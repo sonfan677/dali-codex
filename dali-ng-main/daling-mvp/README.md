@@ -152,4 +152,11 @@
 
 ---
 
+## 执行文档（新增）
+
+- 本地回归清单：`docs/LOCAL_TEST_CHECKLIST.md`
+- 产品与合规摘要：`docs/PRODUCT_BASELINE_SUMMARY.md`
+
+---
+
 如需进一步的「持续集成脚本」或「自动修正 dist 配置」方案，可后续补充到本 README。当前建议开发与部署统一在「根目录项目」进行，以保证云函数与前端的一致性与稳定性。
