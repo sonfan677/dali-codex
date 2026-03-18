@@ -1,0 +1,281 @@
+<template>
+  <view class="page">
+
+    <!-- 顶部：位置授权失败时的提示条 -->
+    <view v-if="locationStore.hasPermission === false" class="tip-bar">
+      <text class="tip-text">📍 未获取位置，以下为示例活动</text>
+      <text class="tip-btn" @tap="requestLocation">授权位置</text>
+    </view>
+
+    <!-- 活动列表 -->
+    <scroll-view scroll-y class="list">
+
+      <view v-if="loading" class="center-tip">
+        <text>加载中...</text>
+      </view>
+
+      <template v-else>
+        <ActivityCard
+          v-for="item in displayActivities"
+          :key="item._id"
+          :activity="item"
+          :userLat="locationStore.lat"
+          :userLng="locationStore.lng"
+          :serverTime="serverTime"
+          @tap="onCardTap(item)"
+        />
+
+        <view v-if="displayActivities.length === 0" class="center-tip">
+          <text class="empty-icon">👀</text>
+          <text class="empty-text">附近暂时没有活动</text>
+        </view>
+      </template>
+
+    </scroll-view>
+
+    <!-- 底部：未授权时的引导Banner -->
+    <view
+      v-if="locationStore.hasPermission === null"
+      class="auth-banner"
+      @tap="requestLocation"
+    >
+      <text class="banner-text">📍 发现你附近正在发生的活动 →</text>
+    </view>
+	<!-- 隐私弹窗 -->
+	<PrivacyPopup ref="privacyPopup" />
+
+  </view>
+</template>
+
+<script>
+import { useLocationStore } from '@/stores/location.js'
+import { useUserStore }     from '@/stores/user.js'
+import { callCloud }        from '@/utils/cloud.js'
+import ActivityCard  from '@/components/ActivityCard.vue'
+import PrivacyPopup  from '@/components/PrivacyPopup.vue'
+
+// 3条示例数据（位置未授权时展示）
+const MOCK_ACTIVITIES = [
+  {
+    _id: 'mock1',
+    title: '茶话会 · 下午茶时光',
+    description: '大家一起喝茶聊天，欢迎来玩',
+    location: { address: '大理古城洱海边', lat: 25.6065, lng: 100.2679 },
+    startTime: new Date(Date.now() + 30 * 60 * 1000),
+    endTime:   new Date(Date.now() + 4 * 60 * 60 * 1000),
+    currentParticipants: 3,
+    maxParticipants: 10,
+    status: 'OPEN',
+    isVerified: true,
+    isRecommended: true,
+    isGroupFormation: false,
+    _distance: 800,
+    _isMock: true,
+  },
+  {
+    _id: 'mock2',
+    title: '环洱海骑行',
+    description: '一起骑行环洱海，约需3小时',
+    location: { address: '才村码头集合', lat: 25.6200, lng: 100.2100 },
+    startTime: new Date(Date.now() + 2 * 60 * 60 * 1000),
+    endTime:   new Date(Date.now() + 6 * 60 * 60 * 1000),
+    currentParticipants: 5,
+    maxParticipants: 8,
+    status: 'OPEN',
+    isVerified: true,
+    isRecommended: false,
+    isGroupFormation: true,
+    minParticipants: 3,
+    formationStatus: 'CONFIRMED',
+    _distance: 2200,
+    _isMock: true,
+  },
+  {
+    _id: 'mock3',
+    title: '狼人杀 · 8人局',
+    description: '今晚在青旅大堂，欢迎新手',
+    location: { address: '人民路某青旅', lat: 25.6010, lng: 100.2650 },
+    startTime: new Date(Date.now() + 4 * 60 * 60 * 1000),
+    endTime:   new Date(Date.now() + 7 * 60 * 60 * 1000),
+    currentParticipants: 2,
+    maxParticipants: 8,
+    status: 'OPEN',
+    isVerified: false,
+    isRecommended: false,
+    isGroupFormation: true,
+    minParticipants: 6,
+    formationStatus: 'FORMING',
+    formationDeadline: new Date(Date.now() + 30 * 60 * 1000),
+    _distance: 1500,
+    _isMock: true,
+  },
+]
+
+export default {
+  components: { ActivityCard, PrivacyPopup },
+
+  setup() {
+    const locationStore = useLocationStore()
+    const userStore     = useUserStore()
+    return { locationStore, userStore }
+  },
+
+  data() {
+    return {
+      activities: [],
+      loading: false,
+      serverTime: Date.now(),
+    }
+  },
+
+  computed: {
+    displayActivities() {
+      // 只要云端返回了数据就优先展示真实数据
+      if (this.activities.length > 0) {
+        return this.activities
+      }
+      return MOCK_ACTIVITIES
+    }
+  },
+  onLoad() {
+      uni.$on('showPrivacyPopup', () => {
+        this.$refs.privacyPopup && this.$refs.privacyPopup.authorize()
+      })
+    },
+  
+    onUnload() {
+      uni.$off('showPrivacyPopup')
+    },
+
+  async onShow() {
+    // #ifdef MP-WEIXIN
+    wx.getSetting({
+      success: async (settingRes) => {
+        if (settingRes.authSetting['scope.userFuzzyLocation']) {
+          try {
+            const ok = await this.locationStore.refreshLocation()
+            if (ok) {
+              await this.loadActivities()
+              return
+            }
+          } catch(e) {
+            console.log('位置获取失败，使用默认坐标')
+          }
+        }
+        // 无论有没有位置权限，都用默认坐标加载活动
+        await this.loadActivitiesWithDefault()
+      },
+      fail: async () => {
+        await this.loadActivitiesWithDefault()
+      }
+    })
+    // #endif
+  },
+
+
+
+  methods: {
+    // 用户点击授权Banner或提示条
+    async requestLocation() {
+      const ok = await this.locationStore.refreshLocation()
+      if (ok) {
+        await this.loadActivities()
+      } else {
+        uni.showToast({ title: '获取位置失败，请在设置中开启', icon: 'none', duration: 2500 })
+      }
+    },
+	async loadActivitiesWithDefault() {
+	  // 使用大理古城坐标作为默认位置
+	  const defaultLat = 25.6065
+	  const defaultLng = 100.2679
+	  try {
+	    this.loading = true
+	    const res = await callCloud('getActivityList', {
+	      lat: defaultLat,
+	      lng: defaultLng,
+	      radius: 50000, // 50公里（云函数单位为米）
+	    })
+	    if (res && res.activities && res.activities.length > 0) {
+	      this.activities = res.activities
+	      this.serverTime = res.serverTime || Date.now()
+	    }
+	  } catch(e) {
+	    console.error('加载活动失败', e)
+	  } finally {
+	    this.loading = false
+	  }
+	},
+
+    // 从云端加载附近活动
+    async loadActivities() {
+      if (!this.locationStore.lat || !this.locationStore.lng) return
+      this.loading = true
+      try {
+        const res = await callCloud('getActivityList', {
+          lat: this.locationStore.lat,
+          lng: this.locationStore.lng,
+          radius: 5000,
+        })
+        this.activities  = res.activities  || []
+        this.serverTime  = res.serverTime  || Date.now()
+      } catch(e) {
+        console.error('加载活动失败', e)
+        uni.showToast({ title: '加载失败，请重试', icon: 'none' })
+      } finally {
+        this.loading = false
+      }
+    },
+
+    onCardTap(item) {
+      if (item._isMock) {
+        // 示例卡片点击→引导授权
+        this.requestLocation()
+        return
+      }
+      uni.navigateTo({ url: `/pages/detail/index?id=${item._id}` })
+    },
+  }
+}
+</script>
+
+<style>
+.page {
+  min-height: 100vh;
+  background: #f5f5f5;
+  padding-bottom: 120rpx;
+}
+.tip-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20rpx 32rpx;
+  background: #FFF3CD;
+}
+.tip-text { font-size: 26rpx; color: #856404; }
+.tip-btn  { font-size: 26rpx; color: #2E75B6; font-weight: bold; padding: 8rpx 20rpx; }
+
+.list { height: calc(100vh - 0rpx); padding: 16rpx; box-sizing: border-box; }
+
+.center-tip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 120rpx 40rpx;
+  gap: 20rpx;
+}
+.empty-icon { font-size: 80rpx; }
+.empty-text { font-size: 28rpx; color: #999; }
+
+.auth-banner {
+  position: fixed;
+  bottom: 40rpx;
+  left: 32rpx;
+  right: 32rpx;
+  background: #1A3C5E;
+  border-radius: 16rpx;
+  padding: 32rpx;
+  text-align: center;
+  box-shadow: 0 8rpx 32rpx rgba(0,0,0,0.2);
+}
+.banner-text { color: white; font-size: 30rpx; font-weight: bold; }
+</style>
