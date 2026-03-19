@@ -30,6 +30,7 @@ async function notifyFormationResult(activity, formationStatus) {
         openid,
         data: {
           title: activity.title,
+          groupCount: `${Number(activity.currentParticipants) || 0}人`,
           time: timeText,
           location: (activity.location && activity.location.address) || '见活动详情',
           tips,

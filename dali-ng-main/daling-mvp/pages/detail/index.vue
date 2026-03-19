@@ -234,10 +234,10 @@ export default {
 	requestSubscribe() {
 	  return new Promise((resolve) => {
 	    // #ifdef MP-WEIXIN
-	    // 这里填你申请的模板ID
-	    const TMPL_START   = '2Z2HlMDTxSa01_MoiVk9vd1TFbf0p0YhdgM10lLHDTg'
-	    const TMPL_CANCEL  = 'cudxa15HYzvfRfzG-yqw4QAlC987rGWdGreMWKFwZHU'
-	    const TMPL_FORMING = 'cMXodOdSzvDq9fCubQaCJjLXmCcDrmDMak2oc-HjPcA'
+	    // 当前小程序模板ID（与云函数默认值一致）
+	    const TMPL_START   = 'zgiN-rGOY7w4igxoQA5cwB6DqO9jsFIPkXQund_ZBiM'
+	    const TMPL_CANCEL  = '3wPqnwBSWK5LnfA-BIDxFeXkSkD01D5meepLNQw6IVY'
+	    const TMPL_FORMING = 'LC4Z3cL8VoDl679__aRVVvuh4VRCys70b5ZQc0edI0o'
 	
 	    wx.requestSubscribeMessage({
 	      tmplIds: [TMPL_START, TMPL_CANCEL, TMPL_FORMING].filter(Boolean),

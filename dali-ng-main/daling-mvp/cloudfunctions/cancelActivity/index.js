@@ -40,6 +40,7 @@ exports.main = async (event, context) => {
             data: {
               title:  activity.title,
               reason: '活动发起人已取消本次活动',
+              tips:   '你可前往首页查看其他活动',
             }
           }
         }).catch(e => console.error('发送取消通知失败', e))

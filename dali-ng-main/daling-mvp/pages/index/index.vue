@@ -181,7 +181,10 @@ export default {
       if (ok) {
         await this.loadActivities()
       } else {
-        uni.showToast({ title: '获取位置失败，请在设置中开启', icon: 'none', duration: 2500 })
+        const msg = this.locationStore.lastErrorCode === 'FUZZY_API_PENDING'
+          ? '地理位置接口审核中，先为你展示示例活动'
+          : '获取位置失败，请在设置中开启'
+        uni.showToast({ title: msg, icon: 'none', duration: 2500 })
       }
     },
 	async loadActivitiesWithDefault() {

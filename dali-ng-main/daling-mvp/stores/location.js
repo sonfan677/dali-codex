@@ -43,29 +43,9 @@ function authorizeFuzzyAsync() {
   })
 }
 
-function authorizeLocationAsync() {
-  return new Promise((resolve) => {
-    wx.authorize({
-      scope: 'scope.userLocation',
-      success: () => resolve(true),
-      fail: () => resolve(false),
-    })
-  })
-}
-
 function getFuzzyLocationAsync() {
   return new Promise((resolve, reject) => {
     wx.getFuzzyLocation({
-      type: 'gcj02',
-      success: resolve,
-      fail: reject,
-    })
-  })
-}
-
-function getLocationAsync() {
-  return new Promise((resolve, reject) => {
-    wx.getLocation({
       type: 'gcj02',
       success: resolve,
       fail: reject,
@@ -85,6 +65,7 @@ export const useLocationStore = defineStore('location', {
     lng: null,
     updatedAt: 0,
     hasPermission: null, // null=未知 true=已授权 false=拒绝
+    lastErrorCode: '',
   }),
 
   actions: {
@@ -105,10 +86,12 @@ export const useLocationStore = defineStore('location', {
         this.lng = gd.lng
         this.updatedAt = now
         this.hasPermission = true
+        this.lastErrorCode = ''
         return true
       }
       // 3分钟内有缓存就不重新获取
       if (this.lat && this.lng && now - this.updatedAt < 3 * 60 * 1000) {
+        this.lastErrorCode = ''
         return true
       }
 
@@ -125,6 +108,7 @@ export const useLocationStore = defineStore('location', {
           const privacyOk = await requirePrivacyAuthorizeAsync()
           if (!privacyOk) {
             this.hasPermission = false
+            this.lastErrorCode = 'PRIVACY_DENIED'
             return false
           }
         }
@@ -140,41 +124,30 @@ export const useLocationStore = defineStore('location', {
             this.lng = locRes.longitude
             this.updatedAt = now
             this.hasPermission = true
+            this.lastErrorCode = ''
             gd.lat = locRes.latitude
             gd.lng = locRes.longitude
             gd.locationUpdatedAt = now
             return true
           } catch (fuzzyErr) {
-            // 模糊定位接口未授权（-80424）时，自动降级到 getLocation
-            if (!isFuzzyUnauthorized(fuzzyErr)) {
+            // 模糊定位接口未授权（-80424）时，提示接口审核中
+            if (isFuzzyUnauthorized(fuzzyErr)) {
               this.hasPermission = false
+              this.lastErrorCode = 'FUZZY_API_PENDING'
               return false
             }
-          }
-        }
-
-        // 2) 降级到普通定位（scope.userLocation + getLocation）
-        const setting2 = await getSettingAsync().catch(() => null)
-        const hasLocationScope = !!setting2?.authSetting?.['scope.userLocation']
-        if (!hasLocationScope) {
-          const authLocationOk = await authorizeLocationAsync()
-          if (!authLocationOk) {
             this.hasPermission = false
+            this.lastErrorCode = 'LOCATION_FAILED'
             return false
           }
         }
 
-        const locRes2 = await getLocationAsync()
-        this.lat = locRes2.latitude
-        this.lng = locRes2.longitude
-        this.updatedAt = now
-        this.hasPermission = true
-        gd.lat = locRes2.latitude
-        gd.lng = locRes2.longitude
-        gd.locationUpdatedAt = now
-        return true
+        this.hasPermission = false
+        this.lastErrorCode = 'LOCATION_DENIED'
+        return false
       } catch (e) {
         this.hasPermission = false
+        this.lastErrorCode = 'LOCATION_FAILED'
         return false
       }
       // #endif

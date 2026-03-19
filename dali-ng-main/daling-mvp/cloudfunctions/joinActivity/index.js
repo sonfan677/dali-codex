@@ -99,7 +99,9 @@ exports.main = async (event, context) => {
         data: {
           title:    activity.title,
           time:     `${mo}月${day}日 ${h}:${m}`,
+          content:  activity.description || '你已报名成功，请留意活动时间',
           location: (activity.location && activity.location.address) || '见活动详情',
+          tips:     '请提前10分钟到场，避免迟到',
         }
       }
     }).catch(e => console.error('发送报名通知失败', e))

@@ -61,7 +61,7 @@
                 "desc" : "你的位置信息将用于发布活动时选择地点"
             }
         },
-        "requiredPrivateInfos" : [ "getFuzzyLocation", "getLocation", "chooseLocation" ]
+        "requiredPrivateInfos" : [ "getFuzzyLocation", "chooseLocation" ]
     },
     "mp-alipay" : {
         "usingComponents" : true
