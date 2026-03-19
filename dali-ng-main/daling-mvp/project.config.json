@@ -22,7 +22,7 @@
   },
   "compileType": "miniprogram",
   "libVersion": "3.14.2",
-  "appid": "wx1c8cfc5359c63aea",
+  "appid": "wxde4c3e1081ec6624",
   "projectname": "daling-mvp",
   "miniprogramRoot": "unpackage/dist/dev/mp-weixin/",
   "cloudfunctionRoot": "cloudfunctions/",
