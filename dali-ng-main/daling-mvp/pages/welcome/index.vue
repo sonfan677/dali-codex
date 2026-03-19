@@ -173,7 +173,7 @@ export default {
       const privacyOk = await this.checkPrivacyFirst()
       if (!privacyOk) return
 
-      const ok = await this.locationStore.refreshLocation()
+      const ok = await this.locationStore.refreshLocation({ interactive: true })
       if (ok) {
         await this.loadActivities()
       } else {
@@ -209,10 +209,11 @@ export default {
 	    const res = await callCloud('getActivityList', {
 	      lat: defaultLat,
 	      lng: defaultLng,
-	      radius: 50, // 扩大到50公里，确保能看到示例活动
+	      radius: 50000, // 50公里（云函数单位为米）
 	    })
-	    if (res && res.list && res.list.length > 0) {
-	      this.activities = res.list
+	    if (res && res.activities && res.activities.length > 0) {
+	      this.activities = res.activities
+	      this.serverTime = res.serverTime || Date.now()
 	    }
 	  } catch(e) {
 	    console.error('加载活动失败', e)

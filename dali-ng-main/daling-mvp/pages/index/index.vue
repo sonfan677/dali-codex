@@ -177,7 +177,7 @@ export default {
   methods: {
     // 用户点击授权Banner或提示条
     async requestLocation() {
-      const ok = await this.locationStore.refreshLocation()
+      const ok = await this.locationStore.refreshLocation({ interactive: true })
       if (ok) {
         await this.loadActivities()
       } else {

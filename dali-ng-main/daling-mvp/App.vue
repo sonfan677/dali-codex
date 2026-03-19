@@ -32,21 +32,8 @@ export default {
       console.error('静默登录失败', e)
     }
 
-    // 静默检查位置权限
-    wx.getSetting({
-      success: (settingRes) => {
-        if (settingRes.authSetting['scope.userFuzzyLocation']) {
-          wx.getFuzzyLocation({
-            type: 'gcj02',
-            success: (locRes) => {
-              getApp().globalData.lat = locRes.latitude
-              getApp().globalData.lng = locRes.longitude
-            },
-            fail: () => console.log('位置获取失败')
-          })
-        }
-      }
-    })
+    // 启动阶段不主动触发定位采集，避免在隐私/权限未完成时触发系统报错。
+    // 位置获取统一交由页面内用户可感知的授权流程处理。
     // #endif
   },
   onShow() {},
