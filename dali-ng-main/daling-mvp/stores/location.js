@@ -86,13 +86,16 @@ export const useLocationStore = defineStore('location', {
         return true
       }
 
+      // 静默模式仅使用缓存，不主动触发定位API，避免真机未授权报错噪音
+      if (!interactive) {
+        this.hasPermission = this.hasPermission === true ? true : false
+        return false
+      }
+
       try {
         const privacyRes = await getPrivacySettingAsync()
-        if (privacyRes && privacyRes.needAuthorization) {
-          if (!interactive) {
-            this.hasPermission = false
-            return false
-          }
+        // 交互模式下，隐私状态未知或未同意时，先走 requirePrivacyAuthorize
+        if (!privacyRes || privacyRes.needAuthorization) {
           const privacyOk = await requirePrivacyAuthorizeAsync()
           if (!privacyOk) {
             this.hasPermission = false
