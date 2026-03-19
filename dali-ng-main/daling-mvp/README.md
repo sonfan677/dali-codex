@@ -52,6 +52,7 @@
 - `utils/cloud.js`：统一云函数调用封装 `callCloud(name, data)`
 - `cloudfunctions/`
   - `login`：静默登录与用户档案初始化
+  - `getActivityDetail`：活动详情（含当前用户报名状态 + 服务器时间）
   - `joinActivity`：报名（并发安全，事务更新人数与报名记录）
   - `cancelActivity`：发布者取消活动并通知参与者
   - `autoUpdateStatus`：自动更新活动状态（结束/成团结果）并通知

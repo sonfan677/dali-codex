@@ -2,94 +2,160 @@ const cloud = require('wx-server-sdk')
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 const db = cloud.database()
 
-exports.main = async (event, context) => {
-  const { OPENID } = cloud.getWXContext()
+function parseAdminMeta(openid) {
+  const adminOpenids = (process.env.ADMIN_OPENIDS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+  const isAdmin = adminOpenids.includes(openid)
 
-  // 1. 验证管理员身份
-  const adminOpenids = (process.env.ADMIN_OPENIDS || '').split(',').map(s => s.trim()).filter(Boolean)
-  if (!adminOpenids.includes(OPENID)) {
+  const roleMap = (process.env.ADMIN_ROLE_MAP || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .reduce((acc, item) => {
+      const [k, v] = item.split(':').map((s) => s.trim())
+      if (k && v) acc[k] = v
+      return acc
+    }, {})
+
+  const cityScopeMap = (process.env.ADMIN_CITY_SCOPE || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .reduce((acc, item) => {
+      const [k, v] = item.split(':').map((s) => s.trim())
+      if (k && v) acc[k] = v
+      return acc
+    }, {})
+
+  return {
+    isAdmin,
+    adminRole: roleMap[openid] || 'superAdmin',
+    adminCityId: cityScopeMap[openid] || 'dali',
+  }
+}
+
+async function getActivitySnapshot(targetId) {
+  try {
+    const res = await db.collection('activities').doc(targetId).get()
+    return res.data || null
+  } catch (e) {
+    return null
+  }
+}
+
+async function getUserSnapshot(openid) {
+  try {
+    const { data } = await db.collection('users')
+      .where({ _openid: openid })
+      .limit(1)
+      .get()
+    return data[0] || null
+  } catch (e) {
+    return null
+  }
+}
+
+exports.main = async (event) => {
+  const { OPENID } = cloud.getWXContext()
+  const { isAdmin, adminRole, adminCityId } = parseAdminMeta(OPENID)
+
+  if (!isAdmin) {
     return { success: false, error: 'UNAUTHORIZED', message: '无管理员权限' }
   }
 
-  const { action, targetId, targetType, reason } = event
-
-  // 2. reason 必填
+  const { action, targetId, targetType, reason, cityId } = event
   if (!reason || reason.trim().length < 2) {
     return { success: false, error: 'REASON_REQUIRED', message: '请填写操作原因（至少2个字）' }
   }
 
+  const normalizedReason = reason.trim()
+  let beforeState = null
+  let afterState = null
   let result = {}
+  let finalTargetType = targetType || ''
 
-  // 3. 执行操作
   switch (action) {
-
-    // ── 活动操作 ──
     case 'recommend':
-      await db.collection('activities').doc(targetId).update({
-        data: { isRecommended: true, updatedAt: db.serverDate() }
-      })
-      result = { message: '已设为官方推荐' }
-      break
-
     case 'unrecommend':
-      await db.collection('activities').doc(targetId).update({
-        data: { isRecommended: false, updatedAt: db.serverDate() }
-      })
-      result = { message: '已取消官方推荐' }
-      break
+    case 'hide': {
+      finalTargetType = finalTargetType || 'activity'
+      beforeState = await getActivitySnapshot(targetId)
+      if (!beforeState) {
+        return { success: false, error: 'NOT_FOUND', message: '活动不存在' }
+      }
+      if (adminRole === 'cityAdmin' && beforeState.cityId && beforeState.cityId !== adminCityId) {
+        return { success: false, error: 'CITY_SCOPE_DENIED', message: '无该城市权限' }
+      }
 
-    case 'hide':
-      await db.collection('activities').doc(targetId).update({
-        data: { status: 'CANCELLED', updatedAt: db.serverDate() }
-      })
-      result = { message: '活动已下架' }
-      break
+      const nextPatch = action === 'recommend'
+        ? { isRecommended: true, updatedAt: db.serverDate() }
+        : action === 'unrecommend'
+          ? { isRecommended: false, updatedAt: db.serverDate() }
+          : { status: 'CANCELLED', updatedAt: db.serverDate() }
 
-    // ── 用户操作 ──
+      await db.collection('activities').doc(targetId).update({ data: nextPatch })
+      afterState = await getActivitySnapshot(targetId)
+      result = {
+        message: action === 'recommend'
+          ? '已设为官方推荐'
+          : action === 'unrecommend'
+            ? '已取消官方推荐'
+            : '活动已下架'
+      }
+      break
+    }
+
     case 'verify':
-      await db.collection('users').where({ _openid: targetId }).update({
-        data: {
-          isVerified: true,
-          verifyStatus: 'approved',
-          updatedAt: db.serverDate(),
-        }
-      })
-      result = { message: '实名认证已通过' }
-      break
-
     case 'reject_verify':
-      await db.collection('users').where({ _openid: targetId }).update({
-        data: {
-          verifyStatus: 'rejected',
-          updatedAt: db.serverDate(),
-        }
-      })
-      result = { message: '实名认证已拒绝' }
-      break
+    case 'ban': {
+      finalTargetType = finalTargetType || 'user'
+      beforeState = await getUserSnapshot(targetId)
+      if (!beforeState) {
+        return { success: false, error: 'NOT_FOUND', message: '用户不存在' }
+      }
 
-    case 'ban':
-      await db.collection('users').where({ _openid: targetId }).update({
-        data: {
-          isBanned: true,
-          updatedAt: db.serverDate(),
-        }
-      })
-      result = { message: '用户已封禁' }
+      const nextPatch = action === 'verify'
+        ? { isVerified: true, verifyStatus: 'approved', updatedAt: db.serverDate() }
+        : action === 'reject_verify'
+          ? { verifyStatus: 'rejected', updatedAt: db.serverDate() }
+          : { isBanned: true, updatedAt: db.serverDate() }
+
+      await db.collection('users').where({ _openid: targetId }).update({ data: nextPatch })
+      afterState = await getUserSnapshot(targetId)
+      result = {
+        message: action === 'verify'
+          ? '实名认证已通过'
+          : action === 'reject_verify'
+            ? '实名认证已拒绝'
+            : '用户已封禁'
+      }
       break
+    }
 
     default:
       return { success: false, error: 'UNKNOWN_ACTION', message: '未知操作类型' }
   }
 
-  // 4. 记录操作日志
+  const finalCityId = cityId || beforeState?.cityId || afterState?.cityId || adminCityId || 'dali'
   await db.collection('adminActions').add({
     data: {
+      actionId: `act_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      adminId: OPENID,
       adminOpenid: OPENID,
+      adminRole,
       targetId,
-      targetType,
+      targetType: finalTargetType,
       action,
-      reason: reason.trim(),
+      actionType: action,
+      reason: normalizedReason,
+      beforeState: beforeState || null,
+      afterState: afterState || null,
       result: result.message,
+      cityId: finalCityId,
+      outcomeVerified: null,
+      outcomeNote: null,
       createdAt: db.serverDate(),
     }
   })

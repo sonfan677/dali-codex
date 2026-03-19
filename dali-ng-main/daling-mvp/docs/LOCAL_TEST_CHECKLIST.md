@@ -11,6 +11,7 @@
    - `cloudfunctionRoot = cloudfunctions/`
 3. 上传并部署云函数（至少本轮相关）：
    - `login`
+   - `getActivityDetail`
    - `getActivityList`
    - `publishActivity`
    - `joinActivity`

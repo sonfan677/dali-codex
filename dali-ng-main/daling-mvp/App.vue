@@ -5,7 +5,8 @@ export default {
   async onLaunch() {
     // #ifdef MP-WEIXIN
     wx.cloud.init({
-      env: 'cloud1-0gvvsqcu142e90b5',
+      // 使用当前小程序绑定的云环境，避免写死到某个环境
+      env: wx.cloud.DYNAMIC_CURRENT_ENV,
       traceUser: true,
     })
 

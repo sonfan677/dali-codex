@@ -127,8 +127,11 @@ export default {
 }
 .status { font-size: 26rpx; font-weight: bold; }
 .status--ongoing      { color: #1E7145; }
+.status--ending_soon  { color: #BF5700; }
+.status--imminent     { color: #C00000; }
 .status--starting_soon{ color: #BF5700; }
-.status--upcoming     { color: #555; }
+.status--upcoming_soon{ color: #555; }
+.status--upcoming_far { color: #777; }
 .status--ended        { color: #999; }
 .dot { color: #ccc; font-size: 24rpx; }
 .participants { font-size: 26rpx; color: #666; }

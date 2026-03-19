@@ -127,7 +127,6 @@ export default {
     this.activityId = options.id
     this.currentOpenid = getApp().globalData?.openid || ''
     this.loadDetail()
-    this.checkJoined()
   },
 
   computed: {
@@ -136,7 +135,7 @@ export default {
     },
 
     timeStatus() {
-      if (!this.activity) return { status: 'upcoming', text: '' }
+      if (!this.activity) return { status: 'upcoming_soon', text: '' }
       return getTimeStatus(this.activity.startTime, this.activity.endTime, new Date(this.serverTime))
     },
 
@@ -195,12 +194,12 @@ export default {
   methods: {
     async loadDetail() {
       try {
-        // #ifdef MP-WEIXIN
-        const db = wx.cloud.database()
-        const res = await db.collection('activities').doc(this.activityId).get()
-        this.activity   = res.data
-        this.serverTime = Date.now()
-        // #endif
+        const res = await callCloud('getActivityDetail', { activityId: this.activityId })
+        if (!res || !res.success) throw new Error(res?.message || '活动不存在')
+        this.activity = res.activity
+        this.hasJoined = !!res.hasJoined
+        this.serverTime = res.serverTime || Date.now()
+        this.currentOpenid = res.currentOpenid || this.currentOpenid
       } catch(e) {
         uni.showToast({ title: '活动不存在', icon: 'none' })
         setTimeout(() => uni.navigateBack(), 1500)
@@ -234,22 +233,6 @@ export default {
 	    // #endif
 	  })
 	},
-    async checkJoined() {
-      try {
-        if (!this.currentOpenid) {
-          this.hasJoined = false
-          return
-        }
-        // #ifdef MP-WEIXIN
-        const db = wx.cloud.database()
-        const { data } = await db.collection('participations')
-          .where({ activityId: this.activityId, userId: this.currentOpenid, status: 'joined' })
-          .get()
-        this.hasJoined = data.length > 0
-        // #endif
-      } catch(e) {}
-    },
-
     async join() {
       const isLoggedIn = getApp().globalData?.isLoggedIn
       if (!isLoggedIn) {

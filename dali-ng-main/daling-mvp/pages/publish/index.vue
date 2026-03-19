@@ -109,7 +109,23 @@
             @input="e => minParticipantsDisplay = e.detail.value"
             @blur="onMinParticipantsBlur"
           />
-          <text class="hint">发布后30分钟内未成团，会通知你决定是否继续</text>
+          <text class="hint">未成团会通知你决定是否继续</text>
+        </view>
+
+        <view v-if="form.isGroupFormation" class="field">
+          <text class="label">成团时间窗口 *</text>
+          <picker
+            mode="selector"
+            :range="formationWindowOptions"
+            :value="formationWindowIndex"
+            @change="onFormationWindowChange"
+          >
+            <view class="picker-row">
+              <text class="picker-value">{{ formationWindowOptions[formationWindowIndex] }}</text>
+              <text class="arrow">›</text>
+            </view>
+          </picker>
+          <text class="hint">{{ formationWindowHint }}</text>
         </view>
 
       </view>
@@ -180,6 +196,16 @@ export default {
       timeIndex: [0, defaultHour, 0],
       durationOptions: ['1小时', '2小时', '3小时', '4小时', '6小时', '8小时'],
       durationIndex: 1,
+      formationWindowOptions: ['15分钟（极速成团）', '30分钟（标准成团）', '60分钟（预约成团）'],
+      formationWindowValues: [15, 30, 60],
+      formationWindowIndex: 1,
+    }
+  },
+
+  computed: {
+    formationWindowHint() {
+      const mins = this.formationWindowValues[this.formationWindowIndex]
+      return `发布后${mins}分钟内未成团，会通知你决定是否继续`
     }
   },
 
@@ -189,12 +215,17 @@ export default {
       this.form.isGroupFormation = e.detail.value
       this.minParticipantsDisplay = ''
       this.form.minParticipants = 2
+      this.formationWindowIndex = 1
       // 打开成团开关时自动滚动到底部
       if (e.detail.value) {
         setTimeout(() => {
           this.scrollTop = 99999
         }, 100)
       }
+    },
+
+    onFormationWindowChange(e) {
+      this.formationWindowIndex = Number(e.detail.value || 0)
     },
 
     // 失焦时校验并格式化
@@ -329,6 +360,8 @@ _doChooseLocation() {
           maxParticipants:  this.form.maxParticipants || 999,
           isGroupFormation: this.form.isGroupFormation,
           minParticipants:  this.form.isGroupFormation ? this.form.minParticipants : 0,
+          formationWindow:  this.form.isGroupFormation ? this.formationWindowValues[this.formationWindowIndex] : 30,
+          cityId:           'dali',
         })
         if (res.success) {
           uni.showToast({ title: '发布成功！', icon: 'success' })
@@ -339,6 +372,7 @@ _doChooseLocation() {
             INVALID_TITLE: '标题格式有误',
             START_PASSED:  '开始时间不能早于现在',
             INVALID_MIN:   '成团人数至少2人',
+            INVALID_WINDOW:'成团时间窗口不合法',
           }
           uni.showToast({ title: msgs[res.error] || res.message || '发布失败', icon: 'none' })
         }
