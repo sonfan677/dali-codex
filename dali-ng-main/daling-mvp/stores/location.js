@@ -1,6 +1,10 @@
 // stores/location.js
 import { defineStore } from 'pinia'
 
+// 接口审核开关：在 getFuzzyLocation 审核通过前保持 false，避免真机报 -80424
+// 审核通过后改为 true 即可恢复真实附近定位能力
+const ENABLE_FUZZY_LOCATION = false
+
 function getSettingAsync() {
   return new Promise((resolve, reject) => {
     wx.getSetting({ success: resolve, fail: reject })
@@ -98,6 +102,13 @@ export const useLocationStore = defineStore('location', {
       // 静默模式仅使用缓存，不主动触发定位API，避免真机未授权报错噪音
       if (!interactive) {
         this.hasPermission = this.hasPermission === true ? true : false
+        return false
+      }
+
+      // 接口审核期间不触发 getFuzzyLocation，避免持续出现 -80424
+      if (!ENABLE_FUZZY_LOCATION) {
+        this.hasPermission = false
+        this.lastErrorCode = 'FUZZY_API_PENDING'
         return false
       }
 
