@@ -43,6 +43,16 @@ function authorizeFuzzyAsync() {
   })
 }
 
+function authorizeLocationAsync() {
+  return new Promise((resolve) => {
+    wx.authorize({
+      scope: 'scope.userLocation',
+      success: () => resolve(true),
+      fail: () => resolve(false),
+    })
+  })
+}
+
 function getFuzzyLocationAsync() {
   return new Promise((resolve, reject) => {
     wx.getFuzzyLocation({
@@ -51,6 +61,22 @@ function getFuzzyLocationAsync() {
       fail: reject,
     })
   })
+}
+
+function getLocationAsync() {
+  return new Promise((resolve, reject) => {
+    wx.getLocation({
+      type: 'gcj02',
+      success: resolve,
+      fail: reject,
+    })
+  })
+}
+
+function isFuzzyUnauthorized(err) {
+  const msg = String(err?.errMsg || '')
+  const code = Number(err?.errCode || 0)
+  return code === -80424 || msg.includes('getFuzzyLocation') || msg.includes('not authorized')
 }
 
 export const useLocationStore = defineStore('location', {
@@ -104,28 +130,47 @@ export const useLocationStore = defineStore('location', {
         }
 
         const setting = await getSettingAsync().catch(() => null)
-        const hasScope = !!setting?.authSetting?.['scope.userFuzzyLocation']
+        const hasFuzzyScope = !!setting?.authSetting?.['scope.userFuzzyLocation']
 
-        if (!hasScope) {
-          // 静默刷新时不打扰用户，只标记权限状态
-          if (!interactive) {
-            this.hasPermission = false
-            return false
+        // 1) 优先尝试模糊定位
+        if (hasFuzzyScope || (await authorizeFuzzyAsync())) {
+          try {
+            const locRes = await getFuzzyLocationAsync()
+            this.lat = locRes.latitude
+            this.lng = locRes.longitude
+            this.updatedAt = now
+            this.hasPermission = true
+            gd.lat = locRes.latitude
+            gd.lng = locRes.longitude
+            gd.locationUpdatedAt = now
+            return true
+          } catch (fuzzyErr) {
+            // 模糊定位接口未授权（-80424）时，自动降级到 getLocation
+            if (!isFuzzyUnauthorized(fuzzyErr)) {
+              this.hasPermission = false
+              return false
+            }
           }
-          const authOk = await authorizeFuzzyAsync()
-          if (!authOk) {
+        }
+
+        // 2) 降级到普通定位（scope.userLocation + getLocation）
+        const setting2 = await getSettingAsync().catch(() => null)
+        const hasLocationScope = !!setting2?.authSetting?.['scope.userLocation']
+        if (!hasLocationScope) {
+          const authLocationOk = await authorizeLocationAsync()
+          if (!authLocationOk) {
             this.hasPermission = false
             return false
           }
         }
 
-        const locRes = await getFuzzyLocationAsync()
-        this.lat = locRes.latitude
-        this.lng = locRes.longitude
+        const locRes2 = await getLocationAsync()
+        this.lat = locRes2.latitude
+        this.lng = locRes2.longitude
         this.updatedAt = now
         this.hasPermission = true
-        gd.lat = locRes.latitude
-        gd.lng = locRes.longitude
+        gd.lat = locRes2.latitude
+        gd.lng = locRes2.longitude
         gd.locationUpdatedAt = now
         return true
       } catch (e) {
