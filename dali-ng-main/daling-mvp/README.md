@@ -64,6 +64,7 @@
 
 - `users`
   - `_openid`、`nickname`、`avatarUrl`、`isVerified`、`verifyStatus`、`joinCount`、`publishCount`、`createdAt`、`updatedAt`
+  - 可信度相关（预留/可选）：`platformVerified`、`trustVerified`
 - `activities`
   - 基本：`title`、`description`、`publisherId`、`publisherNickname`、`publisherAvatar`
   - 时间：`startTime`、`endTime`
@@ -71,6 +72,7 @@
   - 状态：`status`（`OPEN`/`FULL`/`ENDED`/`CANCELLED`）
   - 成团（可选）：`isGroupFormation`、`minParticipants`、`formationDeadline`、`formationStatus`
   - 位置：建议使用 GeoJSON `location: { type: "Point", coordinates: [lng, lat] }`（目前页面采用 `lat/lng/address` 字段）
+  - 可信度展示：`trustProfile { trustLevel(A/B/C), displayStars, identityLabel, riskTags }`
 - `participations`
   - `activityId`、`userId`、`status`（`joined`）、
   - `joinedAt`、`cancelledAt`

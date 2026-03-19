@@ -55,6 +55,58 @@ function getTimeWeight(status) {
   return weights[status] || 1
 }
 
+function chunkArray(arr, size) {
+  const list = []
+  for (let i = 0; i < arr.length; i += size) {
+    list.push(arr.slice(i, i + size))
+  }
+  return list
+}
+
+function buildTrustProfile(activity, user, nowMs) {
+  const hasPlatformVerified = !!(
+    user?.platformVerified ||
+    user?.trustVerified ||
+    user?.verifyStatus === 'platform_verified' ||
+    activity?.trustProfile?.trustLevel === 'A'
+  )
+  const isRealVerified = !!(user?.isVerified || user?.verifyStatus === 'approved' || activity?.isVerified)
+
+  let trustLevel = 'C'
+  if (hasPlatformVerified) trustLevel = 'A'
+  else if (isRealVerified) trustLevel = 'B'
+
+  const displayStars = trustLevel === 'A' ? 5 : trustLevel === 'B' ? 4 : 3
+  const identityLabel = trustLevel === 'A'
+    ? '平台核验'
+    : trustLevel === 'B'
+      ? '已认证'
+      : '新入驻'
+
+  const tags = []
+  if (trustLevel === 'C') tags.push('新入驻')
+  const startMs = new Date(activity.startTime).getTime()
+  if (Number.isFinite(startMs) && startMs > nowMs && startMs - nowMs <= 24 * 60 * 60 * 1000) {
+    tags.push('临时组织')
+  }
+  const modificationRiskScore = Number(activity.modificationRiskScore || activity.modificationRisk || 0)
+  if (modificationRiskScore >= 2) tags.push('曾发生变更')
+
+  const presetTags = Array.isArray(activity?.trustProfile?.riskTags) ? activity.trustProfile.riskTags : []
+  const riskTags = [...new Set([...presetTags, ...tags])].slice(0, 3)
+  const riskLevel = activity?.trustProfile?.riskLevel || (trustLevel === 'A' ? 'L0' : trustLevel === 'B' ? 'L1' : 'L2')
+
+  return {
+    trustLevel,
+    displayStars,
+    starText: `${'★'.repeat(displayStars)}${'☆'.repeat(5 - displayStars)}`,
+    identityLabel,
+    riskTags,
+    riskLevel,
+    internalScore: trustLevel === 'A' ? 90 : trustLevel === 'B' ? 75 : 60,
+  }
+}
+
 exports.main = async (event, context) => {
   const { lat, lng, radius = CITY_CONFIG.geo.defaultFenceRadius, cityId = CITY_CONFIG.cityId } = event
   const safeRadius = Number(radius) || CITY_CONFIG.geo.defaultFenceRadius
@@ -77,7 +129,7 @@ exports.main = async (event, context) => {
   const nowMs = now.getTime()
 
   // 在应用层过滤时间（兼容 Date对象、时间戳数字、字符串 三种格式）
-  const activities = data
+  const mappedList = data
     .map(a => ({
       ...a,
       _distance: getDistance(lat, lng, a.location.lat, a.location.lng),
@@ -94,6 +146,26 @@ exports.main = async (event, context) => {
         : baseRadius
       return a._distance <= effectiveRadius
     })
+
+  const publisherIds = [...new Set(mappedList.map((a) => a.publisherId).filter(Boolean))]
+  const userMap = {}
+  if (publisherIds.length > 0) {
+    for (const ids of chunkArray(publisherIds, 20)) {
+      const { data: users } = await db.collection('users')
+        .where({ _openid: _.in(ids) })
+        .field({
+          _openid: true,
+          isVerified: true,
+          verifyStatus: true,
+          platformVerified: true,
+          trustVerified: true,
+        })
+        .get()
+      users.forEach((u) => { userMap[u._openid] = u })
+    }
+  }
+
+  const activities = mappedList
     .sort((a, b) => {
       if (a.isRecommended && !b.isRecommended) return -1
       if (!a.isRecommended && b.isRecommended) return 1
@@ -104,8 +176,10 @@ exports.main = async (event, context) => {
     .map(a => {
       // 清理内部字段，不传给前端
       const { _endMs, _startMs, _statusByTime, ...rest } = a
+      const trustProfile = buildTrustProfile(rest, userMap[rest.publisherId], nowMs)
       return {
         ...rest,
+        trustProfile,
         timeStatus: _statusByTime,
         timeWeight: getTimeWeight(_statusByTime),
       }

@@ -15,6 +15,12 @@
       <view class="tags">
         <text v-if="activity.isRecommended" class="tag tag--recommend">官方推荐</text>
         <text v-if="activity.isVerified"    class="tag tag--verified">已实名发布</text>
+        <text class="tag tag--trust">{{ trustStars }} {{ trustIdentity }}</text>
+        <text
+          v-for="tag in trustTags"
+          :key="`detail-risk-${activity._id}-${tag}`"
+          class="tag tag--risk"
+        >{{ tag }}</text>
       </view>
 
       <!-- 标题 -->
@@ -51,7 +57,8 @@
         />
         <view class="pub-info">
           <text class="pub-name">{{ activity.publisherNickname || '匿名用户' }}</text>
-          <text class="pub-label">{{ activity.isVerified ? '已实名' : '新入驻' }}</text>
+          <text class="pub-label">{{ trustIdentity }}</text>
+          <text class="pub-trust">{{ trustStars }}</text>
         </view>
       </view>
 
@@ -188,6 +195,24 @@ export default {
         : ''
       if (shortage <= 0) return `已达成团人数！${timeLeft}`
       return `还差 ${shortage} 人 · ${timeLeft}`
+    },
+
+    trustProfile() {
+      return this.activity?.trustProfile || {}
+    },
+
+    trustStars() {
+      if (this.trustProfile.starText) return this.trustProfile.starText
+      const stars = Number(this.trustProfile.displayStars || 3)
+      return `${'★'.repeat(stars)}${'☆'.repeat(5 - stars)}`
+    },
+
+    trustIdentity() {
+      return this.trustProfile.identityLabel || (this.activity?.isVerified ? '已认证' : '新入驻')
+    },
+
+    trustTags() {
+      return Array.isArray(this.trustProfile.riskTags) ? this.trustProfile.riskTags.slice(0, 3) : []
     },
   },
 
@@ -341,6 +366,8 @@ export default {
 .tag { font-size: 22rpx; padding: 6rpx 16rpx; border-radius: 8rpx; }
 .tag--recommend { background: #FFF3CD; color: #856404; }
 .tag--verified  { background: #EEF7EE; color: #1E7145; }
+.tag--trust     { background: #FFF7E8; color: #8B5E00; }
+.tag--risk      { background: #FFF0F0; color: #B03A3A; }
 
 .title {
   font-size: 38rpx; font-weight: bold; color: #1a1a1a;
@@ -369,6 +396,7 @@ export default {
 .pub-info { display: flex; flex-direction: column; gap: 6rpx; }
 .pub-name  { font-size: 28rpx; color: #333; }
 .pub-label { font-size: 22rpx; color: #1E7145; }
+.pub-trust { font-size: 22rpx; color: #8B5E00; }
 
 .formation-block {
   background: #EEF4FB; border-radius: 12rpx;

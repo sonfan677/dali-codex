@@ -15,6 +15,21 @@ const CITY_CONFIG = {
   }
 }
 
+function buildTrustProfileForPublish(user) {
+  const trustLevel = user?.platformVerified || user?.trustVerified ? 'A' : 'B'
+  const displayStars = trustLevel === 'A' ? 5 : 4
+  const identityLabel = trustLevel === 'A' ? '平台核验' : '已认证'
+  return {
+    trustLevel,
+    displayStars,
+    starText: `${'★'.repeat(displayStars)}${'☆'.repeat(5 - displayStars)}`,
+    identityLabel,
+    riskTags: [],
+    riskLevel: trustLevel === 'A' ? 'L0' : 'L1',
+    internalScore: trustLevel === 'A' ? 90 : 75,
+  }
+}
+
 exports.main = async (event, context) => {
   const { OPENID } = cloud.getWXContext()
 
@@ -127,6 +142,8 @@ exports.main = async (event, context) => {
         value: '',
         cityId,
       },
+      trustProfile: buildTrustProfileForPublish(user),
+      modificationRiskScore: 0,
       publisherId: OPENID,
       publisherNickname: user.nickname,
       publisherAvatar: user.avatarUrl,
