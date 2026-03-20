@@ -3,7 +3,7 @@ import { defineStore } from 'pinia'
 
 // 接口审核开关：在 getFuzzyLocation 审核通过前保持 false，避免真机报 -80424
 // 审核通过后改为 true 即可恢复真实附近定位能力
-const ENABLE_FUZZY_LOCATION = false
+const ENABLE_FUZZY_LOCATION = true
 
 function getSettingAsync() {
   return new Promise((resolve, reject) => {
