@@ -173,14 +173,29 @@ export default {
       const privacyOk = await this.checkPrivacyFirst()
       if (!privacyOk) return
 
-      const ok = await this.locationStore.refreshLocation({ interactive: true })
+      const ok = await this.locationStore.refreshLocation({ interactive: true, force: true })
       if (ok) {
         await this.loadActivities()
       } else {
         const msg = this.locationStore.lastErrorCode === 'FUZZY_API_PENDING'
           ? '地理位置接口审核中，先为你展示示例活动'
-          : '获取位置失败，请在设置中开启'
+          : this.locationStore.lastErrorCode === 'LOCATION_DENIED'
+            ? '你已拒绝定位授权，请到设置中开启'
+            : '获取位置失败，请在设置中开启'
         uni.showToast({ title: msg, icon: 'none', duration: 2500 })
+
+        if (this.locationStore.lastErrorCode === 'LOCATION_DENIED') {
+          uni.showModal({
+            title: '需要定位权限',
+            content: '请在设置页开启位置权限后重试',
+            confirmText: '去设置',
+            success: (res) => {
+              if (res.confirm && typeof wx !== 'undefined' && wx.openSetting) {
+                wx.openSetting({ withSubscriptions: false })
+              }
+            }
+          })
+        }
       }
     },
 

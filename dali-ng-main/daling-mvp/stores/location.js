@@ -37,16 +37,6 @@ function requirePrivacyAuthorizeAsync() {
   })
 }
 
-function authorizeFuzzyAsync() {
-  return new Promise((resolve) => {
-    wx.authorize({
-      scope: 'scope.userFuzzyLocation',
-      success: () => resolve(true),
-      fail: () => resolve(false),
-    })
-  })
-}
-
 function getFuzzyLocationAsync() {
   return new Promise((resolve, reject) => {
     wx.getFuzzyLocation({
@@ -63,6 +53,11 @@ function isFuzzyUnauthorized(err) {
   return code === -80424 || msg.includes('getFuzzyLocation') || msg.includes('not authorized')
 }
 
+function isLocationAuthDenied(err) {
+  const msg = String(err?.errMsg || '').toLowerCase()
+  return msg.includes('auth deny') || msg.includes('auth denied') || msg.includes('permission')
+}
+
 export const useLocationStore = defineStore('location', {
   state: () => ({
     lat: null,
@@ -74,7 +69,7 @@ export const useLocationStore = defineStore('location', {
 
   actions: {
     async refreshLocation(options = {}) {
-      const { interactive = false } = options
+      const { interactive = false, force = false } = options
       const now = Date.now()
 
       // #ifndef MP-WEIXIN
@@ -85,7 +80,7 @@ export const useLocationStore = defineStore('location', {
       // #ifdef MP-WEIXIN
       // 优先读 globalData 里启动时已获取的位置
       const gd = getApp().globalData || {}
-      if (gd.lat && gd.lng && !this.lat) {
+      if (!force && gd.lat && gd.lng && !this.lat) {
         this.lat = gd.lat
         this.lng = gd.lng
         this.updatedAt = now
@@ -94,7 +89,7 @@ export const useLocationStore = defineStore('location', {
         return true
       }
       // 3分钟内有缓存就不重新获取
-      if (this.lat && this.lng && now - this.updatedAt < 3 * 60 * 1000) {
+      if (!force && this.lat && this.lng && now - this.updatedAt < 3 * 60 * 1000) {
         this.lastErrorCode = ''
         return true
       }
@@ -124,38 +119,35 @@ export const useLocationStore = defineStore('location', {
           }
         }
 
-        const setting = await getSettingAsync().catch(() => null)
-        const hasFuzzyScope = !!setting?.authSetting?.['scope.userFuzzyLocation']
+        await getSettingAsync().catch(() => null)
 
-        // 1) 优先尝试模糊定位
-        if (hasFuzzyScope || (await authorizeFuzzyAsync())) {
-          try {
-            const locRes = await getFuzzyLocationAsync()
-            this.lat = locRes.latitude
-            this.lng = locRes.longitude
-            this.updatedAt = now
-            this.hasPermission = true
-            this.lastErrorCode = ''
-            gd.lat = locRes.latitude
-            gd.lng = locRes.longitude
-            gd.locationUpdatedAt = now
-            return true
-          } catch (fuzzyErr) {
-            // 模糊定位接口未授权（-80424）时，提示接口审核中
-            if (isFuzzyUnauthorized(fuzzyErr)) {
-              this.hasPermission = false
-              this.lastErrorCode = 'FUZZY_API_PENDING'
-              return false
-            }
+        try {
+          const locRes = await getFuzzyLocationAsync()
+          this.lat = locRes.latitude
+          this.lng = locRes.longitude
+          this.updatedAt = now
+          this.hasPermission = true
+          this.lastErrorCode = ''
+          gd.lat = locRes.latitude
+          gd.lng = locRes.longitude
+          gd.locationUpdatedAt = now
+          return true
+        } catch (fuzzyErr) {
+          // 模糊定位接口未授权（-80424）时，提示接口审核中
+          if (isFuzzyUnauthorized(fuzzyErr)) {
             this.hasPermission = false
-            this.lastErrorCode = 'LOCATION_FAILED'
+            this.lastErrorCode = 'FUZZY_API_PENDING'
             return false
           }
+          if (isLocationAuthDenied(fuzzyErr)) {
+            this.hasPermission = false
+            this.lastErrorCode = 'LOCATION_DENIED'
+            return false
+          }
+          this.hasPermission = false
+          this.lastErrorCode = 'LOCATION_FAILED'
+          return false
         }
-
-        this.hasPermission = false
-        this.lastErrorCode = 'LOCATION_DENIED'
-        return false
       } catch (e) {
         this.hasPermission = false
         this.lastErrorCode = 'LOCATION_FAILED'
