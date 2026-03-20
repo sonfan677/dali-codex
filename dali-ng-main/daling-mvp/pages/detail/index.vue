@@ -230,34 +230,52 @@ export default {
         setTimeout(() => uni.navigateBack(), 1500)
       }
     },
-	// 请求订阅消息授权
-	requestSubscribe() {
-	  return new Promise((resolve) => {
-	    // #ifdef MP-WEIXIN
-	    // 当前小程序模板ID（与云函数默认值一致）
-	    const TMPL_START   = 'zgiN-rGOY7w4igxoQA5cwB6DqO9jsFIPkXQund_ZBiM'
-	    const TMPL_CANCEL  = '3wPqnwBSWK5LnfA-BIDxFeXkSkD01D5meepLNQw6IVY'
-	    const TMPL_FORMING = 'LC4Z3cL8VoDl679__aRVVvuh4VRCys70b5ZQc0edI0o'
-	
-	    wx.requestSubscribeMessage({
-	      tmplIds: [TMPL_START, TMPL_CANCEL, TMPL_FORMING].filter(Boolean),
-	      success: (res) => {
-	        console.log('[订阅消息] 授权结果:', res)
-	        resolve(true)
-	      },
-	      fail: (err) => {
-	        console.log('[订阅消息] 授权失败或拒绝:', err)
-	        resolve(false) // 拒绝也继续报名，不强制
-	      }
-	    })
-	    // #endif
-	
-	    // 非微信环境直接通过
-	    // #ifndef MP-WEIXIN
-	    resolve(true)
-	    // #endif
-	  })
-	},
+    // 请求订阅消息授权
+    requestSubscribe() {
+      return new Promise((resolve) => {
+        // #ifdef MP-WEIXIN
+        if (typeof wx === 'undefined' || typeof wx.requestSubscribeMessage !== 'function') {
+          resolve({ ok: false, reason: 'UNSUPPORTED' })
+          return
+        }
+
+        const TMPL_START   = 'zgiN-rGOY7w4igxoQA5cwB6DqO9jsFIPkXQund_ZBiM'
+        const TMPL_CANCEL  = '3wPqnwBSWK5LnfA-BIDxFeXkSkD01D5meepLNQw6IVY'
+        const TMPL_FORMING = 'LC4Z3cL8VoDl679__aRVVvuh4VRCys70b5ZQc0edI0o'
+        const tmplIds = [TMPL_START, TMPL_CANCEL, TMPL_FORMING].filter(Boolean)
+
+        wx.requestSubscribeMessage({
+          tmplIds,
+          success: (res) => {
+            const statusList = Object.keys(res || {})
+              .filter((k) => k !== 'errMsg')
+              .map((k) => String(res[k] || ''))
+            const accepted = statusList.includes('accept')
+            const rejected = statusList.includes('reject')
+            const banned   = statusList.includes('ban')
+
+            console.log('[订阅消息] 授权结果:', JSON.stringify(res))
+            resolve({
+              ok: true,
+              accepted,
+              rejected,
+              banned,
+              raw: res,
+            })
+          },
+          fail: (err) => {
+            console.log('[订阅消息] 授权失败:', JSON.stringify(err))
+            resolve({ ok: false, reason: 'FAIL', raw: err })
+          }
+        })
+        // #endif
+
+        // 非微信环境直接通过
+        // #ifndef MP-WEIXIN
+        resolve({ ok: false, reason: 'NON_MP' })
+        // #endif
+      })
+    },
     async join() {
       const isLoggedIn = getApp().globalData?.isLoggedIn
       if (!isLoggedIn) {
@@ -266,7 +284,23 @@ export default {
       }
     
       // 请求订阅授权（不影响报名主流程）
-      await this.requestSubscribe()
+      const subRes = await this.requestSubscribe()
+      if (subRes?.ok && subRes.accepted) {
+        uni.showToast({ title: '已开启活动通知', icon: 'none', duration: 1200 })
+      } else if (subRes?.ok && (subRes.rejected || subRes.banned)) {
+        uni.showModal({
+          title: '未开启订阅消息',
+          content: '你可在设置中开启“订阅消息”，以便接收活动提醒',
+          confirmText: '去设置',
+          success: (r) => {
+            if (r.confirm && typeof wx !== 'undefined' && wx.openSetting) {
+              wx.openSetting({ withSubscriptions: true })
+            }
+          }
+        })
+      } else if (!subRes?.ok) {
+        uni.showToast({ title: '订阅授权未弹出，不影响报名', icon: 'none', duration: 1600 })
+      }
     
       this.joining = true
       try {
