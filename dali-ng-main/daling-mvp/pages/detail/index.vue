@@ -265,7 +265,12 @@ export default {
           },
           fail: (err) => {
             console.log('[订阅消息] 授权失败:', JSON.stringify(err))
-            resolve({ ok: false, reason: 'FAIL', raw: err })
+            resolve({
+              ok: false,
+              reason: 'FAIL',
+              errMsg: String(err?.errMsg || ''),
+              raw: err,
+            })
           }
         })
         // #endif
@@ -299,7 +304,19 @@ export default {
           }
         })
       } else if (!subRes?.ok) {
-        uni.showToast({ title: '订阅授权未弹出，不影响报名', icon: 'none', duration: 1600 })
+        const detail = subRes?.errMsg || ''
+        uni.showModal({
+          title: '订阅授权未弹出',
+          content: detail
+            ? `不影响报名\n原因：${detail}`
+            : '不影响报名\n可能是微信侧限制或设置关闭',
+          confirmText: '去设置',
+          success: (r) => {
+            if (r.confirm && typeof wx !== 'undefined' && wx.openSetting) {
+              wx.openSetting({ withSubscriptions: true })
+            }
+          }
+        })
       }
     
       this.joining = true
