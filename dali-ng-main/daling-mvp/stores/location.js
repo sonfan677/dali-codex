@@ -94,13 +94,58 @@ export const useLocationStore = defineStore('location', {
         return true
       }
 
-      // 静默模式仅使用缓存，不主动触发定位API，避免真机未授权报错噪音
+      // 静默刷新：已授权则自动取定位；未授权则保持未知状态（显示底部引导，不显示顶部报错条）
       if (!interactive) {
-        this.hasPermission = this.hasPermission === true ? true : false
-        return false
+        try {
+          const privacyRes = await getPrivacySettingAsync()
+          if (privacyRes && privacyRes.needAuthorization) {
+            this.hasPermission = null
+            this.lastErrorCode = ''
+            return false
+          }
+
+          const setting = await getSettingAsync().catch(() => null)
+          const hasFuzzyScope = !!setting?.authSetting?.['scope.userFuzzyLocation']
+          if (!hasFuzzyScope) {
+            this.hasPermission = null
+            this.lastErrorCode = ''
+            return false
+          }
+
+          if (!ENABLE_FUZZY_LOCATION) {
+            this.hasPermission = false
+            this.lastErrorCode = 'FUZZY_API_PENDING'
+            return false
+          }
+
+          const locRes = await getFuzzyLocationAsync()
+          this.lat = locRes.latitude
+          this.lng = locRes.longitude
+          this.updatedAt = now
+          this.hasPermission = true
+          this.lastErrorCode = ''
+          gd.lat = locRes.latitude
+          gd.lng = locRes.longitude
+          gd.locationUpdatedAt = now
+          return true
+        } catch (err) {
+          if (isLocationAuthDenied(err)) {
+            this.hasPermission = false
+            this.lastErrorCode = 'LOCATION_DENIED'
+            return false
+          }
+          if (isFuzzyUnauthorized(err)) {
+            this.hasPermission = false
+            this.lastErrorCode = 'FUZZY_API_PENDING'
+            return false
+          }
+          this.hasPermission = null
+          this.lastErrorCode = 'LOCATION_FAILED'
+          return false
+        }
       }
 
-      // 接口审核期间不触发 getFuzzyLocation，避免持续出现 -80424
+      // 交互刷新：用户主动点击授权
       if (!ENABLE_FUZZY_LOCATION) {
         this.hasPermission = false
         this.lastErrorCode = 'FUZZY_API_PENDING'
