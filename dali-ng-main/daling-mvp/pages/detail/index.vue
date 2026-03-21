@@ -242,11 +242,20 @@ export default {
         const TMPL_START   = 'zgiN-rGOY7w4igxoQA5cwB6DqO9jsFIPkXQund_ZBiM'
         const TMPL_CANCEL  = '3wPqnwBSWK5LnfA-BIDxFeXkSkD01D5meepLNQw6IVY'
         const TMPL_FORMING = 'LC4Z3cL8VoDl679__aRVVvuh4VRCys70b5ZQc0edI0o'
-        const tmplIds = [TMPL_START, TMPL_CANCEL, TMPL_FORMING].filter(Boolean)
+        const primaryIds = [TMPL_START, TMPL_CANCEL, TMPL_FORMING].filter(Boolean)
+        const fallbackIds = [TMPL_START].filter(Boolean)
 
-        wx.requestSubscribeMessage({
-          tmplIds,
-          success: (res) => {
+        const callSubscribe = (tmplIds, onSuccess, onFail) => {
+          wx.requestSubscribeMessage({
+            tmplIds,
+            success: onSuccess,
+            fail: onFail,
+          })
+        }
+
+        callSubscribe(
+          primaryIds,
+          (res) => {
             const statusList = Object.keys(res || {})
               .filter((k) => k !== 'errMsg')
               .map((k) => String(res[k] || ''))
@@ -263,16 +272,51 @@ export default {
               raw: res,
             })
           },
-          fail: (err) => {
-            console.log('[订阅消息] 授权失败:', JSON.stringify(err))
+          (err) => {
+            const errMsg = String(err?.errMsg || '')
+            console.log('[订阅消息] 首次授权失败:', JSON.stringify(err))
+
+            // 常见场景：某个模板ID在当前AppID下不存在，导致整组请求失败
+            if (errMsg.includes('No template data return') && fallbackIds.length) {
+              callSubscribe(
+                fallbackIds,
+                (res2) => {
+                  const statusList = Object.keys(res2 || {})
+                    .filter((k) => k !== 'errMsg')
+                    .map((k) => String(res2[k] || ''))
+                  const accepted = statusList.includes('accept')
+                  const rejected = statusList.includes('reject')
+                  const banned   = statusList.includes('ban')
+                  resolve({
+                    ok: true,
+                    accepted,
+                    rejected,
+                    banned,
+                    degraded: true,
+                    raw: res2,
+                  })
+                },
+                (err2) => {
+                  console.log('[订阅消息] 降级授权失败:', JSON.stringify(err2))
+                  resolve({
+                    ok: false,
+                    reason: 'FAIL',
+                    errMsg: String(err2?.errMsg || ''),
+                    raw: err2,
+                  })
+                }
+              )
+              return
+            }
+
             resolve({
               ok: false,
               reason: 'FAIL',
-              errMsg: String(err?.errMsg || ''),
+              errMsg,
               raw: err,
             })
           }
-        })
+        )
         // #endif
 
         // 非微信环境直接通过
@@ -291,7 +335,8 @@ export default {
       // 请求订阅授权（不影响报名主流程）
       const subRes = await this.requestSubscribe()
       if (subRes?.ok && subRes.accepted) {
-        uni.showToast({ title: '已开启活动通知', icon: 'none', duration: 1200 })
+        const title = subRes.degraded ? '已开启核心通知（其余模板待核对）' : '已开启活动通知'
+        uni.showToast({ title, icon: 'none', duration: 1500 })
       } else if (subRes?.ok && (subRes.rejected || subRes.banned)) {
         uni.showModal({
           title: '未开启订阅消息',
