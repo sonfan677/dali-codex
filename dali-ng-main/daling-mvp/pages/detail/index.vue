@@ -239,8 +239,8 @@ export default {
           return
         }
 
-        const TMPL_START   = 'zgiN-rGOY7w4igxoQA5cwB6DqO9jsFIPkXQund_ZBiM'
-        const TMPL_CANCEL  = '3wPqnwBSWK5LnfA-BIDxFeXkSkD01D5meepLNQw6IVY'
+        const TMPL_START   = 'zgiN-rGOY7w4igxoQA5cwB6DqO9jsFlPkXQund_ZBiM'
+        const TMPL_CANCEL  = '3wPqnwBSWK5LnfA-BIDxFeXkSkD01D5meepLNQw6lVY'
         const TMPL_FORMING = 'LC4Z3cL8VoDl679__aRVVvuh4VRCys70b5ZQc0edI0o'
         const primaryIds = [TMPL_START, TMPL_CANCEL, TMPL_FORMING].filter(Boolean)
         const fallbackIds = [TMPL_START].filter(Boolean)

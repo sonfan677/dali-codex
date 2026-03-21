@@ -5,8 +5,8 @@ exports.main = async (event) => {
   const { type, openid, data } = event
 
   // 模板ID优先读环境变量，未配置时使用当前项目的默认模板ID
-  const TMPL_START   = process.env.TMPL_START   || 'zgiN-rGOY7w4igxoQA5cwB6DqO9jsFIPkXQund_ZBiM'
-  const TMPL_CANCEL  = process.env.TMPL_CANCEL  || '3wPqnwBSWK5LnfA-BIDxFeXkSkD01D5meepLNQw6IVY'
+  const TMPL_START   = process.env.TMPL_START   || 'zgiN-rGOY7w4igxoQA5cwB6DqO9jsFlPkXQund_ZBiM'
+  const TMPL_CANCEL  = process.env.TMPL_CANCEL  || '3wPqnwBSWK5LnfA-BIDxFeXkSkD01D5meepLNQw6lVY'
   const TMPL_FORMING = process.env.TMPL_FORMING || 'LC4Z3cL8VoDl679__aRVVvuh4VRCys70b5ZQc0edI0o'
 
   const formatDate = (value) => value || ''
