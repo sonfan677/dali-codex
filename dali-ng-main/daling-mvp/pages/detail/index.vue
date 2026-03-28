@@ -79,13 +79,32 @@
       <view v-if="isPublisher" class="participants-block">
         <view class="participants-header">
           <text class="participants-title">参与者列表</text>
-          <text class="participants-count">共 {{ participantList.length }} 人</text>
+          <text class="participants-count">{{ participantCountText }}</text>
         </view>
+
+        <view class="participants-tools">
+          <input
+            v-model="participantKeyword"
+            class="participants-search"
+            placeholder="搜索昵称"
+            maxlength="20"
+          />
+          <button class="participants-tool-btn" @tap="toggleParticipantSort">
+            {{ participantSortLabel }}
+          </button>
+          <button class="participants-tool-btn participants-tool-btn--export" @tap="exportParticipantNicknames">
+            导出昵称
+          </button>
+        </view>
+
         <view v-if="participantList.length === 0" class="participants-empty">
           <text>暂无报名用户</text>
         </view>
+        <view v-else-if="participantFilteredList.length === 0" class="participants-empty">
+          <text>未找到匹配昵称</text>
+        </view>
         <view
-          v-for="item in participantList"
+          v-for="item in participantFilteredList"
           :key="`part-${item._id}`"
           class="participant-item"
         >
@@ -257,6 +276,8 @@ export default {
       serverTime: Date.now(),
       currentOpenid: '',
       participantList: [],
+      participantKeyword: '',
+      participantSort: 'newest',
       commentList: [],
       commentsLoading: false,
       commentInput: '',
@@ -388,6 +409,37 @@ export default {
       return getCategoryLabel(this.activity?.categoryId || 'other')
     },
 
+    participantFilteredList() {
+      const keyword = String(this.participantKeyword || '').trim().toLowerCase()
+      const list = Array.isArray(this.participantList) ? [...this.participantList] : []
+      const matched = keyword
+        ? list.filter((item) => String(item.nickname || '匿名用户').toLowerCase().includes(keyword))
+        : list
+
+      const joinedMs = (item) => {
+        const ms = new Date(item?.joinedAt).getTime()
+        return Number.isFinite(ms) ? ms : 0
+      }
+
+      matched.sort((a, b) => {
+        const delta = joinedMs(a) - joinedMs(b)
+        if (delta === 0) return String(a?._id || '').localeCompare(String(b?._id || ''))
+        return this.participantSort === 'oldest' ? delta : -delta
+      })
+      return matched
+    },
+
+    participantSortLabel() {
+      return this.participantSort === 'oldest' ? '按最早报名' : '按最新报名'
+    },
+
+    participantCountText() {
+      const total = this.participantList.length
+      const visible = this.participantFilteredList.length
+      if (visible === total) return `共 ${total} 人`
+      return `已筛选 ${visible}/${total} 人`
+    },
+
     commentThreads() {
       const all = Array.isArray(this.commentList) ? this.commentList : []
       const roots = all
@@ -437,6 +489,8 @@ export default {
         this.serverTime = res.serverTime || Date.now()
         this.currentOpenid = res.currentOpenid || this.currentOpenid
         this.participantList = Array.isArray(res.participantList) ? res.participantList : []
+        this.participantKeyword = ''
+        this.participantSort = 'newest'
         await this.loadComments()
       } catch(e) {
         uni.showToast({ title: '活动不存在', icon: 'none' })
@@ -460,6 +514,32 @@ export default {
       } finally {
         this.commentsLoading = false
       }
+    },
+
+    toggleParticipantSort() {
+      this.participantSort = this.participantSort === 'newest' ? 'oldest' : 'newest'
+    },
+
+    exportParticipantNicknames() {
+      if (!this.isPublisher) return
+      const exportList = this.participantFilteredList
+      if (!exportList.length) {
+        uni.showToast({ title: '当前没有可导出的昵称', icon: 'none' })
+        return
+      }
+      const lines = exportList.map((item, idx) => `${idx + 1}. ${item.nickname || '匿名用户'}`)
+      const title = this.activity?.title || '活动'
+      const payload = [`${title}｜参与者昵称清单（${exportList.length}人）`, ...lines].join('\n')
+
+      uni.setClipboardData({
+        data: payload,
+        success: () => {
+          uni.showToast({ title: '昵称清单已复制', icon: 'success' })
+        },
+        fail: () => {
+          uni.showToast({ title: '复制失败，请重试', icon: 'none' })
+        },
+      })
     },
 
     chooseReplyTarget(commentItem) {
@@ -902,6 +982,39 @@ export default {
 .participants-count {
   font-size: 24rpx;
   color: #999;
+}
+.participants-tools {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  margin-bottom: 10rpx;
+}
+.participants-search {
+  flex: 1;
+  height: 64rpx;
+  border-radius: 32rpx;
+  background: #f4f6f8;
+  font-size: 24rpx;
+  color: #333;
+  padding: 0 20rpx;
+}
+.participants-tool-btn {
+  height: 64rpx;
+  line-height: 64rpx;
+  border-radius: 32rpx;
+  padding: 0 20rpx;
+  margin: 0;
+  font-size: 22rpx;
+  color: #1A3C5E;
+  background: #EEF4FB;
+  border: none;
+}
+.participants-tool-btn::after {
+  border: none;
+}
+.participants-tool-btn--export {
+  color: #1E7145;
+  background: #EEF7EE;
 }
 .participants-empty {
   font-size: 24rpx;
