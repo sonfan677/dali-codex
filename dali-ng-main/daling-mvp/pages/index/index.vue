@@ -62,6 +62,11 @@ import { callCloud }        from '@/utils/cloud.js'
 import ActivityCard  from '@/components/ActivityCard.vue'
 import PrivacyPopup  from '@/components/PrivacyPopup.vue'
 
+// 小开关：当前位置5km查不到真实活动时，是否回退示例数据
+// false: 不回退，直接显示“附近暂时没有活动”
+// true: 回退示例数据
+const NEARBY_EMPTY_USE_MOCK = false
+
 // 3条示例数据（位置未授权时展示）
 const MOCK_ACTIVITIES = [
   {
@@ -143,23 +148,29 @@ export default {
       if (this.activities.length > 0) {
         return this.activities
       }
+
+      // 当前位置5km查询为空时，可按开关决定是否展示示例数据
+      if (this.lastQueryMode === 'nearby' && !NEARBY_EMPTY_USE_MOCK) {
+        return []
+      }
+
       return MOCK_ACTIVITIES
     },
 
     dataSourceBadge() {
-      if (this.activities.length === 0) {
-        return {
-          type: 'mock',
-          title: '示例数据',
-          desc: '当前展示内置示例活动',
-        }
-      }
-
       if (this.lastQueryMode === 'nearby') {
         return {
           type: 'real',
           title: '真实数据',
           desc: '当前位置 5km',
+        }
+      }
+
+      if (this.activities.length === 0) {
+        return {
+          type: 'mock',
+          title: '示例数据',
+          desc: '当前展示内置示例活动',
         }
       }
 
