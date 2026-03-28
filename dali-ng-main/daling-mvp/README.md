@@ -55,6 +55,8 @@
   - `getActivityDetail`：活动详情（含当前用户报名状态 + 服务器时间）
   - `joinActivity`：报名（并发安全，事务更新人数与报名记录）
   - `quitActivity`：取消报名（事务回滚人数、恢复活动可报名状态）
+  - `addActivityComment`：参与者留言、发布者回复
+  - `getActivityComments`：获取活动留言列表
   - `cancelActivity`：发布者取消活动并通知参与者
   - `submitReport`：用户提交举报（进入管理员待处理队列）
   - `autoUpdateStatus`：自动更新活动状态（结束/成团结果）并通知
@@ -97,6 +99,8 @@
   - 加载活动详情
   - 报名：`callCloud('joinActivity', { activityId })`，云端使用事务防超额，成功后更新人数与报名记录，并异步触发通知
   - 取消报名：`callCloud('quitActivity', { activityId })`，云端事务更新人数与报名状态
+  - 留言：参与者可发送留言；发布者可按留言逐条回复
+  - 分享：支持分享给好友、分享到朋友圈
   - 取消：发布者调用 `cancelActivity`，异步通知已报名用户
   - 举报：`callCloud('submitReport', ...)` 写入待处理举报
 - 通知发送（`sendNotification`）

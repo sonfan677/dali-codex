@@ -101,10 +101,96 @@
         </view>
       </view>
 
+      <!-- 留言区 -->
+      <view class="comment-block">
+        <view class="comment-header">
+          <text class="comment-title">活动留言</text>
+          <text class="comment-count">{{ commentList.length }} 条</text>
+        </view>
+
+        <view v-if="commentsLoading" class="comment-empty">
+          <text>留言加载中...</text>
+        </view>
+        <view v-else-if="commentThreads.length === 0" class="comment-empty">
+          <text>还没有留言，来写第一条吧</text>
+        </view>
+
+        <view
+          v-for="item in commentThreads"
+          :key="`comment-${item._id}`"
+          class="comment-item"
+        >
+          <view class="comment-main">
+            <image
+              class="comment-avatar"
+              :src="item.authorAvatar || '/static/default-avatar.png'"
+              mode="aspectFill"
+            />
+            <view class="comment-body">
+              <view class="comment-meta">
+                <text class="comment-name">{{ item.authorNickname || '匿名用户' }}</text>
+                <text class="comment-role">{{ roleLabel(item.authorRole) }}</text>
+                <text class="comment-time">{{ formatCommentTime(item.createdAt) }}</text>
+              </view>
+              <text class="comment-content">{{ item.content }}</text>
+              <text
+                v-if="isPublisher"
+                class="comment-reply"
+                @tap="chooseReplyTarget(item)"
+              >回复</text>
+            </view>
+          </view>
+
+          <view
+            v-for="reply in item.replies"
+            :key="`reply-${reply._id}`"
+            class="reply-item"
+          >
+            <image
+              class="comment-avatar comment-avatar--small"
+              :src="reply.authorAvatar || '/static/default-avatar.png'"
+              mode="aspectFill"
+            />
+            <view class="comment-body">
+              <view class="comment-meta">
+                <text class="comment-name">{{ reply.authorNickname || '匿名用户' }}</text>
+                <text class="comment-role">{{ roleLabel(reply.authorRole) }}</text>
+                <text class="comment-time">{{ formatCommentTime(reply.createdAt) }}</text>
+              </view>
+              <text class="comment-content">{{ reply.content }}</text>
+            </view>
+          </view>
+        </view>
+
+        <view v-if="canPostComment" class="comment-editor">
+          <view v-if="isPublisher && replyTarget" class="reply-target">
+            <text class="reply-target-text">回复：{{ replyTarget.authorNickname || '匿名用户' }}</text>
+            <text class="reply-target-cancel" @tap="clearReplyTarget">取消</text>
+          </view>
+          <view class="editor-row">
+            <input
+              v-model="commentInput"
+              class="comment-input"
+              :placeholder="commentInputPlaceholder"
+              maxlength="200"
+            />
+            <button
+              class="comment-send"
+              :loading="commentSubmitting"
+              @tap="submitComment"
+            >发送</button>
+          </view>
+        </view>
+        <view v-else class="comment-permission-tip">
+          <text>{{ commentPermissionTip }}</text>
+        </view>
+      </view>
+
     </view>
 
     <!-- 底部操作栏 -->
     <view class="bottom-bar">
+      <button class="share-btn" open-type="share">分享</button>
       <text class="report-btn" @tap="report">举报</text>
 
       <!-- 我是发布者 -->
@@ -165,6 +251,13 @@ export default {
       serverTime: Date.now(),
       currentOpenid: '',
       participantList: [],
+      commentList: [],
+      commentsLoading: false,
+      commentInput: '',
+      commentSubmitting: false,
+      replyTarget: null,
+      canCommentAsParticipant: false,
+      canReplyAsPublisher: false,
     }
   },
 
@@ -172,6 +265,19 @@ export default {
     this.activityId = options.id
     this.currentOpenid = getApp().globalData?.openid || ''
     this.loadDetail()
+  },
+
+  onShareAppMessage() {
+    return this.buildSharePayload()
+  },
+
+  onShareTimeline() {
+    const payload = this.buildSharePayload()
+    const query = payload.path.includes('?') ? payload.path.split('?')[1] : ''
+    return {
+      title: payload.title,
+      query,
+    }
   },
 
   computed: {
@@ -263,6 +369,44 @@ export default {
       if (this.activity?.categoryLabel) return this.activity.categoryLabel
       return getCategoryLabel(this.activity?.categoryId || 'other')
     },
+
+    commentThreads() {
+      const all = Array.isArray(this.commentList) ? this.commentList : []
+      const roots = all
+        .filter((item) => !item.parentId)
+        .map((item) => ({ ...item, replies: [] }))
+      const rootMap = roots.reduce((acc, item) => {
+        acc[item._id] = item
+        return acc
+      }, {})
+
+      all.filter((item) => !!item.parentId).forEach((reply) => {
+        const parent = rootMap[reply.parentId]
+        if (parent) parent.replies.push(reply)
+      })
+      return roots
+    },
+
+    canPostComment() {
+      if (this.isPublisher) return this.canReplyAsPublisher
+      return this.canCommentAsParticipant
+    },
+
+    commentInputPlaceholder() {
+      if (this.isPublisher) {
+        if (this.replyTarget) {
+          return `回复 ${this.replyTarget.authorNickname || '匿名用户'}`
+        }
+        return '请先点击留言右侧“回复”'
+      }
+      return '写下你的活动留言（最多200字）'
+    },
+
+    commentPermissionTip() {
+      if (this.isPublisher) return '发布者可回复留言'
+      if (!this.hasJoined) return '报名后可留言互动'
+      return '当前不可留言'
+    },
   },
 
   methods: {
@@ -275,9 +419,81 @@ export default {
         this.serverTime = res.serverTime || Date.now()
         this.currentOpenid = res.currentOpenid || this.currentOpenid
         this.participantList = Array.isArray(res.participantList) ? res.participantList : []
+        await this.loadComments()
       } catch(e) {
         uni.showToast({ title: '活动不存在', icon: 'none' })
         setTimeout(() => uni.navigateBack(), 1500)
+      }
+    },
+
+    async loadComments() {
+      this.commentsLoading = true
+      try {
+        const res = await callCloud('getActivityComments', { activityId: this.activityId })
+        if (!res?.success) throw new Error(res?.message || '加载留言失败')
+        this.commentList = Array.isArray(res.commentList) ? res.commentList : []
+        this.canCommentAsParticipant = !!res.canCommentAsParticipant
+        this.canReplyAsPublisher = !!res.canReplyAsPublisher
+      } catch (e) {
+        console.error('加载留言失败', e)
+        this.commentList = []
+        this.canCommentAsParticipant = false
+        this.canReplyAsPublisher = false
+      } finally {
+        this.commentsLoading = false
+      }
+    },
+
+    chooseReplyTarget(commentItem) {
+      if (!this.isPublisher) return
+      this.replyTarget = commentItem
+      this.commentInput = ''
+    },
+
+    clearReplyTarget() {
+      this.replyTarget = null
+    },
+
+    async submitComment() {
+      const text = String(this.commentInput || '').trim()
+      if (!text) {
+        uni.showToast({ title: '请输入留言内容', icon: 'none' })
+        return
+      }
+      if (!this.canPostComment) {
+        uni.showToast({ title: this.commentPermissionTip, icon: 'none' })
+        return
+      }
+      if (this.isPublisher && !this.replyTarget) {
+        uni.showToast({ title: '请先选择要回复的留言', icon: 'none' })
+        return
+      }
+
+      this.commentSubmitting = true
+      try {
+        const res = await callCloud('addActivityComment', {
+          activityId: this.activityId,
+          content: text,
+          parentId: this.isPublisher ? this.replyTarget?._id : null,
+        })
+        if (res?.success) {
+          uni.showToast({ title: this.isPublisher ? '回复已发送' : '留言成功', icon: 'success' })
+          this.commentInput = ''
+          this.replyTarget = null
+          await this.loadComments()
+        } else {
+          const map = {
+            NOT_PARTICIPANT: '仅参与者可留言',
+            REPLY_PARENT_REQUIRED: '请先选择要回复的留言',
+            PARTICIPANT_CANNOT_REPLY: '仅发布者可回复留言',
+            CONTENT_TOO_LONG: '留言最多200字',
+          }
+          uni.showToast({ title: map[res?.error] || res?.message || '发送失败', icon: 'none' })
+        }
+      } catch (e) {
+        uni.showToast({ title: '发送失败，请重试', icon: 'none' })
+      } finally {
+        this.commentSubmitting = false
       }
     },
     // 请求订阅消息授权
@@ -422,6 +638,7 @@ export default {
           this.activity.currentParticipants += 1
           if (res.isFull) this.activity.status = 'FULL'
           if (res.formationStatus) this.activity.formationStatus = res.formationStatus
+          await this.loadComments()
           uni.showToast({ title: '报名成功！', icon: 'success' })
         } else {
           const msgs = {
@@ -460,6 +677,8 @@ export default {
               )
               if (result.activityStatus) this.activity.status = result.activityStatus
               if (result.formationStatus) this.activity.formationStatus = result.formationStatus
+              this.replyTarget = null
+              await this.loadComments()
               uni.showToast({ title: '已取消报名', icon: 'success' })
             } else {
               const msgMap = {
@@ -526,6 +745,18 @@ export default {
       })
     },
 
+    buildSharePayload() {
+      const title = this.activity?.title
+        ? `【搭里】${this.activity.title}`
+        : '搭里活动'
+      const path = `/pages/detail/index?id=${this.activityId || ''}`
+      return { title, path }
+    },
+
+    roleLabel(role) {
+      return role === 'publisher' ? '发布者' : '参与者'
+    },
+
     formatTime(t) {
       if (!t) return ''
       const d = new Date(t)
@@ -537,6 +768,17 @@ export default {
     },
 
     formatJoinedAt(t) {
+      if (!t) return '--'
+      const d = new Date(t)
+      if (Number.isNaN(d.getTime())) return '--'
+      const mo = d.getMonth() + 1
+      const day = d.getDate()
+      const h = d.getHours().toString().padStart(2, '0')
+      const m = d.getMinutes().toString().padStart(2, '0')
+      return `${mo}/${day} ${h}:${m}`
+    },
+
+    formatCommentTime(t) {
       if (!t) return '--'
       const d = new Date(t)
       if (Number.isNaN(d.getTime())) return '--'
@@ -664,6 +906,150 @@ export default {
   color: #999;
 }
 
+.comment-block {
+  margin-top: 24rpx;
+  padding: 24rpx;
+  border-radius: 12rpx;
+  background: #ffffff;
+}
+.comment-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12rpx;
+}
+.comment-title {
+  font-size: 28rpx;
+  color: #1a1a1a;
+  font-weight: 700;
+}
+.comment-count {
+  font-size: 24rpx;
+  color: #999;
+}
+.comment-empty {
+  padding: 16rpx 0;
+  font-size: 24rpx;
+  color: #999;
+}
+.comment-item {
+  padding: 16rpx 0;
+  border-top: 1rpx solid #f3f3f3;
+}
+.comment-main {
+  display: flex;
+  gap: 14rpx;
+}
+.comment-avatar {
+  width: 52rpx;
+  height: 52rpx;
+  border-radius: 50%;
+  background: #eee;
+  flex-shrink: 0;
+}
+.comment-avatar--small {
+  width: 42rpx;
+  height: 42rpx;
+}
+.comment-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+}
+.comment-meta {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  flex-wrap: wrap;
+}
+.comment-name {
+  font-size: 25rpx;
+  color: #333;
+  font-weight: 600;
+}
+.comment-role {
+  font-size: 20rpx;
+  color: #1E7145;
+  background: #EEF7EE;
+  border-radius: 12rpx;
+  padding: 2rpx 10rpx;
+}
+.comment-time {
+  font-size: 22rpx;
+  color: #999;
+}
+.comment-content {
+  font-size: 26rpx;
+  color: #444;
+  line-height: 1.55;
+}
+.comment-reply {
+  display: inline-block;
+  margin-top: 4rpx;
+  font-size: 23rpx;
+  color: #2E75B6;
+}
+.reply-item {
+  margin-left: 64rpx;
+  margin-top: 10rpx;
+  padding: 12rpx;
+  border-radius: 10rpx;
+  background: #f8fbff;
+  display: flex;
+  gap: 12rpx;
+}
+.comment-editor {
+  margin-top: 14rpx;
+  border-top: 1rpx solid #f3f3f3;
+  padding-top: 14rpx;
+}
+.reply-target {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10rpx;
+}
+.reply-target-text {
+  font-size: 22rpx;
+  color: #2E75B6;
+}
+.reply-target-cancel {
+  font-size: 22rpx;
+  color: #999;
+}
+.editor-row {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+.comment-input {
+  flex: 1;
+  height: 68rpx;
+  border-radius: 34rpx;
+  background: #f4f6f8;
+  padding: 0 20rpx;
+  font-size: 26rpx;
+  color: #333;
+}
+.comment-send {
+  width: 120rpx;
+  height: 68rpx;
+  line-height: 68rpx;
+  border-radius: 34rpx;
+  background: #1A3C5E;
+  color: #fff;
+  font-size: 25rpx;
+  border: none;
+  padding: 0;
+}
+.comment-send::after { border: none; }
+.comment-permission-tip {
+  margin-top: 10rpx;
+  font-size: 22rpx;
+  color: #999;
+}
+
 .bottom-bar {
   position: fixed; bottom: 0; left: 0; right: 0;
   padding: 24rpx 32rpx;
@@ -671,6 +1057,20 @@ export default {
   background: white; box-shadow: 0 -2rpx 12rpx rgba(0,0,0,0.08);
   display: flex; align-items: center; gap: 20rpx;
 }
+.share-btn {
+  width: 108rpx;
+  height: 60rpx;
+  line-height: 60rpx;
+  font-size: 24rpx;
+  color: #1A3C5E;
+  background: #EEF4FB;
+  border-radius: 12rpx;
+  border: none;
+  padding: 0;
+  margin: 0;
+  flex-shrink: 0;
+}
+.share-btn::after { border: none; }
 .report-btn { font-size: 26rpx; color: #999; padding: 0 16rpx; flex-shrink: 0; }
 
 .btn {

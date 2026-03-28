@@ -6,7 +6,11 @@
     },
 	{
 	  "path": "pages/detail/index",
-	  "style": { "navigationBarTitleText": "活动详情" }
+	  "style": {
+	    "navigationBarTitleText": "活动详情",
+	    "enableShareAppMessage": true,
+	    "enableShareTimeline": true
+	  }
 	},
     {
       "path": "pages/publish/index",
