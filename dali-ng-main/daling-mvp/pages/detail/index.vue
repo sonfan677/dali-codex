@@ -531,14 +531,60 @@ export default {
       const title = this.activity?.title || '活动'
       const payload = [`${title}｜参与者昵称清单（${exportList.length}人）`, ...lines].join('\n')
 
-      uni.setClipboardData({
-        data: payload,
-        success: () => {
+      this.copyText(payload)
+        .then(() => {
           uni.showToast({ title: '昵称清单已复制', icon: 'success' })
-        },
-        fail: () => {
-          uni.showToast({ title: '复制失败，请重试', icon: 'none' })
-        },
+        })
+        .catch((err) => {
+          console.error('复制失败', err)
+          uni.showModal({
+            title: '复制失败',
+            content: '请点击“导出昵称”再试一次；如果仍失败，请把控制台报错截图发我，我来继续排查。',
+            showCancel: false,
+          })
+        })
+    },
+
+    copyText(text) {
+      return new Promise((resolve, reject) => {
+        const data = String(text || '')
+        if (!data) {
+          reject(new Error('EMPTY_TEXT'))
+          return
+        }
+
+        // #ifdef MP-WEIXIN
+        if (typeof wx !== 'undefined' && typeof wx.setClipboardData === 'function') {
+          wx.setClipboardData({
+            data,
+            success: () => resolve(true),
+            fail: (wxErr) => {
+              console.warn('wx.setClipboardData fail:', wxErr)
+              if (typeof uni !== 'undefined' && typeof uni.setClipboardData === 'function') {
+                uni.setClipboardData({
+                  data,
+                  success: () => resolve(true),
+                  fail: (uniErr) => reject(uniErr || wxErr || new Error('COPY_FAILED')),
+                })
+                return
+              }
+              reject(wxErr || new Error('COPY_FAILED'))
+            },
+          })
+          return
+        }
+        // #endif
+
+        if (typeof uni !== 'undefined' && typeof uni.setClipboardData === 'function') {
+          uni.setClipboardData({
+            data,
+            success: () => resolve(true),
+            fail: (err) => reject(err || new Error('COPY_FAILED')),
+          })
+          return
+        }
+
+        reject(new Error('CLIPBOARD_API_UNSUPPORTED'))
       })
     },
 
