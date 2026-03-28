@@ -3,6 +3,22 @@ cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 const db = cloud.database()
 const _ = db.command
 
+async function fetchByPage(queryBuilder, pageSize = 100, maxFetch = 1000) {
+  const list = []
+  let skip = 0
+  while (skip < maxFetch) {
+    const query = queryBuilder()
+      .skip(skip)
+      .limit(pageSize)
+    const { data } = await query.get()
+    if (!data || data.length === 0) break
+    list.push(...data)
+    skip += data.length
+    if (data.length < pageSize) break
+  }
+  return list
+}
+
 async function notifyFormationResult(activity, formationStatus) {
   const { data: parts } = await db.collection('participations')
     .where({ activityId: activity._id, status: 'joined' })
@@ -45,10 +61,13 @@ exports.main = async () => {
   const nowMs = now.getTime()
   console.log(`[autoUpdateStatus] 开始执行 ${now.toISOString()}`)
 
-  const { data: activeActivities } = await db.collection('activities')
-    .where({ status: _.in(['OPEN', 'FULL']) })
-    .limit(100)
-    .get()
+  const activeActivities = await fetchByPage(
+    () => db.collection('activities')
+      .where({ status: _.in(['OPEN', 'FULL']) })
+      .orderBy('createdAt', 'asc'),
+    100,
+    2000
+  )
 
   let endedCount = 0
   for (const activity of activeActivities) {
@@ -80,15 +99,19 @@ exports.main = async () => {
 
     endedCount++
   }
-  console.log(`[autoUpdateStatus] 结束活动数: ${endedCount}`)
+  console.log(`[autoUpdateStatus] 活跃活动扫描数: ${activeActivities.length}，结束活动数: ${endedCount}`)
 
-  const { data: formingActivities } = await db.collection('activities')
-    .where({
-      isGroupFormation: true,
-      formationStatus: 'FORMING',
-      status: _.in(['OPEN', 'FULL']),
-    })
-    .get()
+  const formingActivities = await fetchByPage(
+    () => db.collection('activities')
+      .where({
+        isGroupFormation: true,
+        formationStatus: 'FORMING',
+        status: _.in(['OPEN', 'FULL']),
+      })
+      .orderBy('createdAt', 'asc'),
+    100,
+    2000
+  )
 
   let formingCount = 0
   for (const activity of formingActivities) {
@@ -116,11 +139,13 @@ exports.main = async () => {
     formingCount++
     console.log(`[autoUpdateStatus] 活动 ${activity._id} 成团结果: ${nextFormationStatus}`)
   }
-  console.log(`[autoUpdateStatus] 处理成团活动数: ${formingCount}`)
+  console.log(`[autoUpdateStatus] 成团活动扫描数: ${formingActivities.length}，处理成团活动数: ${formingCount}`)
 
   return {
     success: true,
+    scannedActiveCount: activeActivities.length,
     endedCount,
+    scannedFormingCount: formingActivities.length,
     formingCount,
     executedAt: now.toISOString(),
   }

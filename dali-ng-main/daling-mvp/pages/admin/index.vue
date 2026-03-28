@@ -72,14 +72,21 @@
         >
           <view class="card-info">
             <view class="card-text">
-              <text class="card-title">活动举报</text>
+              <text class="card-title">活动举报 · {{ reportStatusText(item.reportStatus) }}</text>
               <text class="card-sub">原因：{{ item.reason }}</text>
+              <text v-if="item.reporterNickname || item.reporterOpenid" class="card-sub">
+                举报人：{{ item.reporterNickname || shortOpenid(item.reporterOpenid) }}
+              </text>
               <text class="card-openid">活动ID: {{ item.targetId ? item.targetId.slice(0,12) + '...' : '' }}</text>
+              <text v-if="item.reportStatus !== 'PENDING'" class="card-openid">
+                处理结果：{{ handleActionText(item.handleAction) }}{{ item.handleNote ? '（' + item.handleNote + '）' : '' }}
+              </text>
+              <text class="card-openid">提交时间：{{ formatTime(item.createdAt) }}</text>
             </view>
           </view>
-          <view class="card-actions">
-            <button class="action-btn action-btn--approve" @tap="handleReport(item.targetId, 'hide')">下架</button>
-            <button class="action-btn action-btn--reject"  @tap="ignoreReport(item._id)">忽略</button>
+          <view v-if="item.reportStatus === 'PENDING'" class="card-actions">
+            <button class="action-btn action-btn--approve" @tap="handleReport(item)">下架并处理</button>
+            <button class="action-btn action-btn--reject"  @tap="ignoreReport(item)">忽略并处理</button>
           </view>
         </view>
       </template>
@@ -205,7 +212,7 @@ export default {
     },
 
     // 处理举报：下架活动
-    async handleReport(activityId, action) {
+    async handleReport(reportItem) {
       uni.showModal({
         title: '确认下架此活动？',
         editable: true,
@@ -218,14 +225,15 @@ export default {
           }
           try {
             const result = await callCloud('adminAction', {
-              action: 'hide',
-              targetId: activityId,
-              targetType: 'activity',
+              action: 'resolve_report_hide',
+              reportId: reportItem._id,
+              targetId: reportItem.targetId,
+              targetType: 'report',
               reason: res.content,
             })
             if (result.success) {
-              uni.showToast({ title: '活动已下架', icon: 'success' })
-              this.reportList = this.reportList.filter(r => r.targetId !== activityId)
+              uni.showToast({ title: result.message || '举报已处理', icon: 'success' })
+              await this.loadData()
             }
           } catch(e) {
             uni.showToast({ title: '操作失败', icon: 'none' })
@@ -235,9 +243,36 @@ export default {
     },
 
     // 忽略举报
-    async ignoreReport(reportId) {
-      this.reportList = this.reportList.filter(r => r._id !== reportId)
-      uni.showToast({ title: '已忽略', icon: 'success' })
+    async ignoreReport(reportItem) {
+      uni.showModal({
+        title: '确认忽略该举报？',
+        editable: true,
+        placeholderText: '填写忽略原因（必填）',
+        success: async (res) => {
+          if (!res.confirm) return
+          if (!res.content || res.content.trim().length < 2) {
+            uni.showToast({ title: '请填写原因', icon: 'none' })
+            return
+          }
+          try {
+            const result = await callCloud('adminAction', {
+              action: 'resolve_report_ignore',
+              reportId: reportItem._id,
+              targetId: reportItem.targetId,
+              targetType: 'report',
+              reason: res.content,
+            })
+            if (result.success) {
+              uni.showToast({ title: result.message || '举报已处理', icon: 'success' })
+              await this.loadData()
+            } else {
+              uni.showToast({ title: result.message || '操作失败', icon: 'none' })
+            }
+          } catch (e) {
+            uni.showToast({ title: '操作失败', icon: 'none' })
+          }
+        }
+      })
     },
 
     // 推荐/取消推荐活动
@@ -307,6 +342,39 @@ export default {
     statusText(status) {
       const map = { OPEN: '招募中', FULL: '已满员', ENDED: '已结束', CANCELLED: '已取消' }
       return map[status] || status
+    },
+
+    reportStatusText(status) {
+      const map = {
+        PENDING: '待处理',
+        HANDLED: '已处理',
+        IGNORED: '已忽略',
+      }
+      return map[status] || '待处理'
+    },
+
+    handleActionText(action) {
+      const map = {
+        HIDE_ACTIVITY: '已下架活动',
+        IGNORE: '已忽略举报',
+      }
+      return map[action] || '已处理'
+    },
+
+    shortOpenid(openid) {
+      if (!openid) return ''
+      return openid.slice(0, 6) + '...'
+    },
+
+    formatTime(t) {
+      if (!t) return '--'
+      const d = new Date(t)
+      if (Number.isNaN(d.getTime())) return '--'
+      const mo = d.getMonth() + 1
+      const day = d.getDate()
+      const h = d.getHours().toString().padStart(2, '0')
+      const m = d.getMinutes().toString().padStart(2, '0')
+      return `${mo}/${day} ${h}:${m}`
     },
   }
 }

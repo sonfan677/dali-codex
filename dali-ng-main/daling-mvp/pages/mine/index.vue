@@ -264,7 +264,7 @@ export default {
 
         // 我参与的：先查 participations，再查对应活动
         const { data: parts } = await db.collection('participations')
-          .where({ status: 'joined' })
+          .where({ status: 'joined', userId: openid })
           .orderBy('joinedAt', 'desc')
           .limit(20)
           .get()

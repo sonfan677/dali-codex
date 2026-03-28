@@ -52,8 +52,20 @@ exports.main = async () => {
     db.collection('adminActions')
       .where({ action: 'report' })
       .orderBy('createdAt', 'desc')
-      .limit(60)
-      .field({ _id: true, targetId: true, reason: true, createdAt: true, cityId: true })
+      .limit(200)
+      .field({
+        _id: true,
+        targetId: true,
+        reason: true,
+        createdAt: true,
+        cityId: true,
+        reportStatus: true,
+        handleAction: true,
+        handleNote: true,
+        handledAt: true,
+        reporterOpenid: true,
+        reporterNickname: true,
+      })
       .get(),
     db.collection('activities')
       .where({ status: _.in(['OPEN', 'FULL']) })
@@ -72,9 +84,14 @@ exports.main = async () => {
   ])
 
   const shouldFilterCity = meta.adminRole === 'cityAdmin'
-  const reportList = shouldFilterCity
-    ? (reportsRes.data || []).filter((item) => !item.cityId || item.cityId === meta.cityId).slice(0, 20)
-    : (reportsRes.data || []).slice(0, 20)
+  const reportList = (shouldFilterCity
+    ? (reportsRes.data || []).filter((item) => !item.cityId || item.cityId === meta.cityId)
+    : (reportsRes.data || []))
+    .map((item) => ({
+      ...item,
+      reportStatus: item.reportStatus || 'PENDING',
+    }))
+    .slice(0, 60)
 
   const activityList = shouldFilterCity
     ? (activitiesRes.data || []).filter((item) => !item.cityId || item.cityId === meta.cityId).slice(0, 20)

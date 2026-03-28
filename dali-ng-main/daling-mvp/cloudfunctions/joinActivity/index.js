@@ -62,20 +62,45 @@ exports.main = async (event, context) => {
       }
     })
 
-    // 写入报名记录
-    await transaction.collection('participations').add({
-      data: {
-        _openid: OPENID,
-        activityId,
-        userId: OPENID,
-        userNickname: user.nickname || '',
-        userAvatar: user.avatarUrl || '',
-        status: 'joined',
-        joinedAt: db.serverDate(),
-        cancelledAt: null,
-        createdAt: db.serverDate(),
-      }
-    })
+    // 写入/恢复报名记录（允许“取消后再次报名”）
+    const joinedRecordRes = await transaction.collection('participations')
+      .where({ activityId, userId: OPENID })
+      .limit(1)
+      .get()
+    const existedRecord = joinedRecordRes.data && joinedRecordRes.data[0]
+
+    if (existedRecord && existedRecord.status === 'joined') {
+      await transaction.rollback()
+      return { success: false, error: 'ALREADY_JOINED', message: '你已经报名了' }
+    }
+
+    if (existedRecord) {
+      await transaction.collection('participations').doc(existedRecord._id).update({
+        data: {
+          status: 'joined',
+          userNickname: user.nickname || existedRecord.userNickname || '',
+          userAvatar: user.avatarUrl || existedRecord.userAvatar || '',
+          joinedAt: db.serverDate(),
+          cancelledAt: null,
+          updatedAt: db.serverDate(),
+        }
+      })
+    } else {
+      await transaction.collection('participations').add({
+        data: {
+          _openid: OPENID,
+          activityId,
+          userId: OPENID,
+          userNickname: user.nickname || '',
+          userAvatar: user.avatarUrl || '',
+          status: 'joined',
+          joinedAt: db.serverDate(),
+          cancelledAt: null,
+          createdAt: db.serverDate(),
+          updatedAt: db.serverDate(),
+        }
+      })
+    }
 
     await transaction.commit()
     

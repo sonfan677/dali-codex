@@ -82,10 +82,37 @@ exports.main = async (event) => {
     .limit(1)
     .get()
 
+  const isPublisher = activity.publisherId === OPENID
+  let participantList = []
+  if (isPublisher) {
+    const { data: rawParticipants } = await db.collection('participations')
+      .where({ activityId, status: 'joined' })
+      .orderBy('joinedAt', 'desc')
+      .limit(100)
+      .field({
+        _id: true,
+        userId: true,
+        userNickname: true,
+        userAvatar: true,
+        joinedAt: true,
+      })
+      .get()
+
+    participantList = (rawParticipants || []).map((item) => ({
+      _id: item._id,
+      openid: item.userId || '',
+      nickname: item.userNickname || '匿名用户',
+      avatar: item.userAvatar || '',
+      joinedAt: item.joinedAt || null,
+    }))
+  }
+
   return {
     success: true,
     activity: enrichedActivity,
     hasJoined: joinedList.length > 0,
+    isPublisher,
+    participantList,
     currentOpenid: OPENID,
     serverTime: nowMs,
     serverTimestamp: nowMs,

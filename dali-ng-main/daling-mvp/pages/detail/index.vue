@@ -74,6 +74,32 @@
         <text class="formation-desc">{{ formationDesc }}</text>
       </view>
 
+      <!-- 发布者可见：参与者列表 -->
+      <view v-if="isPublisher" class="participants-block">
+        <view class="participants-header">
+          <text class="participants-title">参与者列表</text>
+          <text class="participants-count">共 {{ participantList.length }} 人</text>
+        </view>
+        <view v-if="participantList.length === 0" class="participants-empty">
+          <text>暂无报名用户</text>
+        </view>
+        <view
+          v-for="item in participantList"
+          :key="`part-${item._id}`"
+          class="participant-item"
+        >
+          <image
+            class="participant-avatar"
+            :src="item.avatar || '/static/default-avatar.png'"
+            mode="aspectFill"
+          />
+          <view class="participant-info">
+            <text class="participant-name">{{ item.nickname || '匿名用户' }}</text>
+            <text class="participant-time">报名时间：{{ formatJoinedAt(item.joinedAt) }}</text>
+          </view>
+        </view>
+      </view>
+
     </view>
 
     <!-- 底部操作栏 -->
@@ -88,7 +114,15 @@
         :disabled="!canCancel"
       >取消活动</button>
 
-      <!-- 已报名 -->
+      <!-- 已报名且可取消 -->
+      <button
+        v-else-if="hasJoined && canQuitJoin"
+        class="btn btn--quit"
+        @tap="quitJoin"
+        :loading="quitting"
+      >取消报名</button>
+
+      <!-- 已报名但不可取消 -->
       <button v-else-if="hasJoined" class="btn btn--joined" disabled>
         已报名 ✓
       </button>
@@ -125,8 +159,10 @@ export default {
       activity: null,
       hasJoined: false,
       joining: false,
+      quitting: false,
       serverTime: Date.now(),
       currentOpenid: '',
+      participantList: [],
     }
   },
 
@@ -154,6 +190,12 @@ export default {
     canCancel() {
       if (!this.activity) return false
       return !['ENDED', 'CANCELLED'].includes(this.activity.status)
+    },
+
+    canQuitJoin() {
+      if (!this.activity || !this.hasJoined || this.isPublisher) return false
+      if (['ENDED', 'CANCELLED'].includes(this.activity.status)) return false
+      return this.timeStatus.status !== 'ended'
     },
 
     joinBtnText() {
@@ -225,6 +267,7 @@ export default {
         this.hasJoined = !!res.hasJoined
         this.serverTime = res.serverTime || Date.now()
         this.currentOpenid = res.currentOpenid || this.currentOpenid
+        this.participantList = Array.isArray(res.participantList) ? res.participantList : []
       } catch(e) {
         uni.showToast({ title: '活动不存在', icon: 'none' })
         setTimeout(() => uni.navigateBack(), 1500)
@@ -371,6 +414,7 @@ export default {
           this.hasJoined = true
           this.activity.currentParticipants += 1
           if (res.isFull) this.activity.status = 'FULL'
+          if (res.formationStatus) this.activity.formationStatus = res.formationStatus
           uni.showToast({ title: '报名成功！', icon: 'success' })
         } else {
           const msgs = {
@@ -387,6 +431,44 @@ export default {
       } finally {
         this.joining = false
       }
+    },
+
+    async quitJoin() {
+      if (!this.canQuitJoin) return
+      uni.showModal({
+        title: '确认取消报名？',
+        content: '取消后可再次报名（若活动仍在招募中）',
+        confirmText: '确认取消',
+        cancelText: '再想想',
+        success: async (res) => {
+          if (!res.confirm) return
+          this.quitting = true
+          try {
+            const result = await callCloud('quitActivity', { activityId: this.activityId })
+            if (result?.success) {
+              this.hasJoined = false
+              this.activity.currentParticipants = Math.max(
+                0,
+                Number(result.currentParticipants ?? this.activity.currentParticipants - 1)
+              )
+              if (result.activityStatus) this.activity.status = result.activityStatus
+              if (result.formationStatus) this.activity.formationStatus = result.formationStatus
+              uni.showToast({ title: '已取消报名', icon: 'success' })
+            } else {
+              const msgMap = {
+                NOT_JOINED: '你当前未报名该活动',
+                NOT_ALLOWED: '活动已结束或已取消',
+                PUBLISHER_CANNOT_QUIT: '发布者不可取消报名',
+              }
+              uni.showToast({ title: msgMap[result?.error] || result?.message || '取消失败', icon: 'none' })
+            }
+          } catch (e) {
+            uni.showToast({ title: '操作失败，请重试', icon: 'none' })
+          } finally {
+            this.quitting = false
+          }
+        }
+      })
     },
 
     async cancelActivity() {
@@ -419,19 +501,16 @@ export default {
         success: async (res) => {
           if (res.confirm && res.content) {
             try {
-              // #ifdef MP-WEIXIN
-              const db = wx.cloud.database()
-              await db.collection('adminActions').add({
-                data: {
-                  targetId:   this.activityId,
-                  targetType: 'activity',
-                  action:     'report',
-                  reason:     res.content,
-                  createdAt:  db.serverDate(),
-                }
+              const ret = await callCloud('submitReport', {
+                targetId: this.activityId,
+                targetType: 'activity',
+                reason: res.content,
               })
-              // #endif
-              uni.showToast({ title: '举报已提交，感谢反馈', icon: 'success' })
+              if (ret?.success) {
+                uni.showToast({ title: ret.message || '举报已提交，感谢反馈', icon: 'success' })
+              } else {
+                uni.showToast({ title: ret?.message || '提交失败，请重试', icon: 'none' })
+              }
             } catch(e) {
               uni.showToast({ title: '提交失败，请重试', icon: 'none' })
             }
@@ -447,6 +526,17 @@ export default {
       const day = d.getDate()
       const h  = d.getHours().toString().padStart(2, '0')
       const m  = d.getMinutes().toString().padStart(2, '0')
+      return `${mo}/${day} ${h}:${m}`
+    },
+
+    formatJoinedAt(t) {
+      if (!t) return '--'
+      const d = new Date(t)
+      if (Number.isNaN(d.getTime())) return '--'
+      const mo = d.getMonth() + 1
+      const day = d.getDate()
+      const h = d.getHours().toString().padStart(2, '0')
+      const m = d.getMinutes().toString().padStart(2, '0')
       return `${mo}/${day} ${h}:${m}`
     },
   }
@@ -512,6 +602,60 @@ export default {
 }
 .formation-desc { font-size: 24rpx; color: #555; }
 
+.participants-block {
+  margin-top: 24rpx;
+  padding: 24rpx;
+  border-radius: 12rpx;
+  background: #ffffff;
+}
+.participants-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16rpx;
+}
+.participants-title {
+  font-size: 28rpx;
+  color: #1a1a1a;
+  font-weight: 700;
+}
+.participants-count {
+  font-size: 24rpx;
+  color: #999;
+}
+.participants-empty {
+  font-size: 24rpx;
+  color: #999;
+  padding: 12rpx 0;
+}
+.participant-item {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  padding: 14rpx 0;
+  border-top: 1rpx solid #f2f2f2;
+}
+.participant-avatar {
+  width: 56rpx;
+  height: 56rpx;
+  border-radius: 50%;
+  background: #eee;
+  flex-shrink: 0;
+}
+.participant-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+}
+.participant-name {
+  font-size: 26rpx;
+  color: #333;
+}
+.participant-time {
+  font-size: 22rpx;
+  color: #999;
+}
+
 .bottom-bar {
   position: fixed; bottom: 0; left: 0; right: 0;
   padding: 24rpx 32rpx;
@@ -526,6 +670,7 @@ export default {
   font-size: 30rpx; font-weight: bold; border: none;
 }
 .btn--join     { background: #1A3C5E; color: white; }
+.btn--quit     { background: #FFF5F5; color: #C00000; border: 2rpx solid #E8A7A7; }
 .btn--joined   { background: #f0f0f0; color: #999; }
 .btn--cancel   { background: white; color: #C00000; border: 2rpx solid #C00000; }
 .btn--disabled { background: #f0f0f0; color: #999; }

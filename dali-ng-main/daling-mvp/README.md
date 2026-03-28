@@ -54,7 +54,9 @@
   - `login`：静默登录与用户档案初始化
   - `getActivityDetail`：活动详情（含当前用户报名状态 + 服务器时间）
   - `joinActivity`：报名（并发安全，事务更新人数与报名记录）
+  - `quitActivity`：取消报名（事务回滚人数、恢复活动可报名状态）
   - `cancelActivity`：发布者取消活动并通知参与者
+  - `submitReport`：用户提交举报（进入管理员待处理队列）
   - `autoUpdateStatus`：自动更新活动状态（结束/成团结果）并通知
   - `sendNotification`：统一模板消息发送
 - `project.config.json`：微信开发者工具项目配置（根目录项目）
@@ -93,8 +95,9 @@
 - 活动详情（`pages/detail`）
   - 加载活动详情
   - 报名：`callCloud('joinActivity', { activityId })`，云端使用事务防超额，成功后更新人数与报名记录，并异步触发通知
+  - 取消报名：`callCloud('quitActivity', { activityId })`，云端事务更新人数与报名状态
   - 取消：发布者调用 `cancelActivity`，异步通知已报名用户
-  - 举报：写入 `adminActions`
+  - 举报：`callCloud('submitReport', ...)` 写入待处理举报
 - 通知发送（`sendNotification`）
   - 使用 `cloud.openapi.subscribeMessage.send` 发送模板消息
   - 模板 ID 通过云环境变量 `TMPL_START/TMPL_CANCEL/TMPL_FORMING` 注入
