@@ -2,6 +2,16 @@ const cloud = require('wx-server-sdk')
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 const db = cloud.database()
 
+const CATEGORY_MAP = {
+  sport: '运动',
+  music: '音乐',
+  reading: '读书',
+  game: '游戏',
+  social: '社交',
+  outdoor: '户外',
+  other: '其他',
+}
+
 function buildTrustProfile(activity, user, nowMs) {
   const hasPlatformVerified = !!(
     user?.platformVerified ||
@@ -73,8 +83,11 @@ exports.main = async (event) => {
     })
     .get()
   const publisher = users[0] || null
+  const categoryId = activity.categoryId || 'other'
   const enrichedActivity = {
     ...activity,
+    categoryId,
+    categoryLabel: activity.categoryLabel || CATEGORY_MAP[categoryId] || '其他',
     trustProfile: buildTrustProfile(activity, publisher, nowMs),
   }
   const { data: joinedList } = await db.collection('participations')

@@ -15,6 +15,47 @@
       </view>
     </view>
 
+    <!-- 搜索与筛选 -->
+    <view class="filter-panel">
+      <view class="search-row">
+        <input
+          v-model="searchKeyword"
+          class="search-input"
+          confirm-type="search"
+          placeholder="搜索标题 / 地点 / 描述"
+          @confirm="onSearchConfirm"
+        />
+        <text class="search-action" @tap="onSearchConfirm">搜索</text>
+      </view>
+
+      <scroll-view scroll-x class="category-scroll" show-scrollbar="false">
+        <view class="category-list">
+          <text
+            v-for="item in categoryOptions"
+            :key="`cat-${item.id}`"
+            class="category-chip"
+            :class="{ 'category-chip--active': selectedCategoryId === item.id }"
+            @tap="onCategoryChange(item.id)"
+          >{{ item.label }}</text>
+        </view>
+      </scroll-view>
+
+      <view class="filter-row">
+        <view class="distance-block">
+          <text class="filter-label">距离</text>
+          <picker
+            mode="selector"
+            :range="distancePickerRange"
+            :value="distanceIndex"
+            @change="onDistanceChange"
+          >
+            <view class="distance-picker">{{ currentDistanceLabel }} <text class="picker-arrow">›</text></view>
+          </picker>
+        </view>
+        <text class="filter-hint">{{ filterHintText }}</text>
+      </view>
+    </view>
+
     <!-- 活动列表 -->
     <scroll-view scroll-y class="list">
 
@@ -61,6 +102,11 @@ import { useUserStore }     from '@/stores/user.js'
 import { callCloud }        from '@/utils/cloud.js'
 import ActivityCard  from '@/components/ActivityCard.vue'
 import PrivacyPopup  from '@/components/PrivacyPopup.vue'
+import {
+  ACTIVITY_CATEGORY_OPTIONS,
+  DISTANCE_FILTER_OPTIONS,
+  getCategoryLabel,
+} from '@/utils/activityMeta.js'
 
 // 小开关：当前位置5km查不到真实活动时，是否回退示例数据
 // false: 不回退，直接显示“附近暂时没有活动”
@@ -73,6 +119,8 @@ const MOCK_ACTIVITIES = [
     _id: 'mock1',
     title: '茶话会 · 下午茶时光',
     description: '大家一起喝茶聊天，欢迎来玩',
+    categoryId: 'social',
+    categoryLabel: '社交',
     location: { address: '大理古城洱海边', lat: 25.6065, lng: 100.2679 },
     startTime: new Date(Date.now() + 30 * 60 * 1000),
     endTime:   new Date(Date.now() + 4 * 60 * 60 * 1000),
@@ -89,6 +137,8 @@ const MOCK_ACTIVITIES = [
     _id: 'mock2',
     title: '环洱海骑行',
     description: '一起骑行环洱海，约需3小时',
+    categoryId: 'sport',
+    categoryLabel: '运动',
     location: { address: '才村码头集合', lat: 25.6200, lng: 100.2100 },
     startTime: new Date(Date.now() + 2 * 60 * 60 * 1000),
     endTime:   new Date(Date.now() + 6 * 60 * 60 * 1000),
@@ -107,6 +157,8 @@ const MOCK_ACTIVITIES = [
     _id: 'mock3',
     title: '狼人杀 · 8人局',
     description: '今晚在青旅大堂，欢迎新手',
+    categoryId: 'game',
+    categoryLabel: '游戏',
     location: { address: '人民路某青旅', lat: 25.6010, lng: 100.2650 },
     startTime: new Date(Date.now() + 4 * 60 * 60 * 1000),
     endTime:   new Date(Date.now() + 7 * 60 * 60 * 1000),
@@ -139,11 +191,18 @@ export default {
       loading: false,
       serverTime: Date.now(),
       lastQueryMode: 'default', // nearby: 当前位置5km, default: 默认坐标50km
+      categoryOptions: ACTIVITY_CATEGORY_OPTIONS,
+      selectedCategoryId: 'all',
+      searchKeyword: '',
+      appliedKeyword: '',
+      distanceOptions: DISTANCE_FILTER_OPTIONS,
+      distanceIndex: Math.max(0, DISTANCE_FILTER_OPTIONS.findIndex((item) => item.radius === 50000)),
+      distanceTouched: false,
     }
   },
 
   computed: {
-    displayActivities() {
+    baseActivities() {
       // 只要云端返回了数据就优先展示真实数据
       if (this.activities.length > 0) {
         return this.activities
@@ -155,6 +214,10 @@ export default {
       }
 
       return MOCK_ACTIVITIES
+    },
+
+    displayActivities() {
+      return this.filterActivities(this.baseActivities)
     },
 
     dataSourceBadge() {
@@ -186,7 +249,26 @@ export default {
         return '📍 未获取位置，已按默认坐标展示活动'
       }
       return '📍 未获取位置，以下为示例活动'
-    }
+    },
+
+    distancePickerRange() {
+      return this.distanceOptions.map((item) => item.label)
+    },
+
+    currentDistanceLabel() {
+      return this.distanceOptions[this.distanceIndex]?.label || '5km'
+    },
+
+    selectedCategoryLabel() {
+      return this.categoryOptions.find((item) => item.id === this.selectedCategoryId)?.label || '全部'
+    },
+
+    filterHintText() {
+      const bits = []
+      if (this.selectedCategoryId !== 'all') bits.push(this.selectedCategoryLabel)
+      if (this.appliedKeyword) bits.push(`关键词:${this.appliedKeyword}`)
+      return bits.length > 0 ? bits.join(' · ') : '未设置筛选条件'
+    },
   },
   onLoad() {
       uni.$on('showPrivacyPopup', () => {
@@ -206,6 +288,7 @@ export default {
           try {
             const ok = await this.locationStore.refreshLocation()
             if (ok) {
+              this.applyDefaultDistanceForMode('nearby')
               await this.loadActivities()
               return
             }
@@ -214,9 +297,11 @@ export default {
           }
         }
         // 无论有没有位置权限，都用默认坐标加载活动
+        this.applyDefaultDistanceForMode('default')
         await this.loadActivitiesWithDefault()
       },
       fail: async () => {
+        this.applyDefaultDistanceForMode('default')
         await this.loadActivitiesWithDefault()
       }
     })
@@ -226,10 +311,94 @@ export default {
 
 
   methods: {
+    getSelectedRadius() {
+      return Number(this.distanceOptions[this.distanceIndex]?.radius) || 5000
+    },
+
+    applyDefaultDistanceForMode(mode) {
+      if (this.distanceTouched) return
+      const targetRadius = mode === 'nearby' ? 5000 : 50000
+      const idx = this.distanceOptions.findIndex((item) => item.radius === targetRadius)
+      if (idx >= 0) this.distanceIndex = idx
+    },
+
+    buildQueryParams(lat, lng) {
+      return {
+        lat,
+        lng,
+        radius: this.getSelectedRadius(),
+        keyword: this.appliedKeyword,
+        categoryId: this.selectedCategoryId,
+      }
+    },
+
+    normalizeActivityCategory(item) {
+      const categoryId = item?.categoryId || 'other'
+      return {
+        ...item,
+        categoryId,
+        categoryLabel: item?.categoryLabel || getCategoryLabel(categoryId),
+      }
+    },
+
+    filterActivities(list = []) {
+      const keyword = String(this.appliedKeyword || '').trim().toLowerCase()
+      const selectedCategoryId = this.selectedCategoryId
+      const radius = this.getSelectedRadius()
+
+      return (list || [])
+        .map((item) => this.normalizeActivityCategory(item))
+        .filter((item) => {
+          if (selectedCategoryId !== 'all' && item.categoryId !== selectedCategoryId) {
+            return false
+          }
+          if (keyword) {
+            const haystack = [
+              item.title,
+              item.description,
+              item.location?.address,
+              item.categoryLabel,
+            ].filter(Boolean).join(' ').toLowerCase()
+            if (!haystack.includes(keyword)) return false
+          }
+          if (Number.isFinite(Number(item._distance)) && Number(item._distance) > radius) {
+            return false
+          }
+          return true
+        })
+    },
+
+    async reloadActivities() {
+      if (this.locationStore.hasPermission === true && this.locationStore.lat && this.locationStore.lng) {
+        await this.loadActivities()
+        return
+      }
+      await this.loadActivitiesWithDefault()
+    },
+
+    async onSearchConfirm() {
+      this.appliedKeyword = String(this.searchKeyword || '').trim()
+      await this.reloadActivities()
+    },
+
+    async onCategoryChange(categoryId) {
+      if (this.selectedCategoryId === categoryId) return
+      this.selectedCategoryId = categoryId
+      await this.reloadActivities()
+    },
+
+    async onDistanceChange(e) {
+      const idx = Number(e?.detail?.value || 0)
+      this.distanceIndex = idx
+      this.distanceTouched = true
+      await this.reloadActivities()
+    },
+
     // 用户点击授权Banner或提示条
     async requestLocation() {
       const ok = await this.locationStore.refreshLocation({ interactive: true, force: true })
       if (ok) {
+        this.applyDefaultDistanceForMode('nearby')
         await this.loadActivities()
       } else {
         const msg = this.locationStore.lastErrorCode === 'FUZZY_API_PENDING'
@@ -260,11 +429,7 @@ export default {
 	  try {
 	    this.loading = true
       this.lastQueryMode = 'default'
-	    const res = await callCloud('getActivityList', {
-	      lat: defaultLat,
-	      lng: defaultLng,
-	      radius: 50000, // 50公里（云函数单位为米）
-	    })
+      const res = await callCloud('getActivityList', this.buildQueryParams(defaultLat, defaultLng))
       this.activities = Array.isArray(res?.activities) ? res.activities : []
       this.serverTime = res?.serverTime || Date.now()
 	  } catch(e) {
@@ -280,11 +445,10 @@ export default {
       this.loading = true
       try {
         this.lastQueryMode = 'nearby'
-        const res = await callCloud('getActivityList', {
-          lat: this.locationStore.lat,
-          lng: this.locationStore.lng,
-          radius: 5000,
-        })
+        const res = await callCloud('getActivityList', this.buildQueryParams(
+          this.locationStore.lat,
+          this.locationStore.lng
+        ))
         this.activities  = res.activities  || []
         this.serverTime  = res.serverTime  || Date.now()
       } catch(e) {
@@ -311,6 +475,8 @@ export default {
 .page {
   min-height: 100vh;
   background: #f5f5f5;
+  display: flex;
+  flex-direction: column;
   padding-bottom: 120rpx;
 }
 .tip-bar {
@@ -376,7 +542,102 @@ export default {
   color: #295fa6;
 }
 
-.list { height: calc(100vh - 0rpx); padding: 16rpx; box-sizing: border-box; }
+.filter-panel {
+  background: #fff;
+  margin: 0 16rpx 8rpx;
+  border-radius: 14rpx;
+  padding: 18rpx 18rpx 16rpx;
+}
+
+.search-row {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.search-input {
+  flex: 1;
+  height: 68rpx;
+  border-radius: 34rpx;
+  background: #f4f6f8;
+  padding: 0 24rpx;
+  font-size: 26rpx;
+  color: #333;
+}
+
+.search-action {
+  min-width: 90rpx;
+  text-align: center;
+  font-size: 26rpx;
+  color: #1A3C5E;
+  font-weight: 700;
+}
+
+.category-scroll {
+  margin-top: 14rpx;
+  white-space: nowrap;
+}
+
+.category-list {
+  display: inline-flex;
+  gap: 10rpx;
+}
+
+.category-chip {
+  display: inline-block;
+  padding: 8rpx 18rpx;
+  border-radius: 20rpx;
+  background: #f3f3f3;
+  color: #666;
+  font-size: 24rpx;
+}
+
+.category-chip--active {
+  background: #1A3C5E;
+  color: #fff;
+}
+
+.filter-row {
+  margin-top: 14rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+}
+
+.distance-block {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+}
+
+.filter-label {
+  font-size: 22rpx;
+  color: #888;
+}
+
+.distance-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 4rpx;
+  font-size: 24rpx;
+  color: #1A3C5E;
+  font-weight: 700;
+}
+
+.picker-arrow {
+  font-size: 24rpx;
+  color: #999;
+}
+
+.filter-hint {
+  flex: 1;
+  text-align: right;
+  font-size: 22rpx;
+  color: #999;
+}
+
+.list { flex: 1; padding: 16rpx; box-sizing: border-box; }
 
 .center-tip {
   display: flex;

@@ -15,6 +15,16 @@ const CITY_CONFIG = {
   }
 }
 
+const CATEGORY_MAP = {
+  sport: '运动',
+  music: '音乐',
+  reading: '读书',
+  game: '游戏',
+  social: '社交',
+  outdoor: '户外',
+  other: '其他',
+}
+
 function buildTrustProfileForPublish(user) {
   const trustLevel = user?.platformVerified || user?.trustVerified ? 'A' : 'B'
   const displayStars = trustLevel === 'A' ? 5 : 4
@@ -46,6 +56,8 @@ exports.main = async (event, context) => {
   const {
     title,
     description = '',
+    categoryId = 'other',
+    categoryLabel = '',
     lat,
     lng,
     address = '',
@@ -67,6 +79,9 @@ exports.main = async (event, context) => {
   }
   if (!lat || !lng) {
     return { success: false, error: 'INVALID_LOCATION', message: '请选择活动地点' }
+  }
+  if (!CATEGORY_MAP[categoryId]) {
+    return { success: false, error: 'INVALID_CATEGORY', message: '活动分类不合法' }
   }
   if (!startTime || !endTime) {
     return { success: false, error: 'INVALID_TIME', message: '请选择活动时间' }
@@ -107,6 +122,8 @@ exports.main = async (event, context) => {
       _openid: OPENID,
       title: title.trim(),
       description: description.trim(),
+      categoryId,
+      categoryLabel: categoryLabel || CATEGORY_MAP[categoryId] || '其他',
       coverImage: '',
       cityId,
       location: {

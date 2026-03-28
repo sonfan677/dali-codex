@@ -26,6 +26,22 @@
           />
         </view>
 
+        <!-- 分类 -->
+        <view class="field">
+          <text class="label">活动分类 *</text>
+          <picker
+            mode="selector"
+            :range="categoryPickerRange"
+            :value="categoryIndex"
+            @change="onCategoryChange"
+          >
+            <view class="picker-row">
+              <text class="picker-value">{{ categoryPickerRange[categoryIndex] }}</text>
+              <text class="arrow">›</text>
+            </view>
+          </picker>
+        </view>
+
         <!-- 地点 -->
         <view class="field" @tap="chooseLocation">
           <text class="label">活动地点 *</text>
@@ -144,6 +160,7 @@
 <script>
 import { callCloud } from '@/utils/cloud.js'
 import { useUserStore } from '@/stores/user.js'
+import { PUBLISH_CATEGORY_OPTIONS } from '@/utils/activityMeta.js'
 
 function buildTimeRange() {
   const dates = []
@@ -187,10 +204,14 @@ export default {
         address: '',
         startTimeStr: '',
         startTimeMs: 0,
+        categoryId: PUBLISH_CATEGORY_OPTIONS[0].id,
+        categoryLabel: PUBLISH_CATEGORY_OPTIONS[0].label,
         maxParticipants: null,
         isGroupFormation: false,
         minParticipants: 2,
       },
+      categoryOptions: PUBLISH_CATEGORY_OPTIONS,
+      categoryIndex: 0,
       timeRangeData: { dates, hours, minutes },
       timeRange: [dates, hours, ['00', '15', '30', '45']],
       timeIndex: [0, defaultHour, 0],
@@ -203,6 +224,10 @@ export default {
   },
 
   computed: {
+    categoryPickerRange() {
+      return this.categoryOptions.map((item) => item.label)
+    },
+
     formationWindowHint() {
       const mins = this.formationWindowValues[this.formationWindowIndex]
       return `发布后${mins}分钟内未成团，会通知你决定是否继续`
@@ -226,6 +251,14 @@ export default {
 
     onFormationWindowChange(e) {
       this.formationWindowIndex = Number(e.detail.value || 0)
+    },
+
+    onCategoryChange(e) {
+      const idx = Number(e.detail.value || 0)
+      this.categoryIndex = idx
+      const selected = this.categoryOptions[idx] || this.categoryOptions[0]
+      this.form.categoryId = selected.id
+      this.form.categoryLabel = selected.label
     },
 
     // 失焦时校验并格式化
@@ -352,6 +385,8 @@ _doChooseLocation() {
         const res = await callCloud('publishActivity', {
           title:            this.form.title.trim(),
           description:      this.form.description.trim(),
+          categoryId:       this.form.categoryId,
+          categoryLabel:    this.form.categoryLabel,
           lat:              this.form.lat,
           lng:              this.form.lng,
           address:          this.form.address,
@@ -370,6 +405,7 @@ _doChooseLocation() {
           const msgs = {
             NOT_VERIFIED:  '请先完成实名认证',
             INVALID_TITLE: '标题格式有误',
+            INVALID_CATEGORY: '请选择有效活动分类',
             START_PASSED:  '开始时间不能早于现在',
             INVALID_MIN:   '成团人数至少2人',
             INVALID_WINDOW:'成团时间窗口不合法',

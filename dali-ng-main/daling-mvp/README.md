@@ -41,7 +41,7 @@
 ## 目录概览
 
 - `pages/`：页面源码
-  - `index` 首页/发现
+  - `index` 首页/发现（关键词/分类/距离筛选）
   - `detail` 活动详情（报名、取消、举报）
   - `publish` 发布活动（地点选择、时间选择、成团开关）
   - `mine` 我的
@@ -69,6 +69,7 @@
   - 可信度相关（预留/可选）：`platformVerified`、`trustVerified`
 - `activities`
   - 基本：`title`、`description`、`publisherId`、`publisherNickname`、`publisherAvatar`
+  - 分类：`categoryId`、`categoryLabel`
   - 时间：`startTime`、`endTime`
   - 人数：`currentParticipants`、`maxParticipants`
   - 状态：`status`（`OPEN`/`FULL`/`ENDED`/`CANCELLED`）
@@ -89,7 +90,7 @@
   - `App.vue` 在 `onLaunch` 中初始化云开发并调用 `login` 云函数
   - 登录成功后将 `openid`、`isVerified` 等写入 `globalData`（建议逐步收敛至 Pinia）
 - 发布活动（`pages/publish`）
-  - 选择地点（微信 `chooseLocation`）→ 选择开始时间与时长 → 提交
+  - 选择分类、地点（微信 `chooseLocation`）→ 选择开始时间与时长 → 提交
   - 通过 `callCloud('publishActivity', ...)`（如有）创建活动
   - 开启成团时，录入 `minParticipants` 与 `formationDeadline`
 - 活动详情（`pages/detail`）

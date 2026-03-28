@@ -16,6 +16,20 @@ const CITY_CONFIG = {
   }
 }
 
+const CATEGORY_MAP = {
+  sport: '运动',
+  music: '音乐',
+  reading: '读书',
+  game: '游戏',
+  social: '社交',
+  outdoor: '户外',
+  other: '其他',
+}
+
+function normalizeKeyword(val) {
+  return String(val || '').trim().toLowerCase()
+}
+
 function getDistance(lat1, lng1, lat2, lng2) {
   const R = 6371000
   const dLat = (lat2 - lat1) * Math.PI / 180
@@ -108,8 +122,17 @@ function buildTrustProfile(activity, user, nowMs) {
 }
 
 exports.main = async (event, context) => {
-  const { lat, lng, radius = CITY_CONFIG.geo.defaultFenceRadius, cityId = CITY_CONFIG.cityId } = event
+  const {
+    lat,
+    lng,
+    radius = CITY_CONFIG.geo.defaultFenceRadius,
+    cityId = CITY_CONFIG.cityId,
+    keyword = '',
+    categoryId = 'all',
+  } = event || {}
   const safeRadius = Number(radius) || CITY_CONFIG.geo.defaultFenceRadius
+  const normalizedKeyword = normalizeKeyword(keyword)
+  const normalizedCategoryId = String(categoryId || 'all')
   const now = new Date()
 
   const latDelta = safeRadius / 111000
@@ -146,6 +169,24 @@ exports.main = async (event, context) => {
         : baseRadius
       return a._distance <= effectiveRadius
     })
+    .filter((a) => {
+      const itemCategoryId = a.categoryId || 'other'
+      if (normalizedCategoryId !== 'all' && itemCategoryId !== normalizedCategoryId) {
+        return false
+      }
+      if (!normalizedKeyword) return true
+      const haystack = [
+        a.title,
+        a.description,
+        a.location?.address,
+        a.publisherNickname,
+        a.categoryLabel,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+      return haystack.includes(normalizedKeyword)
+    })
 
   const publisherIds = [...new Set(mappedList.map((a) => a.publisherId).filter(Boolean))]
   const userMap = {}
@@ -179,6 +220,8 @@ exports.main = async (event, context) => {
       const trustProfile = buildTrustProfile(rest, userMap[rest.publisherId], nowMs)
       return {
         ...rest,
+        categoryId: rest.categoryId || 'other',
+        categoryLabel: rest.categoryLabel || CATEGORY_MAP[rest.categoryId] || '其他',
         trustProfile,
         timeStatus: _statusByTime,
         timeWeight: getTimeWeight(_statusByTime),
@@ -189,6 +232,11 @@ exports.main = async (event, context) => {
     success: true,
     cityId,
     activities,
+    query: {
+      radius: safeRadius,
+      categoryId: normalizedCategoryId,
+      keyword: normalizedKeyword,
+    },
     serverTime: nowMs,
     serverTimestamp: nowMs,
   }
