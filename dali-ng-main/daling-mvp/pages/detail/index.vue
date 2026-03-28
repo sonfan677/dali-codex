@@ -536,7 +536,19 @@ export default {
           uni.showToast({ title: '昵称清单已复制', icon: 'success' })
         })
         .catch((err) => {
+          const errMsg = String(err?.errMsg || err?.message || '')
           console.error('复制失败', err)
+          if (
+            errMsg.includes('api scope is not declared in the privacy agreement') ||
+            errMsg.includes('privacy agreement')
+          ) {
+            uni.showModal({
+              title: '需补充隐私接口声明',
+              content: '当前小程序未声明剪贴板接口（setClipboardData）。请在小程序后台“隐私保护指引”中添加并发布后重试。',
+              showCancel: false,
+            })
+            return
+          }
           uni.showModal({
             title: '复制失败',
             content: '请点击“导出昵称”再试一次；如果仍失败，请把控制台报错截图发我，我来继续排查。',
