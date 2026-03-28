@@ -13,6 +13,10 @@
 	  }
 	},
     {
+      "path": "pages/activity-edit/index",
+      "style": { "navigationBarTitleText": "编辑活动" }
+    },
+    {
       "path": "pages/publish/index",
       "style": { "navigationBarTitleText": "发布活动" }
     },

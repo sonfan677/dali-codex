@@ -194,12 +194,18 @@
       <text class="report-btn" @tap="report">举报</text>
 
       <!-- 我是发布者 -->
-      <button
-        v-if="isPublisher"
-        class="btn btn--cancel"
-        @tap="cancelActivity"
-        :disabled="!canCancel"
-      >取消活动</button>
+      <view v-if="isPublisher" class="publisher-actions">
+        <button
+          class="btn btn--edit"
+          @tap="goEdit"
+          :disabled="!canEdit"
+        >编辑活动</button>
+        <button
+          class="btn btn--cancel"
+          @tap="cancelActivity"
+          :disabled="!canCancel"
+        >取消活动</button>
+      </view>
 
       <!-- 已报名且可取消 -->
       <button
@@ -267,6 +273,12 @@ export default {
     this.loadDetail()
   },
 
+  onShow() {
+    if (this.activityId && this.activity) {
+      this.loadDetail()
+    }
+  },
+
   onShareAppMessage() {
     return this.buildSharePayload()
   },
@@ -298,6 +310,12 @@ export default {
     canCancel() {
       if (!this.activity) return false
       return !['ENDED', 'CANCELLED'].includes(this.activity.status)
+    },
+
+    canEdit() {
+      if (!this.canCancel) return false
+      const startedSet = new Set(['ongoing', 'ending_soon', 'ended'])
+      return !startedSet.has(this.timeStatus.status)
     },
 
     canQuitJoin() {
@@ -697,6 +715,18 @@ export default {
       })
     },
 
+    goEdit() {
+      if (!this.isPublisher) {
+        uni.showToast({ title: '仅发布者可编辑', icon: 'none' })
+        return
+      }
+      if (!this.canEdit) {
+        uni.showToast({ title: '当前活动不可编辑', icon: 'none' })
+        return
+      }
+      uni.navigateTo({ url: `/pages/activity-edit/index?id=${this.activityId}` })
+    },
+
     async cancelActivity() {
       const count = this.activity?.currentParticipants || 0
       uni.showModal({
@@ -1073,11 +1103,19 @@ export default {
 .share-btn::after { border: none; }
 .report-btn { font-size: 26rpx; color: #999; padding: 0 16rpx; flex-shrink: 0; }
 
+.publisher-actions {
+  flex: 1;
+  display: flex;
+  gap: 12rpx;
+}
+
 .btn {
   flex: 1; height: 88rpx; border-radius: 16rpx;
   font-size: 30rpx; font-weight: bold; border: none;
 }
+.btn::after { border: none; }
 .btn--join     { background: #1A3C5E; color: white; }
+.btn--edit     { background: #EEF4FB; color: #1A3C5E; border: 2rpx solid #9AB6D4; }
 .btn--quit     { background: #FFF5F5; color: #C00000; border: 2rpx solid #E8A7A7; }
 .btn--joined   { background: #f0f0f0; color: #999; }
 .btn--cancel   { background: white; color: #C00000; border: 2rpx solid #C00000; }
