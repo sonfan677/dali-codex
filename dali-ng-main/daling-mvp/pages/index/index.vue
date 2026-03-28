@@ -3,8 +3,16 @@
 
     <!-- 顶部：位置授权失败时的提示条 -->
     <view v-if="locationStore.hasPermission === false" class="tip-bar">
-      <text class="tip-text">📍 未获取位置，以下为示例活动</text>
+      <text class="tip-text">{{ topTipText }}</text>
       <text class="tip-btn" @tap="requestLocation">授权位置</text>
+    </view>
+
+    <!-- 数据来源小角标 -->
+    <view class="data-badge-wrap">
+      <view class="data-badge" :class="`data-badge--${dataSourceBadge.type}`">
+        <text class="data-badge-title">{{ dataSourceBadge.title }}</text>
+        <text class="data-badge-desc">{{ dataSourceBadge.desc }}</text>
+      </view>
     </view>
 
     <!-- 活动列表 -->
@@ -125,6 +133,7 @@ export default {
       activities: [],
       loading: false,
       serverTime: Date.now(),
+      lastQueryMode: 'default', // nearby: 当前位置5km, default: 默认坐标50km
     }
   },
 
@@ -135,6 +144,37 @@ export default {
         return this.activities
       }
       return MOCK_ACTIVITIES
+    },
+
+    dataSourceBadge() {
+      if (this.activities.length === 0) {
+        return {
+          type: 'mock',
+          title: '示例数据',
+          desc: '当前展示内置示例活动',
+        }
+      }
+
+      if (this.lastQueryMode === 'nearby') {
+        return {
+          type: 'real',
+          title: '真实数据',
+          desc: '当前位置 5km',
+        }
+      }
+
+      return {
+        type: 'real-default',
+        title: '真实数据',
+        desc: '默认坐标 50km',
+      }
+    },
+
+    topTipText() {
+      if (this.activities.length > 0) {
+        return '📍 未获取位置，已按默认坐标展示活动'
+      }
+      return '📍 未获取位置，以下为示例活动'
     }
   },
   onLoad() {
@@ -208,15 +248,14 @@ export default {
 	  const defaultLng = 100.2679
 	  try {
 	    this.loading = true
+      this.lastQueryMode = 'default'
 	    const res = await callCloud('getActivityList', {
 	      lat: defaultLat,
 	      lng: defaultLng,
 	      radius: 50000, // 50公里（云函数单位为米）
 	    })
-	    if (res && res.activities && res.activities.length > 0) {
-	      this.activities = res.activities
-	      this.serverTime = res.serverTime || Date.now()
-	    }
+      this.activities = Array.isArray(res?.activities) ? res.activities : []
+      this.serverTime = res?.serverTime || Date.now()
 	  } catch(e) {
 	    console.error('加载活动失败', e)
 	  } finally {
@@ -229,6 +268,7 @@ export default {
       if (!this.locationStore.lat || !this.locationStore.lng) return
       this.loading = true
       try {
+        this.lastQueryMode = 'nearby'
         const res = await callCloud('getActivityList', {
           lat: this.locationStore.lat,
           lng: this.locationStore.lng,
@@ -271,6 +311,59 @@ export default {
 }
 .tip-text { font-size: 26rpx; color: #856404; }
 .tip-btn  { font-size: 26rpx; color: #2E75B6; font-weight: bold; padding: 8rpx 20rpx; }
+
+.data-badge-wrap {
+  display: flex;
+  justify-content: flex-end;
+  padding: 16rpx 16rpx 0;
+}
+
+.data-badge {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4rpx;
+  padding: 10rpx 14rpx;
+  border-radius: 14rpx;
+}
+
+.data-badge-title {
+  font-size: 22rpx;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.data-badge-desc {
+  font-size: 20rpx;
+  line-height: 1.2;
+}
+
+.data-badge--mock {
+  background: #fff4e5;
+}
+
+.data-badge--mock .data-badge-title,
+.data-badge--mock .data-badge-desc {
+  color: #a15a00;
+}
+
+.data-badge--real {
+  background: #e8f8ef;
+}
+
+.data-badge--real .data-badge-title,
+.data-badge--real .data-badge-desc {
+  color: #1f7a45;
+}
+
+.data-badge--real-default {
+  background: #edf4ff;
+}
+
+.data-badge--real-default .data-badge-title,
+.data-badge--real-default .data-badge-desc {
+  color: #295fa6;
+}
 
 .list { height: calc(100vh - 0rpx); padding: 16rpx; box-sizing: border-box; }
 
