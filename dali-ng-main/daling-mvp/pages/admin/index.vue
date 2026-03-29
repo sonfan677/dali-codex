@@ -348,6 +348,15 @@
 
       <!-- 操作记录 -->
       <template v-else>
+        <view class="export-toolbar">
+          <button
+            class="action-btn action-btn--export"
+            :loading="csvExporting"
+            @tap="exportStatsCsv"
+          >导出统计报表 CSV</button>
+          <text class="export-tip">导出总览统计 + 操作记录明细（当前筛选）</text>
+        </view>
+
         <view v-if="logViewMode === 'flat' && filteredActionLogList.length > 0" class="logs-overview">
           <view class="logs-overview-card">
             <text class="logs-overview-value">{{ logOverview.total }}</text>
@@ -481,6 +490,7 @@ export default {
       lastHandledReportId: '',
       lastHandledReportStatus: '',
       reportHighlightTimer: null,
+      csvExporting: false,
       loading: false,
       hasAccess: true,
       currentAdminOpenid: '',
@@ -1217,6 +1227,226 @@ export default {
       const m = d.getMinutes().toString().padStart(2, '0')
       return `${mo}/${day} ${h}:${m}`
     },
+
+    formatDateToken(d = new Date()) {
+      const y = d.getFullYear()
+      const mo = (d.getMonth() + 1).toString().padStart(2, '0')
+      const day = d.getDate().toString().padStart(2, '0')
+      const h = d.getHours().toString().padStart(2, '0')
+      const m = d.getMinutes().toString().padStart(2, '0')
+      const s = d.getSeconds().toString().padStart(2, '0')
+      return `${y}${mo}${day}_${h}${m}${s}`
+    },
+
+    formatExportTime(d = new Date()) {
+      const y = d.getFullYear()
+      const mo = (d.getMonth() + 1).toString().padStart(2, '0')
+      const day = d.getDate().toString().padStart(2, '0')
+      const h = d.getHours().toString().padStart(2, '0')
+      const m = d.getMinutes().toString().padStart(2, '0')
+      const s = d.getSeconds().toString().padStart(2, '0')
+      return `${y}-${mo}-${day} ${h}:${m}:${s}`
+    },
+
+    escapeCsvCell(value) {
+      const text = value === null || value === undefined ? '' : String(value)
+      if (/[",\n]/.test(text)) {
+        return `"${text.replace(/"/g, '""')}"`
+      }
+      return text
+    },
+
+    buildCsvLine(values = []) {
+      return values.map((item) => this.escapeCsvCell(item)).join(',')
+    },
+
+    buildStatsCsv() {
+      const lines = []
+      const append = (values = []) => lines.push(this.buildCsvLine(values))
+
+      const now = new Date()
+      const statusCounter = { OPEN: 0, FULL: 0, ENDED: 0, CANCELLED: 0 }
+      this.activityList.forEach((item) => {
+        const s = item.status || 'OPEN'
+        statusCounter[s] = (statusCounter[s] || 0) + 1
+      })
+
+      const reportCounter = { PENDING: 0, HANDLED: 0, IGNORED: 0 }
+      this.reportList.forEach((item) => {
+        const s = item.reportStatus || 'PENDING'
+        reportCounter[s] = (reportCounter[s] || 0) + 1
+      })
+
+      const actionCounter = {}
+      this.actionLogList.forEach((item) => {
+        const k = item.action || 'unknown'
+        actionCounter[k] = (actionCounter[k] || 0) + 1
+      })
+      const sortedActionRows = Object.keys(actionCounter)
+        .sort((a, b) => actionCounter[b] - actionCounter[a])
+        .map((action) => [this.actionText(action), action, actionCounter[action]])
+
+      const topReportedActivities = [...this.activityList]
+        .map((item) => ({
+          activityId: item._id || '',
+          title: item.title || '',
+          status: item.status || '',
+          reportTotal: Number(item.reportMeta?.total || 0),
+          reportPending: Number(item.reportMeta?.pending || 0),
+          publisherNickname: item.publisherNickname || '',
+        }))
+        .filter((item) => item.reportTotal > 0)
+        .sort((a, b) => b.reportTotal - a.reportTotal)
+        .slice(0, 20)
+
+      append(['搭里管理统计报表（CSV）'])
+      append(['导出时间', this.formatExportTime(now)])
+      append(['导出角色', this.adminRoleLabel])
+      append(['城市范围', this.cityIdLabel])
+      append(['当前页面', this.activeTab])
+      append(['筛选上下文', `filter=${this.activeFilter}; keyword=${this.searchKeyword || '-'}; logTime=${this.logTimeRange}; logView=${this.logViewMode}; logSort=${this.logSort}; operator=${this.logOperator}; role=${this.logRole}`])
+      append([])
+
+      append(['一、总览指标'])
+      append(['指标', '数值'])
+      append(['待审认证', this.pendingVerifyList.length])
+      append(['待处理举报', reportCounter.PENDING || 0])
+      append(['活跃活动(OPEN+FULL)', this.activeActivityCount])
+      append(['活动总量', this.activityList.length])
+      append(['举报记录总量', this.reportList.length])
+      append(['操作记录总量', this.actionLogList.length])
+      append(['当前筛选操作记录', this.filteredActionLogList.length])
+      append([])
+
+      append(['二、活动状态统计'])
+      append(['状态', '数量'])
+      append(['OPEN(招募中)', statusCounter.OPEN || 0])
+      append(['FULL(已满员)', statusCounter.FULL || 0])
+      append(['ENDED(已结束)', statusCounter.ENDED || 0])
+      append(['CANCELLED(已取消)', statusCounter.CANCELLED || 0])
+      append(['官方推荐活动数', this.activityList.filter((item) => !!item.isRecommended).length])
+      append([])
+
+      append(['三、举报处理统计'])
+      append(['状态', '数量'])
+      append(['PENDING(待处理)', reportCounter.PENDING || 0])
+      append(['HANDLED(已处理)', reportCounter.HANDLED || 0])
+      append(['IGNORED(已忽略)', reportCounter.IGNORED || 0])
+      append([])
+
+      append(['四、操作类型统计'])
+      append(['动作中文', '动作编码', '次数'])
+      sortedActionRows.forEach((row) => append(row))
+      append([])
+
+      append(['五、被举报活动 Top20'])
+      append(['活动ID', '活动标题', '状态', '累计举报', '待处理举报', '发布者'])
+      if (topReportedActivities.length === 0) {
+        append(['-', '暂无', '-', 0, 0, '-'])
+      } else {
+        topReportedActivities.forEach((row) => {
+          append([row.activityId, row.title, row.status, row.reportTotal, row.reportPending, row.publisherNickname])
+        })
+      }
+      append([])
+
+      append(['六、当前筛选下的操作记录明细'])
+      append(['时间', '动作中文', '动作编码', '结果', '对象类型', '对象ID', '关联活动ID', '操作者角色', '操作者OPENID', '原因'])
+      if (this.filteredActionLogList.length === 0) {
+        append(['-', '-', '-', '-', '-', '-', '-', '-', '-', '-'])
+      } else {
+        this.filteredActionLogList.forEach((item) => {
+          append([
+            this.formatExportTime(new Date(item.createdAt || Date.now())),
+            this.actionText(item.action),
+            item.action || '',
+            item.result || '',
+            item.targetType || '',
+            item.targetId || '',
+            item.linkedActivityId || '',
+            item.adminRole || '',
+            item.adminOpenid || '',
+            item.reason || '',
+          ])
+        })
+      }
+
+      return lines.join('\n')
+    },
+
+    async saveCsvToClipboard(csvText) {
+      return new Promise((resolve, reject) => {
+        uni.setClipboardData({
+          data: csvText,
+          success: resolve,
+          fail: reject,
+        })
+      })
+    },
+
+    async saveCsvToFile(csvText, fileName) {
+      return new Promise((resolve, reject) => {
+        if (typeof wx === 'undefined' || !wx.getFileSystemManager || !wx.env?.USER_DATA_PATH) {
+          reject(new Error('CURRENT_ENV_NOT_SUPPORT_FILE'))
+          return
+        }
+        const fs = wx.getFileSystemManager()
+        const filePath = `${wx.env.USER_DATA_PATH}/${fileName}`
+        fs.writeFile({
+          filePath,
+          data: `\uFEFF${csvText}`,
+          encoding: 'utf8',
+          success: () => resolve(filePath),
+          fail: (err) => reject(err),
+        })
+      })
+    },
+
+    async openCsvFile(filePath) {
+      return new Promise((resolve, reject) => {
+        if (typeof wx === 'undefined' || !wx.openDocument) {
+          reject(new Error('OPEN_DOCUMENT_NOT_SUPPORT'))
+          return
+        }
+        wx.openDocument({
+          filePath,
+          fileType: 'csv',
+          showMenu: true,
+          success: resolve,
+          fail: reject,
+        })
+      })
+    },
+
+    async exportStatsCsv() {
+      if (this.csvExporting) return
+      this.csvExporting = true
+      try {
+        const csvText = this.buildStatsCsv()
+        const fileName = `dali_admin_report_${this.formatDateToken(new Date())}.csv`
+
+        try {
+          const filePath = await this.saveCsvToFile(csvText, fileName)
+          await this.openCsvFile(filePath)
+          uni.showToast({ title: 'CSV已生成', icon: 'success' })
+          return
+        } catch (fileErr) {
+          console.warn('保存CSV文件失败，回退剪贴板', fileErr)
+        }
+
+        await this.saveCsvToClipboard(csvText)
+        uni.showModal({
+          title: '已复制CSV内容',
+          content: '当前环境不支持直接打开文件，已复制到剪贴板，可粘贴到表格工具保存为 .csv',
+          showCancel: false,
+        })
+      } catch (e) {
+        console.error('导出CSV失败', e)
+        uni.showToast({ title: '导出失败，请重试', icon: 'none' })
+      } finally {
+        this.csvExporting = false
+      }
+    },
   }
 }
 </script>
@@ -1321,6 +1551,16 @@ export default {
   grid-template-columns: repeat(3, 1fr);
   gap: 12rpx;
   margin: 0 0 14rpx;
+}
+.export-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 10rpx;
+  margin: 0 0 14rpx;
+}
+.export-tip {
+  font-size: 22rpx;
+  color: #667085;
 }
 .logs-overview-card {
   background: #ffffff;
@@ -1490,5 +1730,6 @@ export default {
 .action-btn--recommend  { background: #EEF4FB; color: #1A3C5E; }
 .action-btn--unrecommend{ background: #f5f5f5; color: #888; }
 .action-btn--detail     { background: #F6F8FA; color: #344054; }
+.action-btn--export     { background: #1A3C5E; color: #fff; }
 .action-btn::after { border: none; }
 </style>
