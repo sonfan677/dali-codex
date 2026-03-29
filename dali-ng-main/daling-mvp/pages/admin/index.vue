@@ -137,6 +137,40 @@
         </view>
       </scroll-view>
 
+      <scroll-view
+        v-if="activeTab === 'logs'"
+        scroll-x
+        class="chip-scroll chip-scroll--sort"
+        show-scrollbar="false"
+      >
+        <view class="chip-row">
+          <view
+            v-for="item in logOperatorOptions"
+            :key="item.value"
+            class="chip chip--sort"
+            :class="{ 'chip--active': item.value === logOperator }"
+            @tap="logOperator = item.value"
+          >{{ item.label }}</view>
+        </view>
+      </scroll-view>
+
+      <scroll-view
+        v-if="activeTab === 'logs'"
+        scroll-x
+        class="chip-scroll chip-scroll--sort"
+        show-scrollbar="false"
+      >
+        <view class="chip-row">
+          <view
+            v-for="item in logRoleOptions"
+            :key="item.value"
+            class="chip chip--sort"
+            :class="{ 'chip--active': item.value === logRole }"
+            @tap="logRole = item.value"
+          >{{ item.label }}</view>
+        </view>
+      </scroll-view>
+
       <!-- 待审核认证 -->
       <template v-if="activeTab === 'verify'">
         <view v-if="filteredPendingVerifyList.length === 0" class="empty">
@@ -297,6 +331,21 @@
 
       <!-- 操作记录 -->
       <template v-else>
+        <view v-if="filteredActionLogList.length > 0" class="logs-overview">
+          <view class="logs-overview-card">
+            <text class="logs-overview-value">{{ logOverview.total }}</text>
+            <text class="logs-overview-label">筛选后总数</text>
+          </view>
+          <view class="logs-overview-card">
+            <text class="logs-overview-value">{{ logOverview.highRisk }}</text>
+            <text class="logs-overview-label">高风险操作</text>
+          </view>
+          <view class="logs-overview-card">
+            <text class="logs-overview-value">{{ logOverview.reportRelated }}</text>
+            <text class="logs-overview-label">举报处理相关</text>
+          </view>
+        </view>
+
         <view v-if="filteredActionLogList.length === 0" class="empty">
           <text class="empty-text">暂无操作记录</text>
         </view>
@@ -310,7 +359,10 @@
               <text class="card-title">{{ actionText(item.action) }}</text>
               <text class="status-pill status-pill--log">{{ targetTypeText(item.targetType) }}</text>
             </view>
-            <text class="card-sub">结果：{{ item.result || '已执行' }}</text>
+            <view class="result-row">
+              <text class="card-sub">结果：</text>
+              <text class="status-pill" :class="resultToneClass(item.action)">{{ item.result || '已执行' }}</text>
+            </view>
             <text class="card-sub">原因：{{ item.reason || '--' }}</text>
             <text class="card-openid">对象ID: {{ item.targetId ? item.targetId.slice(0,12) + '...' : '--' }}</text>
             <text v-if="item.linkedActivityId" class="card-openid">
@@ -347,6 +399,8 @@ export default {
       reportSort: 'created_desc',
       logTimeRange: 'all',
       logSort: 'created_desc',
+      logOperator: 'all',
+      logRole: 'all',
       reportHandlingId: '',
       reportHandlingAction: '',
       lastHandledReportId: '',
@@ -354,6 +408,7 @@ export default {
       reportHighlightTimer: null,
       loading: false,
       hasAccess: true,
+      currentAdminOpenid: '',
       adminRole: '',
       cityId: '',
       pendingVerifyList: [],
@@ -448,6 +503,51 @@ export default {
       ]
     },
 
+    logOperatorOptions() {
+      const total = this.actionLogList.length
+      const meCount = this.currentAdminOpenid
+        ? this.actionLogList.filter((item) => item.adminOpenid === this.currentAdminOpenid).length
+        : 0
+      const otherCount = Math.max(total - meCount, 0)
+
+      const options = [{ label: `操作者：全部(${total})`, value: 'all' }]
+      if (this.currentAdminOpenid) {
+        options.push({ label: `操作者：我自己(${meCount})`, value: 'me' })
+        if (otherCount > 0) {
+          options.push({ label: `操作者：其他(${otherCount})`, value: 'others' })
+        }
+      }
+      return options
+    },
+
+    logRoleOptions() {
+      const roleCountMap = this.actionLogList.reduce((acc, item) => {
+        const role = item.adminRole || 'superAdmin'
+        acc[role] = (acc[role] || 0) + 1
+        return acc
+      }, {})
+
+      const options = [{ label: `角色：全部(${this.actionLogList.length})`, value: 'all' }]
+      if (roleCountMap.superAdmin) {
+        options.push({ label: `角色：超管(${roleCountMap.superAdmin})`, value: 'superAdmin' })
+      }
+      if (roleCountMap.cityAdmin) {
+        options.push({ label: `角色：城市管理员(${roleCountMap.cityAdmin})`, value: 'cityAdmin' })
+      }
+      return options
+    },
+
+    logOverview() {
+      const list = this.filteredActionLogList
+      const highRiskActions = ['hide', 'ban', 'resolve_report_hide', 'reject_verify']
+      const reportRelatedActions = ['resolve_report_hide', 'resolve_report_ignore']
+      return {
+        total: list.length,
+        highRisk: list.filter((item) => highRiskActions.includes(item.action)).length,
+        reportRelated: list.filter((item) => reportRelatedActions.includes(item.action)).length,
+      }
+    },
+
     filteredPendingVerifyList() {
       const keyword = this.normalizeKeyword(this.searchKeyword)
       if (!keyword) return this.pendingVerifyList
@@ -518,6 +618,11 @@ export default {
       const filtered = this.actionLogList.filter((item) => {
         const targetMatch = this.activeFilter === 'all' || item.action === this.activeFilter
         const timeMatch = this.isLogInTimeRange(item.createdAt)
+        const role = item.adminRole || 'superAdmin'
+        const roleMatch = this.logRole === 'all' || role === this.logRole
+        const operatorMatch = this.logOperator === 'all'
+          || (this.logOperator === 'me' && item.adminOpenid === this.currentAdminOpenid)
+          || (this.logOperator === 'others' && item.adminOpenid !== this.currentAdminOpenid)
         const keywordMatch = !keyword || this.matchAny(keyword, [
           item.reason,
           item.result,
@@ -527,7 +632,7 @@ export default {
           item.adminOpenid,
           item.adminRole,
         ])
-        return targetMatch && timeMatch && keywordMatch
+        return targetMatch && timeMatch && roleMatch && operatorMatch && keywordMatch
       })
 
       const toTs = (t) => {
@@ -557,6 +662,8 @@ export default {
       this.reportSort = 'created_desc'
       this.logTimeRange = 'all'
       this.logSort = 'created_desc'
+      this.logOperator = 'all'
+      this.logRole = 'all'
     },
   },
 
@@ -582,6 +689,7 @@ export default {
           throw new Error(res?.message || '加载失败')
         }
         this.hasAccess = true
+        this.currentAdminOpenid = res.currentOpenid || ''
         this.adminRole = res.adminRole || 'superAdmin'
         this.cityId = res.cityId || 'dali'
         this.pendingVerifyList = res.pendingVerifyList || []
@@ -863,6 +971,20 @@ export default {
       return map[type] || '记录'
     },
 
+    resultToneClass(action) {
+      const map = {
+        recommend: 'status-pill--result-positive',
+        verify: 'status-pill--result-positive',
+        unrecommend: 'status-pill--result-neutral',
+        resolve_report_ignore: 'status-pill--result-neutral',
+        hide: 'status-pill--result-risk',
+        ban: 'status-pill--result-risk',
+        reject_verify: 'status-pill--result-risk',
+        resolve_report_hide: 'status-pill--result-risk',
+      }
+      return map[action] || 'status-pill--result-default'
+    },
+
     isLogInTimeRange(createdAt) {
       if (this.activeTab !== 'logs') return true
       if (this.logTimeRange === 'all') return true
@@ -1005,6 +1127,31 @@ export default {
 }
 .empty-text { font-size: 28rpx; color: #999; }
 
+.logs-overview {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12rpx;
+  margin: 0 0 14rpx;
+}
+.logs-overview-card {
+  background: #ffffff;
+  border-radius: 12rpx;
+  padding: 14rpx 16rpx;
+}
+.logs-overview-value {
+  display: block;
+  font-size: 32rpx;
+  line-height: 1.2;
+  font-weight: 700;
+  color: #1A3C5E;
+}
+.logs-overview-label {
+  display: block;
+  margin-top: 8rpx;
+  font-size: 20rpx;
+  color: #667085;
+}
+
 .card {
   background: white; border-radius: 12rpx;
   padding: 24rpx 28rpx; margin-bottom: 16rpx;
@@ -1095,6 +1242,16 @@ export default {
 .status-pill--ended { background: #f1f3f5; color: #666; }
 .status-pill--cancelled { background: #FFF0F0; color: #C00000; }
 .status-pill--log { background: #EEF4FB; color: #1A3C5E; }
+.status-pill--result-default { background: #EEF4FB; color: #1A3C5E; }
+.status-pill--result-positive { background: #EEF7EE; color: #1E7145; }
+.status-pill--result-neutral { background: #f1f3f5; color: #667085; }
+.status-pill--result-risk { background: #FFF0F0; color: #C00000; }
+
+.result-row {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+}
 
 .card-actions { display: flex; gap: 16rpx; }
 .card-actions--single { margin-top: 16rpx; }

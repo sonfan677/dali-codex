@@ -265,6 +265,7 @@ exports.main = async () => {
 
   return {
     success: true,
+    currentOpenid: OPENID,
     adminRole: meta.adminRole,
     cityId: meta.cityId,
     pendingVerifyList: pendingUsersRes.data || [],
