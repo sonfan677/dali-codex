@@ -225,7 +225,7 @@ export default {
         return {
           type: 'real',
           title: '真实数据',
-          desc: '当前位置 5km',
+          desc: `当前位置 ${this.currentDistanceLabel}`,
         }
       }
 
@@ -240,7 +240,7 @@ export default {
       return {
         type: 'real-default',
         title: '真实数据',
-        desc: '默认坐标 50km',
+        desc: `默认坐标 ${this.currentDistanceLabel}`,
       }
     },
 
