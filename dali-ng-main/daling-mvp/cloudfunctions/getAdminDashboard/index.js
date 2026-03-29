@@ -36,6 +36,34 @@ function parseAdminMeta(openid) {
   }
 }
 
+async function fetchActivitiesByIds(ids = []) {
+  const uniqueIds = [...new Set(ids.filter(Boolean))]
+  if (!uniqueIds.length) return []
+
+  const results = []
+  const chunkSize = 20
+  for (let i = 0; i < uniqueIds.length; i += chunkSize) {
+    const chunk = uniqueIds.slice(i, i + chunkSize)
+    const { data } = await db.collection('activities')
+      .where({ _id: _.in(chunk) })
+      .field({
+        _id: true,
+        cityId: true,
+        title: true,
+        publisherNickname: true,
+        currentParticipants: true,
+        status: true,
+        isRecommended: true,
+        location: true,
+        createdAt: true,
+        updatedAt: true,
+      })
+      .get()
+    results.push(...(data || []))
+  }
+  return results
+}
+
 exports.main = async () => {
   const { OPENID } = cloud.getWXContext()
   const meta = parseAdminMeta(OPENID)
@@ -115,18 +143,37 @@ exports.main = async () => {
   ])
 
   const shouldFilterCity = meta.adminRole === 'cityAdmin'
-  const reportList = (shouldFilterCity
-    ? (reportsRes.data || []).filter((item) => !item.cityId || item.cityId === meta.cityId)
-    : (reportsRes.data || []))
-    .map((item) => ({
-      ...item,
-      reportStatus: item.reportStatus || 'PENDING',
-    }))
-    .slice(0, 60)
-
   const activityList = shouldFilterCity
     ? (activitiesRes.data || []).filter((item) => !item.cityId || item.cityId === meta.cityId).slice(0, 120)
     : (activitiesRes.data || []).slice(0, 120)
+
+  const rawReports = shouldFilterCity
+    ? (reportsRes.data || []).filter((item) => !item.cityId || item.cityId === meta.cityId)
+    : (reportsRes.data || [])
+
+  const activityMap = activityList.reduce((acc, item) => {
+    acc[item._id] = item
+    return acc
+  }, {})
+
+  const missingReportTargetIds = rawReports
+    .map((item) => item.targetId)
+    .filter((id) => id && !activityMap[id])
+
+  if (missingReportTargetIds.length) {
+    const extraActivities = await fetchActivitiesByIds(missingReportTargetIds)
+    extraActivities.forEach((item) => {
+      activityMap[item._id] = item
+    })
+  }
+
+  const reportList = rawReports
+    .map((item) => ({
+      ...item,
+      reportStatus: item.reportStatus || 'PENDING',
+      targetActivity: activityMap[item.targetId] || null,
+    }))
+    .slice(0, 60)
 
   const actionLogList = (shouldFilterCity
     ? (actionLogsRes.data || []).filter((item) => !item.cityId || item.cityId === meta.cityId)

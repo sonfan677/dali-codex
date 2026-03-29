@@ -139,9 +139,28 @@
               <text class="card-openid">提交时间：{{ formatTime(item.createdAt) }}</text>
             </view>
           </view>
+          <view v-if="item.targetActivity" class="activity-preview">
+            <view class="title-row">
+              <text class="preview-title">{{ item.targetActivity.title || '未命名活动' }}</text>
+              <text class="status-pill" :class="activityStatusClass(item.targetActivity.status)">{{ statusText(item.targetActivity.status) }}</text>
+            </view>
+            <text v-if="item.targetActivity.location && item.targetActivity.location.address" class="preview-sub">
+              地点：{{ item.targetActivity.location.address }}
+            </text>
+            <text class="preview-sub">
+              参与人数：{{ item.targetActivity.currentParticipants || 0 }}{{ item.targetActivity.isRecommended ? ' · 官方推荐' : '' }}
+            </text>
+          </view>
+          <view v-else class="activity-preview activity-preview--missing">
+            <text class="preview-sub">关联活动不存在或已超出当前查询范围</text>
+          </view>
           <view v-if="item.reportStatus === 'PENDING'" class="card-actions">
+            <button class="action-btn action-btn--detail" @tap="goActivityDetail(item.targetId)">查看详情</button>
             <button class="action-btn action-btn--approve" @tap="handleReport(item)">下架并处理</button>
             <button class="action-btn action-btn--reject"  @tap="ignoreReport(item)">忽略并处理</button>
+          </view>
+          <view v-else class="card-actions">
+            <button class="action-btn action-btn--detail" @tap="goActivityDetail(item.targetId)">查看详情</button>
           </view>
         </view>
       </template>
@@ -169,6 +188,10 @@
             </view>
           </view>
           <view class="card-actions">
+            <button
+              class="action-btn action-btn--detail"
+              @tap="goActivityDetail(item._id)"
+            >查看详情</button>
             <button
               v-if="!item.isRecommended"
               class="action-btn action-btn--recommend"
@@ -312,6 +335,8 @@ export default {
           item.reporterOpenid,
           item.targetId,
           item.handleNote,
+          item.targetActivity?.title,
+          item.targetActivity?.location?.address,
         ])
         return statusMatch && keywordMatch
       })
@@ -546,6 +571,16 @@ export default {
       })
     },
 
+    goActivityDetail(activityId) {
+      if (!activityId) {
+        uni.showToast({ title: '缺少活动ID', icon: 'none' })
+        return
+      }
+      uni.navigateTo({
+        url: `/pages/detail/index?id=${activityId}`,
+      })
+    },
+
     statusText(status) {
       const map = { OPEN: '招募中', FULL: '已满员', ENDED: '已结束', CANCELLED: '已取消' }
       return map[status] || status
@@ -741,6 +776,29 @@ export default {
 .card-title { font-size: 28rpx; font-weight: bold; color: #1a1a1a; }
 .card-sub   { font-size: 24rpx; color: #666; }
 .card-openid{ font-size: 22rpx; color: #bbb; }
+.activity-preview {
+  margin: 0 0 18rpx;
+  padding: 18rpx 20rpx;
+  border-radius: 12rpx;
+  background: #F8FBFF;
+  border: 1rpx solid #E1ECF7;
+}
+.activity-preview--missing {
+  background: #f6f7f8;
+  border-color: #eceff1;
+}
+.preview-title {
+  font-size: 26rpx;
+  font-weight: 600;
+  color: #1a1a1a;
+  flex: 1;
+}
+.preview-sub {
+  display: block;
+  margin-top: 8rpx;
+  font-size: 23rpx;
+  color: #667085;
+}
 .title-row {
   display: flex;
   align-items: center;
@@ -772,5 +830,6 @@ export default {
 .action-btn--reject     { background: #FFF0F0; color: #C00000; }
 .action-btn--recommend  { background: #EEF4FB; color: #1A3C5E; }
 .action-btn--unrecommend{ background: #f5f5f5; color: #888; }
+.action-btn--detail     { background: #F6F8FA; color: #344054; }
 .action-btn::after { border: none; }
 </style>
