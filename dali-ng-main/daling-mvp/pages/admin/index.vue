@@ -103,6 +103,40 @@
         </view>
       </scroll-view>
 
+      <scroll-view
+        v-if="activeTab === 'logs'"
+        scroll-x
+        class="chip-scroll chip-scroll--sort"
+        show-scrollbar="false"
+      >
+        <view class="chip-row">
+          <view
+            v-for="item in logTimeOptions"
+            :key="item.value"
+            class="chip chip--sort"
+            :class="{ 'chip--active': item.value === logTimeRange }"
+            @tap="logTimeRange = item.value"
+          >{{ item.label }}</view>
+        </view>
+      </scroll-view>
+
+      <scroll-view
+        v-if="activeTab === 'logs'"
+        scroll-x
+        class="chip-scroll chip-scroll--sort"
+        show-scrollbar="false"
+      >
+        <view class="chip-row">
+          <view
+            v-for="item in logSortOptions"
+            :key="item.value"
+            class="chip chip--sort"
+            :class="{ 'chip--active': item.value === logSort }"
+            @tap="logSort = item.value"
+          >{{ item.label }}</view>
+        </view>
+      </scroll-view>
+
       <!-- 待审核认证 -->
       <template v-if="activeTab === 'verify'">
         <view v-if="filteredPendingVerifyList.length === 0" class="empty">
@@ -279,8 +313,20 @@
             <text class="card-sub">结果：{{ item.result || '已执行' }}</text>
             <text class="card-sub">原因：{{ item.reason || '--' }}</text>
             <text class="card-openid">对象ID: {{ item.targetId ? item.targetId.slice(0,12) + '...' : '--' }}</text>
+            <text v-if="item.linkedActivityId" class="card-openid">
+              关联活动ID: {{ item.linkedActivityId.slice(0,12) + '...' }}
+            </text>
+            <text v-if="item.linkedActivity && item.linkedActivity.title" class="card-sub">
+              关联活动：{{ item.linkedActivity.title }}
+            </text>
             <text class="card-openid">操作者: {{ item.adminRole || 'admin' }} · {{ shortOpenid(item.adminOpenid) }}</text>
             <text class="card-openid">时间：{{ formatTime(item.createdAt) }}</text>
+          </view>
+          <view v-if="item.linkedActivityId" class="card-actions card-actions--single">
+            <button
+              class="action-btn action-btn--detail"
+              @tap="goActivityDetail(item.linkedActivityId)"
+            >查看关联活动</button>
           </view>
         </view>
       </template>
@@ -299,6 +345,8 @@ export default {
       activeFilter: 'all',
       searchKeyword: '',
       reportSort: 'created_desc',
+      logTimeRange: 'all',
+      logSort: 'created_desc',
       reportHandlingId: '',
       reportHandlingAction: '',
       lastHandledReportId: '',
@@ -337,7 +385,7 @@ export default {
         verify: '搜索昵称 / openid',
         reports: '搜索举报原因 / 举报人 / 活动ID',
         activities: '搜索标题 / 地址 / 发布者 / 活动ID',
-        logs: '搜索原因 / 对象ID / 管理员',
+        logs: '搜索原因 / 对象ID / 关联活动ID / 管理员',
       }
       return map[this.activeTab] || '搜索'
     },
@@ -382,6 +430,21 @@ export default {
         { label: '按提交时间(新->旧)', value: 'created_desc' },
         { label: '按提交时间(旧->新)', value: 'created_asc' },
         { label: '按处理时间(新->旧)', value: 'handled_desc' },
+      ]
+    },
+
+    logTimeOptions() {
+      return [
+        { label: '时间：全部', value: 'all' },
+        { label: '时间：今日', value: 'today' },
+        { label: '时间：近7天', value: 'last7' },
+      ]
+    },
+
+    logSortOptions() {
+      return [
+        { label: '排序：新->旧', value: 'created_desc' },
+        { label: '排序：旧->新', value: 'created_asc' },
       ]
     },
 
@@ -452,17 +515,34 @@ export default {
 
     filteredActionLogList() {
       const keyword = this.normalizeKeyword(this.searchKeyword)
-      return this.actionLogList.filter((item) => {
+      const filtered = this.actionLogList.filter((item) => {
         const targetMatch = this.activeFilter === 'all' || item.action === this.activeFilter
+        const timeMatch = this.isLogInTimeRange(item.createdAt)
         const keywordMatch = !keyword || this.matchAny(keyword, [
           item.reason,
           item.result,
           item.targetId,
+          item.linkedActivityId,
+          item.linkedActivity?.title,
           item.adminOpenid,
           item.adminRole,
         ])
-        return targetMatch && keywordMatch
+        return targetMatch && timeMatch && keywordMatch
       })
+
+      const toTs = (t) => {
+        const ms = new Date(t).getTime()
+        return Number.isFinite(ms) ? ms : 0
+      }
+
+      const sorted = [...filtered]
+      sorted.sort((a, b) => (
+        this.logSort === 'created_asc'
+          ? toTs(a.createdAt) - toTs(b.createdAt)
+          : toTs(b.createdAt) - toTs(a.createdAt)
+      ))
+
+      return sorted
     },
   },
 
@@ -475,6 +555,8 @@ export default {
       this.activeFilter = 'all'
       this.searchKeyword = ''
       this.reportSort = 'created_desc'
+      this.logTimeRange = 'all'
+      this.logSort = 'created_desc'
     },
   },
 
@@ -781,6 +863,26 @@ export default {
       return map[type] || '记录'
     },
 
+    isLogInTimeRange(createdAt) {
+      if (this.activeTab !== 'logs') return true
+      if (this.logTimeRange === 'all') return true
+
+      const ts = new Date(createdAt).getTime()
+      if (!Number.isFinite(ts)) return false
+
+      const now = new Date()
+      if (this.logTimeRange === 'today') {
+        const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+        return ts >= start
+      }
+
+      if (this.logTimeRange === 'last7') {
+        return ts >= (now.getTime() - 7 * 24 * 60 * 60 * 1000)
+      }
+
+      return true
+    },
+
     normalizeKeyword(text) {
       return String(text || '').trim().toLowerCase()
     },
@@ -995,6 +1097,7 @@ export default {
 .status-pill--log { background: #EEF4FB; color: #1A3C5E; }
 
 .card-actions { display: flex; gap: 16rpx; }
+.card-actions--single { margin-top: 16rpx; }
 .action-btn {
   flex: 1; height: 72rpx; border-radius: 12rpx;
   font-size: 26rpx; font-weight: bold; border: none;

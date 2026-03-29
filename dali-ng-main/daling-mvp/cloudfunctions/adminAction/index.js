@@ -85,12 +85,15 @@ exports.main = async (event) => {
   let afterState = null
   let result = {}
   let finalTargetType = targetType || ''
+  let linkedActivityId = ''
+  let linkedReportId = ''
 
   switch (action) {
     case 'recommend':
     case 'unrecommend':
     case 'hide': {
       finalTargetType = finalTargetType || 'activity'
+      linkedActivityId = targetId
       beforeState = await getActivitySnapshot(targetId)
       if (!beforeState) {
         return { success: false, error: 'NOT_FOUND', message: '活动不存在' }
@@ -164,6 +167,8 @@ exports.main = async (event) => {
 
       finalTargetType = 'report'
       finalTargetId = reportId
+      linkedReportId = reportId
+      linkedActivityId = reportBefore.targetId || targetId || ''
 
       const reportPatch = {
         reportStatus: action === 'resolve_report_hide' ? 'HANDLED' : 'IGNORED',
@@ -225,6 +230,8 @@ exports.main = async (event) => {
       reason: normalizedReason,
       beforeState: beforeState || null,
       afterState: afterState || null,
+      linkedActivityId: linkedActivityId || '',
+      linkedReportId: linkedReportId || '',
       result: result.message,
       cityId: finalCityId,
       outcomeVerified: null,

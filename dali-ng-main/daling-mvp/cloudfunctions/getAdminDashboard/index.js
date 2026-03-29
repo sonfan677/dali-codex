@@ -97,6 +97,16 @@ function buildReportMetaMap(reportList = []) {
   }, {})
 }
 
+function resolveActionLinkedActivityId(item = {}) {
+  if (item.targetType === 'activity' && item.targetId) return item.targetId
+  if (item.linkedActivityId) return item.linkedActivityId
+  if (item.beforeState?.activity?._id) return item.beforeState.activity._id
+  if (item.beforeState?.targetId) return item.beforeState.targetId
+  if (item.afterState?.activity?._id) return item.afterState.activity._id
+  if (item.afterState?.targetId) return item.afterState.targetId
+  return ''
+}
+
 exports.main = async () => {
   const { OPENID } = cloud.getWXContext()
   const meta = parseAdminMeta(OPENID)
@@ -165,6 +175,10 @@ exports.main = async () => {
         action: true,
         targetId: true,
         targetType: true,
+        linkedActivityId: true,
+        linkedReportId: true,
+        beforeState: true,
+        afterState: true,
         reason: true,
         result: true,
         cityId: true,
@@ -200,6 +214,21 @@ exports.main = async () => {
     })
   }
 
+  const rawActionLogs = shouldFilterCity
+    ? (actionLogsRes.data || []).filter((item) => !item.cityId || item.cityId === meta.cityId)
+    : (actionLogsRes.data || [])
+
+  const missingLogActivityIds = rawActionLogs
+    .map((item) => resolveActionLinkedActivityId(item))
+    .filter((id) => id && !activityMap[id])
+
+  if (missingLogActivityIds.length) {
+    const extraActivities = await fetchActivitiesByIds(missingLogActivityIds)
+    extraActivities.forEach((item) => {
+      activityMap[item._id] = item
+    })
+  }
+
   const reportList = rawReports
     .map((item) => ({
       ...item,
@@ -223,9 +252,15 @@ exports.main = async () => {
     },
   }))
 
-  const actionLogList = (shouldFilterCity
-    ? (actionLogsRes.data || []).filter((item) => !item.cityId || item.cityId === meta.cityId)
-    : (actionLogsRes.data || []))
+  const actionLogList = rawActionLogs
+    .map((item) => {
+      const linkedActivityId = resolveActionLinkedActivityId(item)
+      return {
+        ...item,
+        linkedActivityId,
+        linkedActivity: linkedActivityId ? (activityMap[linkedActivityId] || null) : null,
+      }
+    })
     .slice(0, 80)
 
   return {
