@@ -49,6 +49,45 @@
         <text class="desc-text">{{ activity.description }}</text>
       </view>
 
+      <!-- 管理员可见：处理痕迹 -->
+      <view v-if="isAdminView && adminInsight" class="admin-trace">
+        <view class="admin-trace-header">
+          <text class="admin-trace-title">管理员视图</text>
+          <text class="admin-trace-sub">仅管理员可见</text>
+        </view>
+        <view class="admin-trace-summary">
+          <text class="admin-trace-item">累计举报：{{ adminInsight.totalReports || 0 }}</text>
+          <text class="admin-trace-item">待处理：{{ adminInsight.pendingReports || 0 }}</text>
+          <text class="admin-trace-item">已处理：{{ adminInsight.handledReports || 0 }}</text>
+          <text class="admin-trace-item">已忽略：{{ adminInsight.ignoredReports || 0 }}</text>
+        </view>
+        <text v-if="adminInsight.latestReportReason" class="admin-trace-text">
+          最近举报：{{ adminInsight.latestReportReason }}
+        </text>
+        <text v-if="adminInsight.latestReportAt" class="admin-trace-text">
+          举报时间：{{ formatCommentTime(adminInsight.latestReportAt) }}
+        </text>
+        <text v-if="adminInsight.latestHandleNote" class="admin-trace-text">
+          最近处理说明：{{ adminInsight.latestHandleNote }}
+        </text>
+        <text v-if="adminInsight.latestHandledAt" class="admin-trace-text">
+          最近处理时间：{{ formatCommentTime(adminInsight.latestHandledAt) }}
+        </text>
+
+        <view v-if="adminActionHistory.length > 0" class="admin-log-list">
+          <text class="admin-log-title">最近管理动作</text>
+          <view
+            v-for="item in adminActionHistory"
+            :key="`admin-log-${item._id}`"
+            class="admin-log-item"
+          >
+            <text class="admin-log-action">{{ adminActionText(item.action) }}</text>
+            <text class="admin-log-meta">{{ formatCommentTime(item.createdAt) }} · {{ item.adminRole || 'admin' }}</text>
+            <text v-if="item.reason" class="admin-log-reason">原因：{{ item.reason }}</text>
+          </view>
+        </view>
+      </view>
+
       <!-- 发布者 -->
       <view class="publisher">
         <image
@@ -275,6 +314,8 @@ export default {
       quitting: false,
       serverTime: Date.now(),
       currentOpenid: '',
+      isAdminView: false,
+      adminInsight: null,
       participantList: [],
       participantKeyword: '',
       participantSort: 'newest',
@@ -440,6 +481,10 @@ export default {
       return `已筛选 ${visible}/${total} 人`
     },
 
+    adminActionHistory() {
+      return Array.isArray(this.adminInsight?.actionHistory) ? this.adminInsight.actionHistory : []
+    },
+
     commentThreads() {
       const all = Array.isArray(this.commentList) ? this.commentList : []
       const roots = all
@@ -488,6 +533,8 @@ export default {
         this.hasJoined = !!res.hasJoined
         this.serverTime = res.serverTime || Date.now()
         this.currentOpenid = res.currentOpenid || this.currentOpenid
+        this.isAdminView = !!res.isAdmin
+        this.adminInsight = res.adminInsight || null
         this.participantList = Array.isArray(res.participantList) ? res.participantList : []
         this.participantKeyword = ''
         this.participantSort = 'newest'
@@ -925,6 +972,15 @@ export default {
       return role === 'publisher' ? '发布者' : '参与者'
     },
 
+    adminActionText(action) {
+      const map = {
+        recommend: '设为推荐',
+        unrecommend: '取消推荐',
+        hide: '手动下架',
+      }
+      return map[action] || action
+    },
+
     formatTime(t) {
       if (!t) return ''
       const d = new Date(t)
@@ -989,6 +1045,86 @@ export default {
   padding: 24rpx; margin: 24rpx 0;
 }
 .desc-text { font-size: 28rpx; color: #555; line-height: 1.7; }
+
+.admin-trace {
+  margin: 24rpx 0;
+  padding: 24rpx;
+  border-radius: 14rpx;
+  background: linear-gradient(180deg, #FFF9EC 0%, #FFFDF6 100%);
+  border: 1rpx solid #F1DFC2;
+}
+.admin-trace-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14rpx;
+}
+.admin-trace-title {
+  font-size: 28rpx;
+  font-weight: 700;
+  color: #7A4B00;
+}
+.admin-trace-sub {
+  font-size: 22rpx;
+  color: #B5842F;
+}
+.admin-trace-summary {
+  display: flex;
+  gap: 10rpx;
+  flex-wrap: wrap;
+  margin-bottom: 12rpx;
+}
+.admin-trace-item {
+  padding: 6rpx 14rpx;
+  border-radius: 999rpx;
+  background: rgba(122, 75, 0, 0.08);
+  font-size: 22rpx;
+  color: #7A4B00;
+}
+.admin-trace-text {
+  display: block;
+  margin-top: 8rpx;
+  font-size: 24rpx;
+  color: #6B7280;
+  line-height: 1.6;
+}
+.admin-log-list {
+  margin-top: 18rpx;
+  padding-top: 16rpx;
+  border-top: 1rpx solid rgba(122, 75, 0, 0.12);
+}
+.admin-log-title {
+  display: block;
+  margin-bottom: 10rpx;
+  font-size: 24rpx;
+  font-weight: 600;
+  color: #7A4B00;
+}
+.admin-log-item {
+  padding: 12rpx 0;
+  border-top: 1rpx solid rgba(122, 75, 0, 0.08);
+}
+.admin-log-item:first-child {
+  border-top: none;
+}
+.admin-log-action {
+  display: block;
+  font-size: 25rpx;
+  color: #333;
+  font-weight: 600;
+}
+.admin-log-meta {
+  display: block;
+  margin-top: 6rpx;
+  font-size: 22rpx;
+  color: #999;
+}
+.admin-log-reason {
+  display: block;
+  margin-top: 4rpx;
+  font-size: 23rpx;
+  color: #666;
+}
 
 .publisher {
   display: flex; align-items: center; gap: 20rpx;

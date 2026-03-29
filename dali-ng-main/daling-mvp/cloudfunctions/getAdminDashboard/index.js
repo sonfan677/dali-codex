@@ -64,6 +64,39 @@ async function fetchActivitiesByIds(ids = []) {
   return results
 }
 
+function buildReportMetaMap(reportList = []) {
+  return reportList.reduce((acc, item) => {
+    const activityId = item.targetId
+    if (!activityId) return acc
+
+    const current = acc[activityId] || {
+      total: 0,
+      pending: 0,
+      handled: 0,
+      ignored: 0,
+      latestReason: '',
+      latestReportedAt: null,
+      latestStatus: 'PENDING',
+    }
+
+    current.total += 1
+    if (item.reportStatus === 'HANDLED') current.handled += 1
+    else if (item.reportStatus === 'IGNORED') current.ignored += 1
+    else current.pending += 1
+
+    const reportMs = new Date(item.createdAt).getTime()
+    const latestMs = new Date(current.latestReportedAt).getTime()
+    if (!current.latestReportedAt || (Number.isFinite(reportMs) && reportMs > latestMs)) {
+      current.latestReason = item.reason || ''
+      current.latestReportedAt = item.createdAt || null
+      current.latestStatus = item.reportStatus || 'PENDING'
+    }
+
+    acc[activityId] = current
+    return acc
+  }, {})
+}
+
 exports.main = async () => {
   const { OPENID } = cloud.getWXContext()
   const meta = parseAdminMeta(OPENID)
@@ -175,6 +208,21 @@ exports.main = async () => {
     }))
     .slice(0, 60)
 
+  const reportMetaMap = buildReportMetaMap(rawReports)
+
+  const enrichedActivityList = activityList.map((item) => ({
+    ...item,
+    reportMeta: reportMetaMap[item._id] || {
+      total: 0,
+      pending: 0,
+      handled: 0,
+      ignored: 0,
+      latestReason: '',
+      latestReportedAt: null,
+      latestStatus: '',
+    },
+  }))
+
   const actionLogList = (shouldFilterCity
     ? (actionLogsRes.data || []).filter((item) => !item.cityId || item.cityId === meta.cityId)
     : (actionLogsRes.data || []))
@@ -186,7 +234,7 @@ exports.main = async () => {
     cityId: meta.cityId,
     pendingVerifyList: pendingUsersRes.data || [],
     reportList,
-    activityList,
+    activityList: enrichedActivityList,
     actionLogList,
     serverTimestamp: Date.now(),
   }

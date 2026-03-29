@@ -181,9 +181,16 @@
                 <text class="card-title">{{ item.title }}</text>
                 <text class="status-pill" :class="activityStatusClass(item.status)">{{ statusText(item.status) }}</text>
               </view>
+              <view v-if="item.reportMeta && item.reportMeta.total > 0" class="inline-badges">
+                <text class="mini-pill mini-pill--report">累计举报 {{ item.reportMeta.total }}</text>
+                <text v-if="item.reportMeta.pending > 0" class="mini-pill mini-pill--pending">待处理 {{ item.reportMeta.pending }}</text>
+              </view>
               <text class="card-sub">{{ item.currentParticipants }}人参与{{ item.isRecommended ? ' · 官方推荐' : '' }}</text>
               <text v-if="item.publisherNickname" class="card-sub">发布者：{{ item.publisherNickname }}</text>
               <text class="card-openid">{{ item.location && item.location.address }}</text>
+              <text v-if="item.reportMeta && item.reportMeta.latestReason" class="card-openid">
+                最近举报：{{ item.reportMeta.latestReason }}
+              </text>
               <text class="card-openid">活动ID: {{ item._id ? item._id.slice(0,12) + '...' : '' }}</text>
             </view>
           </view>
@@ -303,14 +310,19 @@ export default {
           { label: '已结束', value: 'ENDED' },
           { label: '已取消', value: 'CANCELLED' },
           { label: '官方推荐', value: 'recommended' },
+          { label: '被举报', value: 'reported' },
         ]
       }
       if (this.activeTab === 'logs') {
         return [
           { label: '全部', value: 'all' },
-          { label: '活动操作', value: 'activity' },
-          { label: '用户审核', value: 'user' },
-          { label: '举报处理', value: 'report' },
+          { label: '设为推荐', value: 'recommend' },
+          { label: '取消推荐', value: 'unrecommend' },
+          { label: '手动下架', value: 'hide' },
+          { label: '通过认证', value: 'verify' },
+          { label: '拒绝认证', value: 'reject_verify' },
+          { label: '举报下架', value: 'resolve_report_hide' },
+          { label: '举报忽略', value: 'resolve_report_ignore' },
         ]
       }
       return []
@@ -346,12 +358,17 @@ export default {
       const keyword = this.normalizeKeyword(this.searchKeyword)
       return this.activityList.filter((item) => {
         const statusMatch = this.activeFilter === 'all'
-          || (this.activeFilter === 'recommended' ? !!item.isRecommended : item.status === this.activeFilter)
+          || (this.activeFilter === 'recommended'
+            ? !!item.isRecommended
+            : this.activeFilter === 'reported'
+              ? Number(item.reportMeta?.total || 0) > 0
+              : item.status === this.activeFilter)
         const keywordMatch = !keyword || this.matchAny(keyword, [
           item.title,
           item.location?.address,
           item.publisherNickname,
           item._id,
+          item.reportMeta?.latestReason,
         ])
         return statusMatch && keywordMatch
       })
@@ -360,7 +377,7 @@ export default {
     filteredActionLogList() {
       const keyword = this.normalizeKeyword(this.searchKeyword)
       return this.actionLogList.filter((item) => {
-        const targetMatch = this.activeFilter === 'all' || item.targetType === this.activeFilter
+        const targetMatch = this.activeFilter === 'all' || item.action === this.activeFilter
         const keywordMatch = !keyword || this.matchAny(keyword, [
           item.reason,
           item.result,
@@ -798,6 +815,26 @@ export default {
   margin-top: 8rpx;
   font-size: 23rpx;
   color: #667085;
+}
+.inline-badges {
+  display: flex;
+  gap: 10rpx;
+  flex-wrap: wrap;
+  margin: 6rpx 0 2rpx;
+}
+.mini-pill {
+  padding: 4rpx 12rpx;
+  border-radius: 999rpx;
+  font-size: 20rpx;
+  line-height: 1.2;
+}
+.mini-pill--report {
+  background: #FFF7E8;
+  color: #8B5E00;
+}
+.mini-pill--pending {
+  background: #FFF0F0;
+  color: #C00000;
 }
 .title-row {
   display: flex;

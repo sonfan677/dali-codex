@@ -12,6 +12,16 @@ const CATEGORY_MAP = {
   other: '其他',
 }
 
+function parseAdminMeta(openid) {
+  const adminOpenids = (process.env.ADMIN_OPENIDS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+  return {
+    isAdmin: adminOpenids.includes(openid),
+  }
+}
+
 function buildTrustProfile(activity, user, nowMs) {
   const hasPlatformVerified = !!(
     user?.platformVerified ||
@@ -59,6 +69,7 @@ function buildTrustProfile(activity, user, nowMs) {
 exports.main = async (event) => {
   const { OPENID } = cloud.getWXContext()
   const { activityId } = event
+  const { isAdmin } = parseAdminMeta(OPENID)
 
   if (!activityId) {
     return { success: false, error: 'INVALID_ACTIVITY_ID', message: '缺少活动ID' }
@@ -120,11 +131,82 @@ exports.main = async (event) => {
     }))
   }
 
+  let adminInsight = null
+  if (isAdmin) {
+    const [reportsRes, adminActionsRes] = await Promise.all([
+      db.collection('adminActions')
+        .where({ action: 'report', targetId: activityId })
+        .orderBy('createdAt', 'desc')
+        .limit(20)
+        .field({
+          _id: true,
+          reason: true,
+          createdAt: true,
+          reportStatus: true,
+          handleAction: true,
+          handleNote: true,
+          handledAt: true,
+          reporterNickname: true,
+          reporterOpenid: true,
+        })
+        .get(),
+      db.collection('adminActions')
+        .where({
+          targetType: 'activity',
+          targetId: activityId,
+        })
+        .orderBy('createdAt', 'desc')
+        .limit(20)
+        .field({
+          _id: true,
+          action: true,
+          reason: true,
+          result: true,
+          adminOpenid: true,
+          adminRole: true,
+          createdAt: true,
+        })
+        .get(),
+    ])
+
+    const reportList = reportsRes.data || []
+    const actionHistory = (adminActionsRes.data || []).map((item) => ({
+      _id: item._id,
+      action: item.action,
+      reason: item.reason || '',
+      result: item.result || '',
+      adminOpenid: item.adminOpenid || '',
+      adminRole: item.adminRole || 'admin',
+      createdAt: item.createdAt || null,
+    }))
+
+    const latestReport = reportList[0] || null
+    const pendingReports = reportList.filter((item) => (item.reportStatus || 'PENDING') === 'PENDING').length
+    const handledReports = reportList.filter((item) => item.reportStatus === 'HANDLED').length
+    const ignoredReports = reportList.filter((item) => item.reportStatus === 'IGNORED').length
+
+    adminInsight = {
+      isAdminView: true,
+      totalReports: reportList.length,
+      pendingReports,
+      handledReports,
+      ignoredReports,
+      latestReportReason: latestReport?.reason || '',
+      latestReportAt: latestReport?.createdAt || null,
+      latestReportStatus: latestReport?.reportStatus || '',
+      latestHandleNote: latestReport?.handleNote || '',
+      latestHandledAt: latestReport?.handledAt || null,
+      actionHistory: actionHistory.slice(0, 5),
+    }
+  }
+
   return {
     success: true,
     activity: enrichedActivity,
     hasJoined: joinedList.length > 0,
     isPublisher,
+    isAdmin,
+    adminInsight,
     participantList,
     currentOpenid: OPENID,
     serverTime: nowMs,
