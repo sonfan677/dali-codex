@@ -236,6 +236,9 @@ export default {
       loading: false,
       serverTime: Date.now(),
       lastQueryMode: 'default', // nearby: 当前位置5km, default: 默认坐标50km
+      isAdminViewer: false,
+      adminRole: '',
+      adminCheckedAt: 0,
       categoryOptions: ACTIVITY_CATEGORY_OPTIONS,
       selectedCategoryId: 'all',
       searchKeyword: '',
@@ -316,7 +319,7 @@ export default {
     },
 
     showDistributionCard() {
-      return this.activities.length > 0 && this.dataSourceBadge.type !== 'mock'
+      return this.isAdminViewer && this.activities.length > 0 && this.dataSourceBadge.type !== 'mock'
     },
 
     distributionSubtitle() {
@@ -376,6 +379,7 @@ export default {
     },
 
   async onShow() {
+    await this.ensureAdminVisibility()
     // #ifdef MP-WEIXIN
     wx.getSetting({
       success: async (settingRes) => {
@@ -406,6 +410,25 @@ export default {
 
 
   methods: {
+    async ensureAdminVisibility(force = false) {
+      const now = Date.now()
+      // 5分钟内复用缓存，避免每次 onShow 都打云函数
+      if (!force && this.adminCheckedAt && now - this.adminCheckedAt < 5 * 60 * 1000) {
+        return this.isAdminViewer
+      }
+      try {
+        const res = await callCloud('checkAdmin')
+        this.isAdminViewer = !!(res && res.success && res.isAdmin)
+        this.adminRole = res?.adminRole || ''
+      } catch (e) {
+        this.isAdminViewer = false
+        this.adminRole = ''
+      } finally {
+        this.adminCheckedAt = now
+      }
+      return this.isAdminViewer
+    },
+
     getSelectedRadius() {
       return Number(this.distanceOptions[this.distanceIndex]?.radius) || 5000
     },
