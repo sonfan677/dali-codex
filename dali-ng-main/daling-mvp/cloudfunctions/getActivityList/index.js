@@ -161,13 +161,9 @@ exports.main = async (event, context) => {
       _statusByTime: getTimeStatus(new Date(a.startTime).getTime(), new Date(a.endTime).getTime(), nowMs),
     }))
     .filter(a => {
-      // 过滤：未结束 + 在围栏内
+      // 过滤：未结束 + 在用户选择半径内
       if (a._endMs <= nowMs) return false
-      const baseRadius = Number(a.location?.radius) || CITY_CONFIG.geo.defaultFenceRadius
-      const effectiveRadius = a._statusByTime === 'ONGOING'
-        ? Math.round(baseRadius * 1.2)
-        : baseRadius
-      return a._distance <= effectiveRadius
+      return a._distance <= safeRadius
     })
     .filter((a) => {
       const itemCategoryId = a.categoryId || 'other'
