@@ -86,6 +86,23 @@
         </view>
       </scroll-view>
 
+      <scroll-view
+        v-if="activeTab === 'reports'"
+        scroll-x
+        class="chip-scroll chip-scroll--sort"
+        show-scrollbar="false"
+      >
+        <view class="chip-row">
+          <view
+            v-for="item in reportSortOptions"
+            :key="item.value"
+            class="chip chip--sort"
+            :class="{ 'chip--active': item.value === reportSort }"
+            @tap="reportSort = item.value"
+          >{{ item.label }}</view>
+        </view>
+      </scroll-view>
+
       <!-- 待审核认证 -->
       <template v-if="activeTab === 'verify'">
         <view v-if="filteredPendingVerifyList.length === 0" class="empty">
@@ -120,6 +137,10 @@
           v-for="item in filteredReportList"
           :key="item._id"
           class="card"
+          :class="{
+            'card--flash-handled': isRecentHandled(item._id, 'HANDLED'),
+            'card--flash-ignored': isRecentHandled(item._id, 'IGNORED'),
+          }"
         >
           <view class="card-info">
             <view class="card-text">
@@ -137,6 +158,10 @@
               </text>
               <text v-if="item.handledAt" class="card-openid">处理时间：{{ formatTime(item.handledAt) }}</text>
               <text class="card-openid">提交时间：{{ formatTime(item.createdAt) }}</text>
+              <text
+                v-if="isHandlingReport(item._id)"
+                class="card-openid card-openid--processing"
+              >处理中，请稍候...</text>
             </view>
           </view>
           <view v-if="item.targetActivity" class="activity-preview">
@@ -155,12 +180,30 @@
             <text class="preview-sub">关联活动不存在或已超出当前查询范围</text>
           </view>
           <view v-if="item.reportStatus === 'PENDING'" class="card-actions">
-            <button class="action-btn action-btn--detail" @tap="goActivityDetail(item.targetId)">查看详情</button>
-            <button class="action-btn action-btn--approve" @tap="handleReport(item)">下架并处理</button>
-            <button class="action-btn action-btn--reject"  @tap="ignoreReport(item)">忽略并处理</button>
+            <button
+              class="action-btn action-btn--detail"
+              :disabled="isHandlingReport(item._id)"
+              @tap="goActivityDetail(item.targetId)"
+            >查看详情</button>
+            <button
+              class="action-btn action-btn--approve"
+              :loading="isHandlingReport(item._id, 'resolve_report_hide')"
+              :disabled="isHandlingReport(item._id)"
+              @tap="handleReport(item)"
+            >下架并处理</button>
+            <button
+              class="action-btn action-btn--reject"
+              :loading="isHandlingReport(item._id, 'resolve_report_ignore')"
+              :disabled="isHandlingReport(item._id)"
+              @tap="ignoreReport(item)"
+            >忽略并处理</button>
           </view>
           <view v-else class="card-actions">
-            <button class="action-btn action-btn--detail" @tap="goActivityDetail(item.targetId)">查看详情</button>
+            <button
+              class="action-btn action-btn--detail"
+              :disabled="isHandlingReport(item._id)"
+              @tap="goActivityDetail(item.targetId)"
+            >查看详情</button>
           </view>
         </view>
       </template>
@@ -255,6 +298,12 @@ export default {
       activeTab: 'verify',
       activeFilter: 'all',
       searchKeyword: '',
+      reportSort: 'created_desc',
+      reportHandlingId: '',
+      reportHandlingAction: '',
+      lastHandledReportId: '',
+      lastHandledReportStatus: '',
+      reportHighlightTimer: null,
       loading: false,
       hasAccess: true,
       adminRole: '',
@@ -328,6 +377,14 @@ export default {
       return []
     },
 
+    reportSortOptions() {
+      return [
+        { label: '按提交时间(新->旧)', value: 'created_desc' },
+        { label: '按提交时间(旧->新)', value: 'created_asc' },
+        { label: '按处理时间(新->旧)', value: 'handled_desc' },
+      ]
+    },
+
     filteredPendingVerifyList() {
       const keyword = this.normalizeKeyword(this.searchKeyword)
       if (!keyword) return this.pendingVerifyList
@@ -339,7 +396,7 @@ export default {
 
     filteredReportList() {
       const keyword = this.normalizeKeyword(this.searchKeyword)
-      return this.reportList.filter((item) => {
+      const filtered = this.reportList.filter((item) => {
         const statusMatch = this.activeFilter === 'all' || (item.reportStatus || 'PENDING') === this.activeFilter
         const keywordMatch = !keyword || this.matchAny(keyword, [
           item.reason,
@@ -352,6 +409,25 @@ export default {
         ])
         return statusMatch && keywordMatch
       })
+
+      const toTs = (t) => {
+        const ms = new Date(t).getTime()
+        return Number.isFinite(ms) ? ms : 0
+      }
+
+      const sorted = [...filtered]
+      sorted.sort((a, b) => {
+        if (this.reportSort === 'created_asc') {
+          return toTs(a.createdAt) - toTs(b.createdAt)
+        }
+        if (this.reportSort === 'handled_desc') {
+          const deltaHandled = toTs(b.handledAt) - toTs(a.handledAt)
+          if (deltaHandled !== 0) return deltaHandled
+          return toTs(b.createdAt) - toTs(a.createdAt)
+        }
+        return toTs(b.createdAt) - toTs(a.createdAt)
+      })
+      return sorted
     },
 
     filteredActivityList() {
@@ -398,7 +474,15 @@ export default {
     activeTab() {
       this.activeFilter = 'all'
       this.searchKeyword = ''
+      this.reportSort = 'created_desc'
     },
+  },
+
+  onUnload() {
+    if (this.reportHighlightTimer) {
+      clearTimeout(this.reportHighlightTimer)
+      this.reportHighlightTimer = null
+    }
   },
 
   methods: {
@@ -475,6 +559,8 @@ export default {
             uni.showToast({ title: '请填写原因', icon: 'none' })
             return
           }
+          this.reportHandlingId = reportItem._id
+          this.reportHandlingAction = 'resolve_report_hide'
           try {
             const result = await callCloud('adminAction', {
               action: 'resolve_report_hide',
@@ -484,11 +570,16 @@ export default {
               reason: res.content,
             })
             if (result.success) {
+              if (this.activeFilter === 'PENDING') this.activeFilter = 'all'
               uni.showToast({ title: result.message || '举报已处理', icon: 'success' })
               await this.loadData()
+              this.markReportHandled(reportItem._id, 'HANDLED')
             }
           } catch(e) {
             uni.showToast({ title: '操作失败', icon: 'none' })
+          } finally {
+            this.reportHandlingId = ''
+            this.reportHandlingAction = ''
           }
         }
       })
@@ -506,6 +597,8 @@ export default {
             uni.showToast({ title: '请填写原因', icon: 'none' })
             return
           }
+          this.reportHandlingId = reportItem._id
+          this.reportHandlingAction = 'resolve_report_ignore'
           try {
             const result = await callCloud('adminAction', {
               action: 'resolve_report_ignore',
@@ -515,13 +608,18 @@ export default {
               reason: res.content,
             })
             if (result.success) {
+              if (this.activeFilter === 'PENDING') this.activeFilter = 'all'
               uni.showToast({ title: result.message || '举报已处理', icon: 'success' })
               await this.loadData()
+              this.markReportHandled(reportItem._id, 'IGNORED')
             } else {
               uni.showToast({ title: result.message || '操作失败', icon: 'none' })
             }
           } catch (e) {
             uni.showToast({ title: '操作失败', icon: 'none' })
+          } finally {
+            this.reportHandlingId = ''
+            this.reportHandlingAction = ''
           }
         }
       })
@@ -627,6 +725,27 @@ export default {
         IGNORED: 'status-pill--ignored',
       }
       return map[status] || 'status-pill--pending'
+    },
+
+    isHandlingReport(reportId, action = '') {
+      if (!reportId || this.reportHandlingId !== reportId) return false
+      if (!action) return true
+      return this.reportHandlingAction === action
+    },
+
+    markReportHandled(reportId, status) {
+      this.lastHandledReportId = reportId
+      this.lastHandledReportStatus = status
+      if (this.reportHighlightTimer) clearTimeout(this.reportHighlightTimer)
+      this.reportHighlightTimer = setTimeout(() => {
+        this.lastHandledReportId = ''
+        this.lastHandledReportStatus = ''
+        this.reportHighlightTimer = null
+      }, 8000)
+    },
+
+    isRecentHandled(reportId, status) {
+      return this.lastHandledReportId === reportId && this.lastHandledReportStatus === status
     },
 
     activityStatusClass(status) {
@@ -754,6 +873,9 @@ export default {
   margin: 0 0 16rpx;
   white-space: nowrap;
 }
+.chip-scroll--sort {
+  margin-top: -8rpx;
+}
 .chip-row {
   display: flex;
   gap: 12rpx;
@@ -770,6 +892,10 @@ export default {
   background: #1A3C5E;
   color: white;
 }
+.chip--sort {
+  font-size: 20rpx;
+  padding: 10rpx 18rpx;
+}
 
 .center-tip, .empty {
   display: flex; flex-direction: column;
@@ -780,6 +906,15 @@ export default {
 .card {
   background: white; border-radius: 12rpx;
   padding: 24rpx 28rpx; margin-bottom: 16rpx;
+  transition: all .22s ease;
+}
+.card--flash-handled {
+  box-shadow: 0 0 0 2rpx #1E7145 inset;
+  background: #F6FFF8;
+}
+.card--flash-ignored {
+  box-shadow: 0 0 0 2rpx #667085 inset;
+  background: #F8FAFC;
 }
 .card-info {
   display: flex; align-items: center;
@@ -793,6 +928,7 @@ export default {
 .card-title { font-size: 28rpx; font-weight: bold; color: #1a1a1a; }
 .card-sub   { font-size: 24rpx; color: #666; }
 .card-openid{ font-size: 22rpx; color: #bbb; }
+.card-openid--processing { color: #1A3C5E; }
 .activity-preview {
   margin: 0 0 18rpx;
   padding: 18rpx 20rpx;
