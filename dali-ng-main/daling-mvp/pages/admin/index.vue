@@ -128,6 +128,23 @@
       >
         <view class="chip-row">
           <view
+            v-for="item in logViewOptions"
+            :key="item.value"
+            class="chip chip--sort"
+            :class="{ 'chip--active': item.value === logViewMode }"
+            @tap="logViewMode = item.value"
+          >{{ item.label }}</view>
+        </view>
+      </scroll-view>
+
+      <scroll-view
+        v-if="activeTab === 'logs'"
+        scroll-x
+        class="chip-scroll chip-scroll--sort"
+        show-scrollbar="false"
+      >
+        <view class="chip-row">
+          <view
             v-for="item in logSortOptions"
             :key="item.value"
             class="chip chip--sort"
@@ -331,7 +348,7 @@
 
       <!-- 操作记录 -->
       <template v-else>
-        <view v-if="filteredActionLogList.length > 0" class="logs-overview">
+        <view v-if="logViewMode === 'flat' && filteredActionLogList.length > 0" class="logs-overview">
           <view class="logs-overview-card">
             <text class="logs-overview-value">{{ logOverview.total }}</text>
             <text class="logs-overview-label">筛选后总数</text>
@@ -346,41 +363,98 @@
           </view>
         </view>
 
-        <view v-if="filteredActionLogList.length === 0" class="empty">
-          <text class="empty-text">暂无操作记录</text>
-        </view>
-        <view
-          v-for="item in filteredActionLogList"
-          :key="item._id"
-          class="card"
-        >
-          <view class="card-text">
-            <view class="title-row">
-              <text class="card-title">{{ actionText(item.action) }}</text>
-              <text class="status-pill status-pill--log">{{ targetTypeText(item.targetType) }}</text>
-            </view>
-            <view class="result-row">
-              <text class="card-sub">结果：</text>
-              <text class="status-pill" :class="resultToneClass(item.action)">{{ item.result || '已执行' }}</text>
-            </view>
-            <text class="card-sub">原因：{{ item.reason || '--' }}</text>
-            <text class="card-openid">对象ID: {{ item.targetId ? item.targetId.slice(0,12) + '...' : '--' }}</text>
-            <text v-if="item.linkedActivityId" class="card-openid">
-              关联活动ID: {{ item.linkedActivityId.slice(0,12) + '...' }}
-            </text>
-            <text v-if="item.linkedActivity && item.linkedActivity.title" class="card-sub">
-              关联活动：{{ item.linkedActivity.title }}
-            </text>
-            <text class="card-openid">操作者: {{ item.adminRole || 'admin' }} · {{ shortOpenid(item.adminOpenid) }}</text>
-            <text class="card-openid">时间：{{ formatTime(item.createdAt) }}</text>
+        <template v-if="logViewMode === 'flat'">
+          <view v-if="filteredActionLogList.length === 0" class="empty">
+            <text class="empty-text">暂无操作记录</text>
           </view>
-          <view v-if="item.linkedActivityId" class="card-actions card-actions--single">
-            <button
-              class="action-btn action-btn--detail"
-              @tap="goActivityDetail(item.linkedActivityId)"
-            >查看关联活动</button>
+          <view
+            v-for="item in filteredActionLogList"
+            :key="item._id"
+            class="card"
+          >
+            <view class="card-text">
+              <view class="title-row">
+                <text class="card-title">{{ actionText(item.action) }}</text>
+                <text class="status-pill status-pill--log">{{ targetTypeText(item.targetType) }}</text>
+              </view>
+              <view class="result-row">
+                <text class="card-sub">结果：</text>
+                <text class="status-pill" :class="resultToneClass(item.action)">{{ item.result || '已执行' }}</text>
+              </view>
+              <text class="card-sub">原因：{{ item.reason || '--' }}</text>
+              <text class="card-openid">对象ID: {{ item.targetId ? item.targetId.slice(0,12) + '...' : '--' }}</text>
+              <text v-if="item.linkedActivityId" class="card-openid">
+                关联活动ID: {{ item.linkedActivityId.slice(0,12) + '...' }}
+              </text>
+              <text v-if="item.linkedActivity && item.linkedActivity.title" class="card-sub">
+                关联活动：{{ item.linkedActivity.title }}
+              </text>
+              <text class="card-openid">操作者: {{ item.adminRole || 'admin' }} · {{ shortOpenid(item.adminOpenid) }}</text>
+              <text class="card-openid">时间：{{ formatTime(item.createdAt) }}</text>
+            </view>
+            <view v-if="item.linkedActivityId" class="card-actions card-actions--single">
+              <button
+                class="action-btn action-btn--detail"
+                @tap="goActivityDetail(item.linkedActivityId)"
+              >查看关联活动</button>
+            </view>
           </view>
-        </view>
+        </template>
+
+        <template v-else>
+          <view v-if="logActivityAggregateList.length === 0" class="empty">
+            <text class="empty-text">暂无可聚合链路</text>
+          </view>
+          <view
+            v-for="group in logActivityAggregateList"
+            :key="group.activityId"
+            class="card"
+          >
+            <view class="card-text">
+              <view class="title-row">
+                <text class="card-title">{{ group.title || '未命名活动' }}</text>
+                <text class="status-pill" :class="activityStatusClass(group.status)">{{ statusText(group.status) }}</text>
+              </view>
+              <view class="inline-badges">
+                <text class="mini-pill mini-pill--report">举报 {{ group.reportTotal }}</text>
+                <text v-if="group.pendingReports > 0" class="mini-pill mini-pill--pending">待处理 {{ group.pendingReports }}</text>
+                <text class="mini-pill mini-pill--log">管理动作 {{ group.actionCount }}</text>
+                <text v-if="group.highRiskCount > 0" class="mini-pill mini-pill--risk">高风险 {{ group.highRiskCount }}</text>
+              </view>
+              <text class="card-openid">活动ID: {{ group.activityId.slice(0,12) + '...' }}</text>
+              <text class="card-openid">最近事件：{{ formatTime(group.latestAt) }}</text>
+            </view>
+
+            <view class="timeline">
+              <view
+                v-for="item in group.timeline"
+                :key="item.eventKey"
+                class="timeline-item"
+              >
+                <view class="timeline-dot" :class="item.eventType === 'REPORT' ? 'timeline-dot--report' : 'timeline-dot--action'" />
+                <view class="timeline-content">
+                  <view class="title-row">
+                    <text class="card-sub">{{ item.title }}</text>
+                    <text class="card-openid">{{ formatTime(item.at) }}</text>
+                  </view>
+                  <text class="card-openid">{{ item.desc }}</text>
+                </view>
+              </view>
+            </view>
+
+            <text
+              v-if="group.totalTimelineCount > group.timeline.length"
+              class="card-openid"
+            >仅显示最近 {{ group.timeline.length }} 条，共 {{ group.totalTimelineCount }} 条</text>
+
+            <view class="card-actions card-actions--single">
+              <button
+                class="action-btn action-btn--detail"
+                @tap="goActivityDetail(group.activityId)"
+              >查看活动详情</button>
+            </view>
+          </view>
+        </template>
       </template>
 
     </view>
@@ -399,6 +473,7 @@ export default {
       reportSort: 'created_desc',
       logTimeRange: 'all',
       logSort: 'created_desc',
+      logViewMode: 'flat',
       logOperator: 'all',
       logRole: 'all',
       reportHandlingId: '',
@@ -503,6 +578,13 @@ export default {
       ]
     },
 
+    logViewOptions() {
+      return [
+        { label: '视图：明细', value: 'flat' },
+        { label: '视图：按活动聚合', value: 'by_activity' },
+      ]
+    },
+
     logOperatorOptions() {
       const total = this.actionLogList.length
       const meCount = this.currentAdminOpenid
@@ -546,6 +628,112 @@ export default {
         highRisk: list.filter((item) => highRiskActions.includes(item.action)).length,
         reportRelated: list.filter((item) => reportRelatedActions.includes(item.action)).length,
       }
+    },
+
+    logActivityAggregateList() {
+      const keyword = this.normalizeKeyword(this.searchKeyword)
+      const activityMap = this.activityList.reduce((acc, item) => {
+        acc[item._id] = item
+        return acc
+      }, {})
+      const groups = {}
+      const highRiskActions = ['hide', 'ban', 'resolve_report_hide', 'reject_verify']
+
+      const toTs = (value) => {
+        const ms = new Date(value).getTime()
+        return Number.isFinite(ms) ? ms : 0
+      }
+
+      const ensureGroup = (activityId, fallback = {}) => {
+        if (!activityId) return null
+        if (!groups[activityId]) {
+          const base = activityMap[activityId] || fallback || {}
+          groups[activityId] = {
+            activityId,
+            title: base.title || '活动',
+            status: base.status || 'OPEN',
+            reportTotal: 0,
+            pendingReports: 0,
+            handledReports: 0,
+            ignoredReports: 0,
+            actionCount: 0,
+            highRiskCount: 0,
+            latestAt: null,
+            timeline: [],
+            totalTimelineCount: 0,
+          }
+        }
+        return groups[activityId]
+      }
+
+      this.filteredActionLogList.forEach((item) => {
+        const activityId = item.linkedActivityId || (item.targetType === 'activity' ? item.targetId : '')
+        if (!activityId) return
+        const group = ensureGroup(activityId, item.linkedActivity || {})
+        if (!group) return
+
+        group.actionCount += 1
+        if (highRiskActions.includes(item.action)) group.highRiskCount += 1
+        const currentTs = toTs(item.createdAt)
+        if (!group.latestAt || currentTs > toTs(group.latestAt)) group.latestAt = item.createdAt
+
+        group.timeline.push({
+          eventKey: `action_${item._id}`,
+          eventType: 'ACTION',
+          at: item.createdAt,
+          ts: currentTs,
+          title: `${this.actionText(item.action)} · ${item.result || '已执行'}`,
+          desc: `操作者：${item.adminRole || 'admin'} · ${this.shortOpenid(item.adminOpenid)} · 原因：${item.reason || '--'}`,
+        })
+      })
+
+      const canIncludeReportOnly = this.activeFilter === 'all' && this.logOperator === 'all' && this.logRole === 'all'
+      this.reportList.forEach((item) => {
+        if (!item.targetId) return
+        if (!this.isLogInTimeRange(item.createdAt)) return
+        if (keyword && !this.matchAny(keyword, [
+          item.reason,
+          item.targetId,
+          item.reporterNickname,
+          item.reporterOpenid,
+          item.targetActivity?.title,
+          item.targetActivity?.location?.address,
+        ])) {
+          return
+        }
+        if (!canIncludeReportOnly && !groups[item.targetId]) return
+
+        const group = ensureGroup(item.targetId, item.targetActivity || {})
+        if (!group) return
+
+        group.reportTotal += 1
+        if (item.reportStatus === 'HANDLED') group.handledReports += 1
+        else if (item.reportStatus === 'IGNORED') group.ignoredReports += 1
+        else group.pendingReports += 1
+
+        const currentTs = toTs(item.createdAt)
+        if (!group.latestAt || currentTs > toTs(group.latestAt)) group.latestAt = item.createdAt
+        group.timeline.push({
+          eventKey: `report_${item._id}`,
+          eventType: 'REPORT',
+          at: item.createdAt,
+          ts: currentTs,
+          title: `用户举报 · ${this.reportStatusText(item.reportStatus)}`,
+          desc: `举报人：${item.reporterNickname || this.shortOpenid(item.reporterOpenid)} · 原因：${item.reason || '--'}`,
+        })
+      })
+
+      const list = Object.values(groups).map((group) => {
+        const sorted = [...group.timeline].sort((a, b) => b.ts - a.ts)
+        return {
+          ...group,
+          timeline: sorted.slice(0, 6),
+          totalTimelineCount: sorted.length,
+        }
+      })
+
+      list.sort((a, b) => toTs(b.latestAt) - toTs(a.latestAt))
+      return list
     },
 
     filteredPendingVerifyList() {
@@ -662,6 +850,7 @@ export default {
       this.reportSort = 'created_desc'
       this.logTimeRange = 'all'
       this.logSort = 'created_desc'
+      this.logViewMode = 'flat'
       this.logOperator = 'all'
       this.logRole = 'all'
     },
@@ -1221,6 +1410,14 @@ export default {
   background: #FFF0F0;
   color: #C00000;
 }
+.mini-pill--log {
+  background: #EEF4FB;
+  color: #1A3C5E;
+}
+.mini-pill--risk {
+  background: #FFF1F2;
+  color: #9F1239;
+}
 .title-row {
   display: flex;
   align-items: center;
@@ -1251,6 +1448,35 @@ export default {
   display: flex;
   align-items: center;
   gap: 10rpx;
+}
+.timeline {
+  margin-top: 14rpx;
+  padding-top: 8rpx;
+}
+.timeline-item {
+  display: flex;
+  gap: 14rpx;
+  margin-bottom: 12rpx;
+}
+.timeline-item:last-child {
+  margin-bottom: 0;
+}
+.timeline-dot {
+  width: 14rpx;
+  height: 14rpx;
+  border-radius: 50%;
+  margin-top: 8rpx;
+  flex-shrink: 0;
+}
+.timeline-dot--report {
+  background: #F59E0B;
+}
+.timeline-dot--action {
+  background: #1A3C5E;
+}
+.timeline-content {
+  flex: 1;
+  min-width: 0;
 }
 
 .card-actions { display: flex; gap: 16rpx; }
