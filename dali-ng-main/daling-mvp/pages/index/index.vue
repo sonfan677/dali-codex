@@ -56,6 +56,51 @@
       </view>
     </view>
 
+    <view v-if="showDistributionCard" class="distribution-panel">
+      <view class="distribution-head">
+        <text class="distribution-title">附近活动分布可视化</text>
+        <text class="distribution-sub">{{ distributionSubtitle }}</text>
+      </view>
+
+      <view class="distribution-section">
+        <text class="distribution-label">距离分布</text>
+        <view class="distribution-list">
+          <view
+            v-for="item in distanceDistribution"
+            :key="`dist-${item.key}`"
+            class="distribution-item"
+          >
+            <view class="distribution-item-top">
+              <text class="distribution-item-name">{{ item.label }}</text>
+              <text class="distribution-item-count">{{ item.count }}</text>
+            </view>
+            <view class="distribution-bar">
+              <view class="distribution-bar-fill" :style="{ width: item.percent + '%' }" />
+            </view>
+          </view>
+        </view>
+      </view>
+
+      <view class="distribution-section">
+        <text class="distribution-label">类型分布（Top 6）</text>
+        <view class="distribution-list">
+          <view
+            v-for="item in categoryDistribution"
+            :key="`cat-${item.id}`"
+            class="distribution-item"
+          >
+            <view class="distribution-item-top">
+              <text class="distribution-item-name">{{ item.label }}</text>
+              <text class="distribution-item-count">{{ item.count }}</text>
+            </view>
+            <view class="distribution-bar distribution-bar--cat">
+              <view class="distribution-bar-fill distribution-bar-fill--cat" :style="{ width: item.percent + '%' }" />
+            </view>
+          </view>
+        </view>
+      </view>
+    </view>
+
     <!-- 活动列表 -->
     <scroll-view scroll-y class="list">
 
@@ -268,6 +313,56 @@ export default {
       if (this.selectedCategoryId !== 'all') bits.push(this.selectedCategoryLabel)
       if (this.appliedKeyword) bits.push(`关键词:${this.appliedKeyword}`)
       return bits.length > 0 ? bits.join(' · ') : '未设置筛选条件'
+    },
+
+    showDistributionCard() {
+      return this.activities.length > 0 && this.dataSourceBadge.type !== 'mock'
+    },
+
+    distributionSubtitle() {
+      const source = this.lastQueryMode === 'nearby' ? '当前位置' : '默认坐标'
+      return `${source} · 当前范围 ${this.currentDistanceLabel} · 共 ${this.activities.length} 条`
+    },
+
+    distanceDistribution() {
+      const buckets = [
+        { key: '0-1', label: '0-1km', min: 0, max: 1000, count: 0 },
+        { key: '1-3', label: '1-3km', min: 1000, max: 3000, count: 0 },
+        { key: '3-5', label: '3-5km', min: 3000, max: 5000, count: 0 },
+        { key: '5-10', label: '5-10km', min: 5000, max: 10000, count: 0 },
+        { key: '10+', label: '10km+', min: 10000, max: Number.POSITIVE_INFINITY, count: 0 },
+      ]
+
+      ;(this.activities || []).forEach((item) => {
+        const d = Number(item?._distance)
+        if (!Number.isFinite(d) || d < 0) return
+        const hit = buckets.find((bucket) => d >= bucket.min && d < bucket.max)
+        if (hit) hit.count += 1
+      })
+
+      const maxCount = Math.max(...buckets.map((item) => item.count), 1)
+      return buckets.map((item) => ({
+        ...item,
+        percent: Math.max(8, Math.round((item.count / maxCount) * 100)),
+      }))
+    },
+
+    categoryDistribution() {
+      const counter = {}
+      ;(this.activities || []).forEach((item) => {
+        const categoryId = item?.categoryId || 'other'
+        const categoryLabel = item?.categoryLabel || getCategoryLabel(categoryId)
+        const current = counter[categoryId] || { id: categoryId, label: categoryLabel, count: 0 }
+        current.count += 1
+        counter[categoryId] = current
+      })
+
+      const list = Object.values(counter).sort((a, b) => b.count - a.count).slice(0, 6)
+      const maxCount = Math.max(...list.map((item) => item.count), 1)
+      return list.map((item) => ({
+        ...item,
+        percent: Math.max(8, Math.round((item.count / maxCount) * 100)),
+      }))
     },
   },
   onLoad() {
@@ -547,6 +642,86 @@ export default {
   margin: 0 16rpx 8rpx;
   border-radius: 14rpx;
   padding: 18rpx 18rpx 16rpx;
+}
+
+.distribution-panel {
+  background: #fff;
+  margin: 0 16rpx 10rpx;
+  border-radius: 14rpx;
+  padding: 18rpx;
+}
+
+.distribution-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12rpx;
+}
+
+.distribution-title {
+  font-size: 28rpx;
+  color: #1A3C5E;
+  font-weight: 700;
+}
+
+.distribution-sub {
+  font-size: 20rpx;
+  color: #667085;
+}
+
+.distribution-section {
+  margin-top: 16rpx;
+}
+
+.distribution-label {
+  display: block;
+  font-size: 22rpx;
+  color: #475467;
+  margin-bottom: 10rpx;
+}
+
+.distribution-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10rpx;
+}
+
+.distribution-item-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.distribution-item-name {
+  font-size: 22rpx;
+  color: #344054;
+}
+
+.distribution-item-count {
+  font-size: 22rpx;
+  color: #667085;
+}
+
+.distribution-bar {
+  margin-top: 6rpx;
+  height: 12rpx;
+  border-radius: 999rpx;
+  background: #e9eef5;
+  overflow: hidden;
+}
+
+.distribution-bar-fill {
+  height: 100%;
+  border-radius: 999rpx;
+  background: linear-gradient(90deg, #2E75B6 0%, #1A3C5E 100%);
+}
+
+.distribution-bar--cat {
+  background: #edf7f1;
+}
+
+.distribution-bar-fill--cat {
+  background: linear-gradient(90deg, #39a169 0%, #1f7a45 100%);
 }
 
 .search-row {
