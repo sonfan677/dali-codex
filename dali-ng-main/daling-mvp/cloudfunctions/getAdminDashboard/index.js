@@ -44,7 +44,7 @@ exports.main = async () => {
     return { success: false, error: 'UNAUTHORIZED', message: '无管理员权限' }
   }
 
-  const [pendingUsersRes, reportsRes, activitiesRes] = await Promise.all([
+  const [pendingUsersRes, reportsRes, activitiesRes, actionLogsRes] = await Promise.all([
     db.collection('users')
       .where({ verifyStatus: 'pending' })
       .field({ _id: true, _openid: true, nickname: true, avatarUrl: true })
@@ -68,17 +68,48 @@ exports.main = async () => {
       })
       .get(),
     db.collection('activities')
-      .where({ status: _.in(['OPEN', 'FULL']) })
+      .where({ status: _.in(['OPEN', 'FULL', 'ENDED', 'CANCELLED']) })
       .orderBy('createdAt', 'desc')
-      .limit(60)
+      .limit(200)
       .field({
         _id: true,
         cityId: true,
         title: true,
+        publisherNickname: true,
         currentParticipants: true,
         status: true,
         isRecommended: true,
         location: true,
+        createdAt: true,
+        updatedAt: true,
+      })
+      .get(),
+    db.collection('adminActions')
+      .where({
+        action: _.in([
+          'recommend',
+          'unrecommend',
+          'hide',
+          'verify',
+          'reject_verify',
+          'ban',
+          'resolve_report_hide',
+          'resolve_report_ignore',
+        ]),
+      })
+      .orderBy('createdAt', 'desc')
+      .limit(200)
+      .field({
+        _id: true,
+        action: true,
+        targetId: true,
+        targetType: true,
+        reason: true,
+        result: true,
+        cityId: true,
+        adminOpenid: true,
+        adminRole: true,
+        createdAt: true,
       })
       .get()
   ])
@@ -94,8 +125,13 @@ exports.main = async () => {
     .slice(0, 60)
 
   const activityList = shouldFilterCity
-    ? (activitiesRes.data || []).filter((item) => !item.cityId || item.cityId === meta.cityId).slice(0, 20)
-    : (activitiesRes.data || []).slice(0, 20)
+    ? (activitiesRes.data || []).filter((item) => !item.cityId || item.cityId === meta.cityId).slice(0, 120)
+    : (activitiesRes.data || []).slice(0, 120)
+
+  const actionLogList = (shouldFilterCity
+    ? (actionLogsRes.data || []).filter((item) => !item.cityId || item.cityId === meta.cityId)
+    : (actionLogsRes.data || []))
+    .slice(0, 80)
 
   return {
     success: true,
@@ -104,6 +140,7 @@ exports.main = async () => {
     pendingVerifyList: pendingUsersRes.data || [],
     reportList,
     activityList,
+    actionLogList,
     serverTimestamp: Date.now(),
   }
 }

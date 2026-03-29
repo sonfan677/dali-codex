@@ -3,6 +3,26 @@
 
     <view class="header">
       <text class="title">管理后台</text>
+      <text class="subtitle">{{ adminRoleLabel }} · {{ cityIdLabel }}</text>
+    </view>
+
+    <view v-if="hasAccess && !loading" class="summary-grid">
+      <view class="summary-card">
+        <text class="summary-value">{{ pendingVerifyList.length }}</text>
+        <text class="summary-label">待审认证</text>
+      </view>
+      <view class="summary-card">
+        <text class="summary-value">{{ pendingReportCount }}</text>
+        <text class="summary-label">待处理举报</text>
+      </view>
+      <view class="summary-card">
+        <text class="summary-value">{{ activeActivityCount }}</text>
+        <text class="summary-label">活跃活动</text>
+      </view>
+      <view class="summary-card">
+        <text class="summary-value">{{ actionLogList.length }}</text>
+        <text class="summary-label">操作记录</text>
+      </view>
     </view>
 
     <!-- Tab -->
@@ -22,6 +42,11 @@
         :class="{ 'tab--active': activeTab === 'activities' }"
         @tap="activeTab = 'activities'"
       >活动管理</view>
+      <view
+        class="tab"
+        :class="{ 'tab--active': activeTab === 'logs' }"
+        @tap="activeTab = 'logs'"
+      >操作记录</view>
     </view>
 
     <view v-if="!hasAccess" class="empty">
@@ -35,13 +60,39 @@
 
     <view v-else class="content">
 
+      <view class="toolbar">
+        <input
+          v-model="searchKeyword"
+          class="search-input"
+          :placeholder="searchPlaceholder"
+          maxlength="30"
+        />
+      </view>
+
+      <scroll-view
+        v-if="filterOptions.length > 0"
+        scroll-x
+        class="chip-scroll"
+        show-scrollbar="false"
+      >
+        <view class="chip-row">
+          <view
+            v-for="item in filterOptions"
+            :key="item.value"
+            class="chip"
+            :class="{ 'chip--active': item.value === activeFilter }"
+            @tap="activeFilter = item.value"
+          >{{ item.label }}</view>
+        </view>
+      </scroll-view>
+
       <!-- 待审核认证 -->
       <template v-if="activeTab === 'verify'">
-        <view v-if="pendingVerifyList.length === 0" class="empty">
+        <view v-if="filteredPendingVerifyList.length === 0" class="empty">
           <text class="empty-text">暂无待审核认证</text>
         </view>
         <view
-          v-for="item in pendingVerifyList"
+          v-for="item in filteredPendingVerifyList"
           :key="item._id"
           class="card"
         >
@@ -62,17 +113,20 @@
 
       <!-- 举报记录 -->
       <template v-else-if="activeTab === 'reports'">
-        <view v-if="reportList.length === 0" class="empty">
+        <view v-if="filteredReportList.length === 0" class="empty">
           <text class="empty-text">暂无举报记录</text>
         </view>
         <view
-          v-for="item in reportList"
+          v-for="item in filteredReportList"
           :key="item._id"
           class="card"
         >
           <view class="card-info">
             <view class="card-text">
-              <text class="card-title">活动举报 · {{ reportStatusText(item.reportStatus) }}</text>
+              <view class="title-row">
+                <text class="card-title">活动举报</text>
+                <text class="status-pill" :class="reportStatusClass(item.reportStatus)">{{ reportStatusText(item.reportStatus) }}</text>
+              </view>
               <text class="card-sub">原因：{{ item.reason }}</text>
               <text v-if="item.reporterNickname || item.reporterOpenid" class="card-sub">
                 举报人：{{ item.reporterNickname || shortOpenid(item.reporterOpenid) }}
@@ -81,6 +135,7 @@
               <text v-if="item.reportStatus !== 'PENDING'" class="card-openid">
                 处理结果：{{ handleActionText(item.handleAction) }}{{ item.handleNote ? '（' + item.handleNote + '）' : '' }}
               </text>
+              <text v-if="item.handledAt" class="card-openid">处理时间：{{ formatTime(item.handledAt) }}</text>
               <text class="card-openid">提交时间：{{ formatTime(item.createdAt) }}</text>
             </view>
           </view>
@@ -92,20 +147,25 @@
       </template>
 
       <!-- 活动管理 -->
-      <template v-else>
-        <view v-if="activityList.length === 0" class="empty">
+      <template v-else-if="activeTab === 'activities'">
+        <view v-if="filteredActivityList.length === 0" class="empty">
           <text class="empty-text">暂无活动</text>
         </view>
         <view
-          v-for="item in activityList"
+          v-for="item in filteredActivityList"
           :key="item._id"
           class="card"
         >
           <view class="card-info">
             <view class="card-text">
-              <text class="card-title">{{ item.title }}</text>
-              <text class="card-sub">{{ item.currentParticipants }}人参与 · {{ statusText(item.status) }}</text>
+              <view class="title-row">
+                <text class="card-title">{{ item.title }}</text>
+                <text class="status-pill" :class="activityStatusClass(item.status)">{{ statusText(item.status) }}</text>
+              </view>
+              <text class="card-sub">{{ item.currentParticipants }}人参与{{ item.isRecommended ? ' · 官方推荐' : '' }}</text>
+              <text v-if="item.publisherNickname" class="card-sub">发布者：{{ item.publisherNickname }}</text>
               <text class="card-openid">{{ item.location && item.location.address }}</text>
+              <text class="card-openid">活动ID: {{ item._id ? item._id.slice(0,12) + '...' : '' }}</text>
             </view>
           </view>
           <view class="card-actions">
@@ -128,6 +188,30 @@
         </view>
       </template>
 
+      <!-- 操作记录 -->
+      <template v-else>
+        <view v-if="filteredActionLogList.length === 0" class="empty">
+          <text class="empty-text">暂无操作记录</text>
+        </view>
+        <view
+          v-for="item in filteredActionLogList"
+          :key="item._id"
+          class="card"
+        >
+          <view class="card-text">
+            <view class="title-row">
+              <text class="card-title">{{ actionText(item.action) }}</text>
+              <text class="status-pill status-pill--log">{{ targetTypeText(item.targetType) }}</text>
+            </view>
+            <text class="card-sub">结果：{{ item.result || '已执行' }}</text>
+            <text class="card-sub">原因：{{ item.reason || '--' }}</text>
+            <text class="card-openid">对象ID: {{ item.targetId ? item.targetId.slice(0,12) + '...' : '--' }}</text>
+            <text class="card-openid">操作者: {{ item.adminRole || 'admin' }} · {{ shortOpenid(item.adminOpenid) }}</text>
+            <text class="card-openid">时间：{{ formatTime(item.createdAt) }}</text>
+          </view>
+        </view>
+      </template>
+
     </view>
   </view>
 </template>
@@ -139,16 +223,140 @@ export default {
   data() {
     return {
       activeTab: 'verify',
+      activeFilter: 'all',
+      searchKeyword: '',
       loading: false,
       hasAccess: true,
+      adminRole: '',
+      cityId: '',
       pendingVerifyList: [],
       reportList: [],
       activityList: [],
+      actionLogList: [],
     }
+  },
+
+  computed: {
+    pendingReportCount() {
+      return this.reportList.filter((item) => item.reportStatus === 'PENDING').length
+    },
+
+    activeActivityCount() {
+      return this.activityList.filter((item) => ['OPEN', 'FULL'].includes(item.status)).length
+    },
+
+    adminRoleLabel() {
+      return this.adminRole === 'cityAdmin' ? '城市管理员' : '超级管理员'
+    },
+
+    cityIdLabel() {
+      return this.cityId ? `城市：${this.cityId}` : '城市：全部'
+    },
+
+    searchPlaceholder() {
+      const map = {
+        verify: '搜索昵称 / openid',
+        reports: '搜索举报原因 / 举报人 / 活动ID',
+        activities: '搜索标题 / 地址 / 发布者 / 活动ID',
+        logs: '搜索原因 / 对象ID / 管理员',
+      }
+      return map[this.activeTab] || '搜索'
+    },
+
+    filterOptions() {
+      if (this.activeTab === 'reports') {
+        return [
+          { label: '全部', value: 'all' },
+          { label: '待处理', value: 'PENDING' },
+          { label: '已处理', value: 'HANDLED' },
+          { label: '已忽略', value: 'IGNORED' },
+        ]
+      }
+      if (this.activeTab === 'activities') {
+        return [
+          { label: '全部', value: 'all' },
+          { label: '招募中', value: 'OPEN' },
+          { label: '已满员', value: 'FULL' },
+          { label: '已结束', value: 'ENDED' },
+          { label: '已取消', value: 'CANCELLED' },
+          { label: '官方推荐', value: 'recommended' },
+        ]
+      }
+      if (this.activeTab === 'logs') {
+        return [
+          { label: '全部', value: 'all' },
+          { label: '活动操作', value: 'activity' },
+          { label: '用户审核', value: 'user' },
+          { label: '举报处理', value: 'report' },
+        ]
+      }
+      return []
+    },
+
+    filteredPendingVerifyList() {
+      const keyword = this.normalizeKeyword(this.searchKeyword)
+      if (!keyword) return this.pendingVerifyList
+      return this.pendingVerifyList.filter((item) => this.matchAny(keyword, [
+        item.nickname,
+        item._openid,
+      ]))
+    },
+
+    filteredReportList() {
+      const keyword = this.normalizeKeyword(this.searchKeyword)
+      return this.reportList.filter((item) => {
+        const statusMatch = this.activeFilter === 'all' || (item.reportStatus || 'PENDING') === this.activeFilter
+        const keywordMatch = !keyword || this.matchAny(keyword, [
+          item.reason,
+          item.reporterNickname,
+          item.reporterOpenid,
+          item.targetId,
+          item.handleNote,
+        ])
+        return statusMatch && keywordMatch
+      })
+    },
+
+    filteredActivityList() {
+      const keyword = this.normalizeKeyword(this.searchKeyword)
+      return this.activityList.filter((item) => {
+        const statusMatch = this.activeFilter === 'all'
+          || (this.activeFilter === 'recommended' ? !!item.isRecommended : item.status === this.activeFilter)
+        const keywordMatch = !keyword || this.matchAny(keyword, [
+          item.title,
+          item.location?.address,
+          item.publisherNickname,
+          item._id,
+        ])
+        return statusMatch && keywordMatch
+      })
+    },
+
+    filteredActionLogList() {
+      const keyword = this.normalizeKeyword(this.searchKeyword)
+      return this.actionLogList.filter((item) => {
+        const targetMatch = this.activeFilter === 'all' || item.targetType === this.activeFilter
+        const keywordMatch = !keyword || this.matchAny(keyword, [
+          item.reason,
+          item.result,
+          item.targetId,
+          item.adminOpenid,
+          item.adminRole,
+        ])
+        return targetMatch && keywordMatch
+      })
+    },
   },
 
   async onShow() {
     await this.loadData()
+  },
+
+  watch: {
+    activeTab() {
+      this.activeFilter = 'all'
+      this.searchKeyword = ''
+    },
   },
 
   methods: {
@@ -166,9 +374,12 @@ export default {
           throw new Error(res?.message || '加载失败')
         }
         this.hasAccess = true
+        this.adminRole = res.adminRole || 'superAdmin'
+        this.cityId = res.cityId || 'dali'
         this.pendingVerifyList = res.pendingVerifyList || []
         this.reportList = res.reportList || []
         this.activityList = res.activityList || []
+        this.actionLogList = res.actionLogList || []
       } catch(e) {
         console.error('加载管理数据失败', e)
         uni.showToast({ title: '加载失败', icon: 'none' })
@@ -199,8 +410,7 @@ export default {
             })
             if (result.success) {
               uni.showToast({ title: result.message, icon: 'success' })
-              // 从列表移除
-              this.pendingVerifyList = this.pendingVerifyList.filter(u => u._openid !== openid)
+              await this.loadData()
             } else {
               uni.showToast({ title: result.message || '操作失败', icon: 'none' })
             }
@@ -297,10 +507,7 @@ export default {
             })
             if (result.success) {
               uni.showToast({ title: result.message, icon: 'success' })
-              const idx = this.activityList.findIndex(a => a._id === activityId)
-              if (idx !== -1) {
-                this.activityList[idx].isRecommended = action === 'recommend'
-              }
+              await this.loadData()
             }
           } catch(e) {
             uni.showToast({ title: '操作失败', icon: 'none' })
@@ -330,7 +537,7 @@ export default {
             })
             if (result.success) {
               uni.showToast({ title: '活动已下架', icon: 'success' })
-              this.activityList = this.activityList.filter(a => a._id !== activityId)
+              await this.loadData()
             }
           } catch(e) {
             uni.showToast({ title: '操作失败', icon: 'none' })
@@ -361,6 +568,56 @@ export default {
       return map[action] || '已处理'
     },
 
+    reportStatusClass(status) {
+      const map = {
+        PENDING: 'status-pill--pending',
+        HANDLED: 'status-pill--handled',
+        IGNORED: 'status-pill--ignored',
+      }
+      return map[status] || 'status-pill--pending'
+    },
+
+    activityStatusClass(status) {
+      const map = {
+        OPEN: 'status-pill--open',
+        FULL: 'status-pill--full',
+        ENDED: 'status-pill--ended',
+        CANCELLED: 'status-pill--cancelled',
+      }
+      return map[status] || 'status-pill--open'
+    },
+
+    actionText(action) {
+      const map = {
+        recommend: '设为推荐',
+        unrecommend: '取消推荐',
+        hide: '手动下架活动',
+        verify: '通过实名认证',
+        reject_verify: '拒绝实名认证',
+        ban: '封禁用户',
+        resolve_report_hide: '举报处理并下架',
+        resolve_report_ignore: '举报处理并忽略',
+      }
+      return map[action] || action
+    },
+
+    targetTypeText(type) {
+      const map = {
+        activity: '活动',
+        user: '用户',
+        report: '举报',
+      }
+      return map[type] || '记录'
+    },
+
+    normalizeKeyword(text) {
+      return String(text || '').trim().toLowerCase()
+    },
+
+    matchAny(keyword, values) {
+      return values.some((item) => String(item || '').toLowerCase().includes(keyword))
+    },
+
     shortOpenid(openid) {
       if (!openid) return ''
       return openid.slice(0, 6) + '...'
@@ -388,6 +645,31 @@ export default {
   padding: 48rpx 32rpx 32rpx;
 }
 .title { font-size: 40rpx; font-weight: bold; color: white; }
+.subtitle { display: block; margin-top: 10rpx; font-size: 24rpx; color: rgba(255,255,255,0.75); }
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16rpx;
+  padding: 16rpx;
+}
+.summary-card {
+  background: white;
+  border-radius: 16rpx;
+  padding: 22rpx 24rpx;
+}
+.summary-value {
+  display: block;
+  font-size: 38rpx;
+  font-weight: 700;
+  color: #1A3C5E;
+}
+.summary-label {
+  display: block;
+  margin-top: 8rpx;
+  font-size: 24rpx;
+  color: #888;
+}
 
 .tabs {
   display: flex; background: white;
@@ -396,7 +678,7 @@ export default {
 .tab {
   flex: 1; text-align: center;
   padding: 24rpx 0;
-  font-size: 24rpx; color: #888;
+  font-size: 23rpx; color: #888;
 }
 .tab--active {
   color: #1A3C5E; font-weight: bold;
@@ -404,6 +686,38 @@ export default {
 }
 
 .content { padding: 16rpx; }
+
+.toolbar {
+  margin-bottom: 14rpx;
+}
+.search-input {
+  height: 76rpx;
+  border-radius: 38rpx;
+  background: white;
+  padding: 0 24rpx;
+  font-size: 26rpx;
+  color: #333;
+}
+.chip-scroll {
+  margin: 0 0 16rpx;
+  white-space: nowrap;
+}
+.chip-row {
+  display: flex;
+  gap: 12rpx;
+}
+.chip {
+  padding: 12rpx 22rpx;
+  border-radius: 999rpx;
+  background: #f0f2f4;
+  font-size: 22rpx;
+  color: #666;
+  flex-shrink: 0;
+}
+.chip--active {
+  background: #1A3C5E;
+  color: white;
+}
 
 .center-tip, .empty {
   display: flex; flex-direction: column;
@@ -427,6 +741,27 @@ export default {
 .card-title { font-size: 28rpx; font-weight: bold; color: #1a1a1a; }
 .card-sub   { font-size: 24rpx; color: #666; }
 .card-openid{ font-size: 22rpx; color: #bbb; }
+.title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12rpx;
+}
+.status-pill {
+  flex-shrink: 0;
+  padding: 6rpx 14rpx;
+  border-radius: 999rpx;
+  font-size: 20rpx;
+  line-height: 1.2;
+}
+.status-pill--pending { background: #FFF3CD; color: #8B5E00; }
+.status-pill--handled { background: #EEF7EE; color: #1E7145; }
+.status-pill--ignored { background: #f1f3f5; color: #666; }
+.status-pill--open { background: #EEF7EE; color: #1E7145; }
+.status-pill--full { background: #FFF3CD; color: #8B5E00; }
+.status-pill--ended { background: #f1f3f5; color: #666; }
+.status-pill--cancelled { background: #FFF0F0; color: #C00000; }
+.status-pill--log { background: #EEF4FB; color: #1A3C5E; }
 
 .card-actions { display: flex; gap: 16rpx; }
 .action-btn {
@@ -437,4 +772,5 @@ export default {
 .action-btn--reject     { background: #FFF0F0; color: #C00000; }
 .action-btn--recommend  { background: #EEF4FB; color: #1A3C5E; }
 .action-btn--unrecommend{ background: #f5f5f5; color: #888; }
+.action-btn::after { border: none; }
 </style>
