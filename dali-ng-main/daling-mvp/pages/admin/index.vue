@@ -120,6 +120,18 @@
         </view>
       </scroll-view>
 
+      <view
+        v-if="activeTab === 'logs' && logTimeRange === 'custom'"
+        class="date-range-panel"
+      >
+        <picker mode="date" :value="logCustomStartDate" @change="onPickLogStartDate">
+          <view class="date-pill">开始日期：{{ logCustomStartDate || '--' }}</view>
+        </picker>
+        <picker mode="date" :value="logCustomEndDate" @change="onPickLogEndDate">
+          <view class="date-pill">结束日期：{{ logCustomEndDate || '--' }}</view>
+        </picker>
+      </view>
+
       <scroll-view
         v-if="activeTab === 'logs'"
         scroll-x
@@ -354,7 +366,26 @@
             :loading="csvExporting"
             @tap="exportStatsCsv"
           >导出统计报表 CSV</button>
-          <text class="export-tip">导出总览统计 + 操作记录明细（当前筛选）</text>
+          <text class="export-tip">导出总览统计 + 操作记录明细（当前筛选 + 当前时间范围）</text>
+          <view class="export-config">
+            <view class="title-row">
+              <text class="export-config-title">明细字段筛选</text>
+              <text class="export-config-tip">已选 {{ exportSelectedFields.length }}/{{ exportFieldOptions.length }}</text>
+            </view>
+            <view class="export-actions">
+              <button class="mini-btn" @tap="selectAllExportFields">全选</button>
+              <button class="mini-btn mini-btn--ghost" @tap="resetExportFields">重置默认</button>
+            </view>
+            <view class="chip-row export-chip-wrap">
+              <view
+                v-for="item in exportFieldOptions"
+                :key="item.key"
+                class="chip chip--sort"
+                :class="{ 'chip--active': exportSelectedFields.includes(item.key) }"
+                @tap="toggleExportField(item.key)"
+              >{{ item.label }}</view>
+            </view>
+          </view>
         </view>
 
         <view v-if="logViewMode === 'flat' && filteredActionLogList.length > 0" class="logs-overview">
@@ -475,12 +506,20 @@ import { callCloud } from '@/utils/cloud.js'
 
 export default {
   data() {
+    const now = new Date()
+    const yyyy = now.getFullYear()
+    const mm = `${now.getMonth() + 1}`.padStart(2, '0')
+    const dd = `${now.getDate()}`.padStart(2, '0')
+    const today = `${yyyy}-${mm}-${dd}`
+
     return {
       activeTab: 'verify',
       activeFilter: 'all',
       searchKeyword: '',
       reportSort: 'created_desc',
       logTimeRange: 'all',
+      logCustomStartDate: today,
+      logCustomEndDate: today,
       logSort: 'created_desc',
       logViewMode: 'flat',
       logOperator: 'all',
@@ -500,6 +539,18 @@ export default {
       reportList: [],
       activityList: [],
       actionLogList: [],
+      exportSelectedFields: [
+        'createdAt',
+        'actionText',
+        'action',
+        'result',
+        'targetType',
+        'targetId',
+        'linkedActivityId',
+        'adminRole',
+        'adminOpenid',
+        'reason',
+      ],
     }
   },
 
@@ -578,6 +629,7 @@ export default {
         { label: '时间：全部', value: 'all' },
         { label: '时间：今日', value: 'today' },
         { label: '时间：近7天', value: 'last7' },
+        { label: '时间：自定义', value: 'custom' },
       ]
     },
 
@@ -638,6 +690,21 @@ export default {
         highRisk: list.filter((item) => highRiskActions.includes(item.action)).length,
         reportRelated: list.filter((item) => reportRelatedActions.includes(item.action)).length,
       }
+    },
+
+    exportFieldOptions() {
+      return [
+        { key: 'createdAt', label: '时间' },
+        { key: 'actionText', label: '动作中文' },
+        { key: 'action', label: '动作编码' },
+        { key: 'result', label: '结果' },
+        { key: 'targetType', label: '对象类型' },
+        { key: 'targetId', label: '对象ID' },
+        { key: 'linkedActivityId', label: '关联活动ID' },
+        { key: 'adminRole', label: '操作者角色' },
+        { key: 'adminOpenid', label: '操作者OPENID' },
+        { key: 'reason', label: '原因' },
+      ]
     },
 
     logActivityAggregateList() {
@@ -859,6 +926,8 @@ export default {
       this.searchKeyword = ''
       this.reportSort = 'created_desc'
       this.logTimeRange = 'all'
+      this.logCustomStartDate = this.getTodayDateToken()
+      this.logCustomEndDate = this.getTodayDateToken()
       this.logSort = 'created_desc'
       this.logViewMode = 'flat'
       this.logOperator = 'all'
@@ -874,6 +943,100 @@ export default {
   },
 
   methods: {
+    getTodayDateToken() {
+      const now = new Date()
+      const y = now.getFullYear()
+      const mo = `${now.getMonth() + 1}`.padStart(2, '0')
+      const day = `${now.getDate()}`.padStart(2, '0')
+      return `${y}-${mo}-${day}`
+    },
+
+    getRangeDateBoundary(dateToken, endOfDay = false) {
+      if (!dateToken || !/^\d{4}-\d{2}-\d{2}$/.test(dateToken)) return NaN
+      const [y, m, d] = dateToken.split('-').map((n) => Number(n))
+      const date = new Date(y, m - 1, d, endOfDay ? 23 : 0, endOfDay ? 59 : 0, endOfDay ? 59 : 0, endOfDay ? 999 : 0)
+      const ts = date.getTime()
+      return Number.isFinite(ts) ? ts : NaN
+    },
+
+    onPickLogStartDate(e) {
+      const value = e?.detail?.value || ''
+      if (!value) return
+      if (this.logCustomEndDate && value > this.logCustomEndDate) {
+        this.logCustomEndDate = value
+      }
+      this.logCustomStartDate = value
+    },
+
+    onPickLogEndDate(e) {
+      const value = e?.detail?.value || ''
+      if (!value) return
+      if (this.logCustomStartDate && value < this.logCustomStartDate) {
+        this.logCustomStartDate = value
+      }
+      this.logCustomEndDate = value
+    },
+
+    toggleExportField(fieldKey) {
+      if (!fieldKey) return
+      const exists = this.exportSelectedFields.includes(fieldKey)
+      if (exists) {
+        if (this.exportSelectedFields.length === 1) {
+          uni.showToast({ title: '至少保留1个字段', icon: 'none' })
+          return
+        }
+        this.exportSelectedFields = this.exportSelectedFields.filter((key) => key !== fieldKey)
+        return
+      }
+      this.exportSelectedFields = [...this.exportSelectedFields, fieldKey]
+    },
+
+    selectAllExportFields() {
+      this.exportSelectedFields = this.exportFieldOptions.map((item) => item.key)
+    },
+
+    resetExportFields() {
+      this.exportSelectedFields = [
+        'createdAt',
+        'actionText',
+        'action',
+        'result',
+        'targetType',
+        'targetId',
+        'linkedActivityId',
+        'adminRole',
+        'adminOpenid',
+        'reason',
+      ]
+    },
+
+    getExportDetailFieldDefs() {
+      const valueResolver = {
+        createdAt: (item) => this.formatExportTime(new Date(item.createdAt || Date.now())),
+        actionText: (item) => this.actionText(item.action),
+        action: (item) => item.action || '',
+        result: (item) => item.result || '',
+        targetType: (item) => item.targetType || '',
+        targetId: (item) => item.targetId || '',
+        linkedActivityId: (item) => item.linkedActivityId || '',
+        adminRole: (item) => item.adminRole || '',
+        adminOpenid: (item) => item.adminOpenid || '',
+        reason: (item) => item.reason || '',
+      }
+      const selectedKeys = this.exportFieldOptions
+        .filter((item) => this.exportSelectedFields.includes(item.key))
+        .map((item) => item.key)
+
+      const finalKeys = selectedKeys.length > 0 ? selectedKeys : ['createdAt', 'actionText', 'action', 'targetId']
+      return this.exportFieldOptions
+        .filter((item) => finalKeys.includes(item.key))
+        .map((item) => ({
+          key: item.key,
+          label: item.label,
+          value: valueResolver[item.key],
+        }))
+    },
+
     async loadData() {
       this.loading = true
       try {
@@ -1201,6 +1364,13 @@ export default {
         return ts >= (now.getTime() - 7 * 24 * 60 * 60 * 1000)
       }
 
+      if (this.logTimeRange === 'custom') {
+        const start = this.getRangeDateBoundary(this.logCustomStartDate, false)
+        const end = this.getRangeDateBoundary(this.logCustomEndDate, true)
+        if (!Number.isFinite(start) || !Number.isFinite(end)) return true
+        return ts >= start && ts <= end
+      }
+
       return true
     },
 
@@ -1263,6 +1433,12 @@ export default {
     buildStatsCsv() {
       const lines = []
       const append = (values = []) => lines.push(this.buildCsvLine(values))
+      const exportLogList = this.filteredActionLogList
+      const exportDetailFieldDefs = this.getExportDetailFieldDefs()
+      const exportRangeText = this.logTimeRange === 'custom'
+        ? `${this.logCustomStartDate || '--'} 至 ${this.logCustomEndDate || '--'}`
+        : this.logTimeRange
+      const selectedFieldText = exportDetailFieldDefs.map((item) => item.label).join(' / ')
 
       const now = new Date()
       const statusCounter = { OPEN: 0, FULL: 0, ENDED: 0, CANCELLED: 0 }
@@ -1278,7 +1454,7 @@ export default {
       })
 
       const actionCounter = {}
-      this.actionLogList.forEach((item) => {
+      exportLogList.forEach((item) => {
         const k = item.action || 'unknown'
         actionCounter[k] = (actionCounter[k] || 0) + 1
       })
@@ -1304,7 +1480,8 @@ export default {
       append(['导出角色', this.adminRoleLabel])
       append(['城市范围', this.cityIdLabel])
       append(['当前页面', this.activeTab])
-      append(['筛选上下文', `filter=${this.activeFilter}; keyword=${this.searchKeyword || '-'}; logTime=${this.logTimeRange}; logView=${this.logViewMode}; logSort=${this.logSort}; operator=${this.logOperator}; role=${this.logRole}`])
+      append(['筛选上下文', `filter=${this.activeFilter}; keyword=${this.searchKeyword || '-'}; logTime=${exportRangeText}; logView=${this.logViewMode}; logSort=${this.logSort}; operator=${this.logOperator}; role=${this.logRole}`])
+      append(['明细字段', selectedFieldText || '-'])
       append([])
 
       append(['一、总览指标'])
@@ -1315,7 +1492,7 @@ export default {
       append(['活动总量', this.activityList.length])
       append(['举报记录总量', this.reportList.length])
       append(['操作记录总量', this.actionLogList.length])
-      append(['当前筛选操作记录', this.filteredActionLogList.length])
+      append(['导出范围操作记录', exportLogList.length])
       append([])
 
       append(['二、活动状态统计'])
@@ -1351,23 +1528,12 @@ export default {
       append([])
 
       append(['六、当前筛选下的操作记录明细'])
-      append(['时间', '动作中文', '动作编码', '结果', '对象类型', '对象ID', '关联活动ID', '操作者角色', '操作者OPENID', '原因'])
-      if (this.filteredActionLogList.length === 0) {
-        append(['-', '-', '-', '-', '-', '-', '-', '-', '-', '-'])
+      append(exportDetailFieldDefs.map((item) => item.label))
+      if (exportLogList.length === 0) {
+        append(exportDetailFieldDefs.map(() => '-'))
       } else {
-        this.filteredActionLogList.forEach((item) => {
-          append([
-            this.formatExportTime(new Date(item.createdAt || Date.now())),
-            this.actionText(item.action),
-            item.action || '',
-            item.result || '',
-            item.targetType || '',
-            item.targetId || '',
-            item.linkedActivityId || '',
-            item.adminRole || '',
-            item.adminOpenid || '',
-            item.reason || '',
-          ])
+        exportLogList.forEach((item) => {
+          append(exportDetailFieldDefs.map((field) => field.value(item)))
         })
       }
 
@@ -1519,6 +1685,19 @@ export default {
 .chip-scroll--sort {
   margin-top: -8rpx;
 }
+.date-range-panel {
+  display: flex;
+  gap: 12rpx;
+  margin: -2rpx 0 14rpx;
+}
+.date-pill {
+  padding: 12rpx 18rpx;
+  border-radius: 999rpx;
+  background: #eef4fb;
+  color: #1A3C5E;
+  font-size: 22rpx;
+  line-height: 1.2;
+}
 .chip-row {
   display: flex;
   gap: 12rpx;
@@ -1561,6 +1740,47 @@ export default {
 .export-tip {
   font-size: 22rpx;
   color: #667085;
+}
+.export-config {
+  background: #fff;
+  border-radius: 12rpx;
+  border: 1rpx solid #e7ecf3;
+  padding: 14rpx;
+}
+.export-config-title {
+  font-size: 22rpx;
+  color: #344054;
+  font-weight: 600;
+}
+.export-config-tip {
+  font-size: 20rpx;
+  color: #667085;
+}
+.export-actions {
+  margin-top: 10rpx;
+  display: flex;
+  gap: 10rpx;
+}
+.mini-btn {
+  height: 54rpx;
+  line-height: 54rpx;
+  padding: 0 16rpx;
+  margin: 0;
+  border-radius: 999rpx;
+  font-size: 20rpx;
+  background: #1A3C5E;
+  color: #fff;
+}
+.mini-btn::after {
+  border: none;
+}
+.mini-btn--ghost {
+  background: #eef4fb;
+  color: #1A3C5E;
+}
+.export-chip-wrap {
+  flex-wrap: wrap;
+  margin-top: 12rpx;
 }
 .logs-overview-card {
   background: #ffffff;
