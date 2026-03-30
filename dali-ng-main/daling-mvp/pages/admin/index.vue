@@ -504,6 +504,39 @@
               </view>
             </view>
 
+            <view v-if="trendDashboardRows.length > 0" class="trend-category-panel">
+              <text class="export-config-title">分类小图表（活动发布）</text>
+              <view class="trend-category-grid">
+                <view
+                  v-for="card in trendCategoryCards"
+                  :key="card.key"
+                  class="trend-category-card"
+                >
+                  <view class="title-row">
+                    <text class="card-sub">{{ card.label }}</text>
+                    <text class="card-openid">本期 {{ card.latestCount }} · 环比 {{ card.latestRate }}</text>
+                  </view>
+                  <view class="trend-mini-bars">
+                    <view
+                      v-for="point in card.points"
+                      :key="`${card.key}_${point.key}`"
+                      class="trend-mini-row"
+                    >
+                      <text class="trend-mini-label">{{ point.shortLabel }}</text>
+                      <view class="trend-mini-track">
+                        <view
+                          class="trend-mini-fill"
+                          :class="card.fillClass"
+                          :style="{ width: point.width }"
+                        />
+                      </view>
+                      <text class="trend-mini-value">{{ point.count }}</text>
+                    </view>
+                  </view>
+                </view>
+              </view>
+            </view>
+
             <view class="export-actions">
               <button class="mini-btn mini-btn--ghost" @tap="copyTrendInsight">复制看板解读</button>
             </view>
@@ -891,6 +924,56 @@ export default {
           sub: `环比 ${latest.actionGrowthRate || '-'}`,
         },
       ]
+    },
+
+    trendCategoryCards() {
+      const rows = this.trendDashboardRows
+      const categories = [
+        { key: 'sport', label: '运动', fillClass: 'trend-mini-fill--sport' },
+        { key: 'music', label: '音乐', fillClass: 'trend-mini-fill--music' },
+        { key: 'reading', label: '读书', fillClass: 'trend-mini-fill--reading' },
+      ]
+
+      if (rows.length === 0) {
+        return categories.map((item) => ({
+          ...item,
+          latestCount: 0,
+          latestRate: '-',
+          points: [],
+        }))
+      }
+
+      const scaleMax = rows.reduce((max, row) => {
+        const map = row.categoryPublishedMap || {}
+        return Math.max(max, map.sport || 0, map.music || 0, map.reading || 0)
+      }, 1)
+
+      const buildShortLabel = (label = '', key = '') => {
+        if (this.trendDashboardMode === 'month') return key.slice(5) || label
+        const idx = label.indexOf('-')
+        if (idx > 0) return label.slice(0, idx)
+        return label
+      }
+
+      return categories.map((item) => {
+        const points = rows.map((row) => {
+          const count = Number(row.categoryPublishedMap?.[item.key] || 0)
+          return {
+            key: row.key,
+            shortLabel: buildShortLabel(row.label, row.key),
+            count,
+            width: this.calcMiniBarWidth(count, scaleMax),
+          }
+        })
+        const latest = points[points.length - 1]
+        const prev = points[points.length - 2]
+        return {
+          ...item,
+          latestCount: latest?.count || 0,
+          latestRate: prev ? this.formatRate(latest?.count || 0, prev?.count || 0) : '-',
+          points,
+        }
+      })
     },
 
     logActivityAggregateList() {
@@ -1707,6 +1790,22 @@ export default {
       return `${sign}${value.toFixed(1)}%`
     },
 
+    normalizeTrendCategory(categoryId = '') {
+      const safe = String(categoryId || '').trim().toLowerCase()
+      if (['sport', 'music', 'reading', 'game', 'social', 'outdoor', 'other'].includes(safe)) {
+        return safe
+      }
+      return 'other'
+    },
+
+    calcMiniBarWidth(value, max = 1) {
+      const safeValue = Number(value) || 0
+      if (safeValue <= 0) return '0%'
+      const safeMax = Number(max) > 0 ? Number(max) : 1
+      const pct = Math.max(10, Math.round((safeValue / safeMax) * 100))
+      return `${Math.min(100, pct)}%`
+    },
+
     buildTrendRows(periods = []) {
       const highRiskActionSet = new Set(['hide', 'ban', 'resolve_report_hide', 'reject_verify'])
       const reportHandledStatusSet = new Set(['HANDLED', 'IGNORED'])
@@ -1715,16 +1814,25 @@ export default {
       const rows = periods.map((period) => {
         const touchedActivities = new Set()
         const activeAdmins = new Set()
-
-        const publishedActivityCount = this.activityList.reduce((count, item) => {
+        const categoryPublishedMap = {
+          sport: 0,
+          music: 0,
+          reading: 0,
+          game: 0,
+          social: 0,
+          outdoor: 0,
+          other: 0,
+        }
+        let publishedActivityCount = 0
+        let publishedRecommendedCount = 0
+        this.activityList.forEach((item) => {
           const ts = this.toTimestamp(item.createdAt)
-          return count + (this.isInPeriod(ts, period) ? 1 : 0)
-        }, 0)
-
-        const publishedRecommendedCount = this.activityList.reduce((count, item) => {
-          const ts = this.toTimestamp(item.createdAt)
-          return count + ((this.isInPeriod(ts, period) && item.isRecommended) ? 1 : 0)
-        }, 0)
+          if (!this.isInPeriod(ts, period)) return
+          publishedActivityCount += 1
+          if (item.isRecommended) publishedRecommendedCount += 1
+          const category = this.normalizeTrendCategory(item.categoryId)
+          categoryPublishedMap[category] = (categoryPublishedMap[category] || 0) + 1
+        })
 
         const newReportCount = this.reportList.reduce((count, item) => {
           const ts = this.toTimestamp(item.createdAt)
@@ -1755,6 +1863,7 @@ export default {
           ...period,
           publishedActivityCount,
           publishedRecommendedCount,
+          categoryPublishedMap,
           newReportCount,
           handledReportCount,
           adminActionCount,
@@ -1798,12 +1907,21 @@ export default {
         .sort((a, b) => (b.adminActionCount || 0) - (a.adminActionCount || 0))[0]
       const topReportRow = [...rows]
         .sort((a, b) => (b.newReportCount || 0) - (a.newReportCount || 0))[0]
+      const latestCategoryMap = latest.categoryPublishedMap || {}
+      const categoryPairs = [
+        ['运动', Number(latestCategoryMap.sport || 0)],
+        ['音乐', Number(latestCategoryMap.music || 0)],
+        ['读书', Number(latestCategoryMap.reading || 0)],
+      ]
+      const topCategory = categoryPairs.sort((a, b) => b[1] - a[1])[0]
 
       return [
         '【搭里运营看板解读】',
         `口径：${modeText}`,
         `当前周期：${latest.label}`,
         `新发布活动：${latest.publishedActivityCount}（环比 ${latest.activityGrowthRate}）`,
+        `分类发布：运动 ${latestCategoryMap.sport || 0} / 音乐 ${latestCategoryMap.music || 0} / 读书 ${latestCategoryMap.reading || 0}`,
+        `分类主力：${topCategory?.[0] || '-'}（${topCategory?.[1] || 0}）`,
         `新增举报：${latest.newReportCount}（环比 ${latest.reportGrowthRate}）`,
         `管理动作：${latest.adminActionCount}（环比 ${latest.actionGrowthRate}）`,
         `本周期已处理举报：${latest.handledReportCount}，高风险动作：${latest.highRiskActionCount}`,
@@ -1835,6 +1953,9 @@ export default {
         '周序',
         '周范围',
         '新发布活动',
+        '运动发布',
+        '音乐发布',
+        '读书发布',
         '新发布推荐活动',
         '新增举报',
         '已处理举报',
@@ -1848,13 +1969,17 @@ export default {
         '管理动作环比',
       ])
       if (weekRows.length === 0) {
-        append(['-', '-', 0, 0, 0, 0, 0, 0, 0, 0, 0, '-', '-', '-'])
+        append(['-', '-', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, '-', '-', '-'])
       } else {
         weekRows.forEach((row, index) => {
+          const categoryMap = row.categoryPublishedMap || {}
           append([
             index + 1,
             row.label,
             row.publishedActivityCount,
+            categoryMap.sport || 0,
+            categoryMap.music || 0,
+            categoryMap.reading || 0,
             row.publishedRecommendedCount,
             row.newReportCount,
             row.handledReportCount,
@@ -1876,6 +2001,9 @@ export default {
         '月序',
         '月份',
         '新发布活动',
+        '运动发布',
+        '音乐发布',
+        '读书发布',
         '新发布推荐活动',
         '新增举报',
         '已处理举报',
@@ -1889,13 +2017,17 @@ export default {
         '管理动作环比',
       ])
       if (monthRows.length === 0) {
-        append(['-', '-', 0, 0, 0, 0, 0, 0, 0, 0, 0, '-', '-', '-'])
+        append(['-', '-', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, '-', '-', '-'])
       } else {
         monthRows.forEach((row, index) => {
+          const categoryMap = row.categoryPublishedMap || {}
           append([
             index + 1,
             row.label,
             row.publishedActivityCount,
+            categoryMap.sport || 0,
+            categoryMap.music || 0,
+            categoryMap.reading || 0,
             row.publishedRecommendedCount,
             row.newReportCount,
             row.handledReportCount,
@@ -2638,6 +2770,63 @@ export default {
 }
 .trend-bar-fill--action {
   background: #1A3C5E;
+}
+.trend-category-panel {
+  margin-top: 12rpx;
+  padding-top: 10rpx;
+  border-top: 1rpx solid #eef2f6;
+}
+.trend-category-grid {
+  margin-top: 10rpx;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10rpx;
+}
+.trend-category-card {
+  background: #f9fafb;
+  border-radius: 10rpx;
+  padding: 10rpx 12rpx;
+}
+.trend-mini-bars {
+  margin-top: 8rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+}
+.trend-mini-row {
+  display: grid;
+  grid-template-columns: 70rpx 1fr 40rpx;
+  align-items: center;
+  gap: 8rpx;
+}
+.trend-mini-label {
+  font-size: 20rpx;
+  color: #667085;
+}
+.trend-mini-track {
+  width: 100%;
+  height: 8rpx;
+  border-radius: 999rpx;
+  background: #e5e7eb;
+  overflow: hidden;
+}
+.trend-mini-fill {
+  height: 100%;
+  border-radius: 999rpx;
+}
+.trend-mini-fill--sport {
+  background: #0b6e4f;
+}
+.trend-mini-fill--music {
+  background: #d97706;
+}
+.trend-mini-fill--reading {
+  background: #1A3C5E;
+}
+.trend-mini-value {
+  font-size: 20rpx;
+  color: #344054;
+  text-align: right;
 }
 .mini-btn {
   height: 54rpx;

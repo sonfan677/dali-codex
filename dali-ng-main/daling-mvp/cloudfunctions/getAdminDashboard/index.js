@@ -49,6 +49,8 @@ async function fetchActivitiesByIds(ids = []) {
       .field({
         _id: true,
         cityId: true,
+        categoryId: true,
+        categoryLabel: true,
         title: true,
         publisherNickname: true,
         currentParticipants: true,
@@ -145,6 +147,8 @@ exports.main = async () => {
       .field({
         _id: true,
         cityId: true,
+        categoryId: true,
+        categoryLabel: true,
         title: true,
         publisherNickname: true,
         currentParticipants: true,
