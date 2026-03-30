@@ -365,15 +365,21 @@
             <button
               class="action-btn action-btn--export"
               :loading="csvExporting"
-              :disabled="csvExportingV2"
+              :disabled="csvExportingV2 || trendCsvExporting"
               @tap="exportStatsCsv"
             >导出基础报表 CSV</button>
             <button
               class="action-btn action-btn--export action-btn--export-v2"
               :loading="csvExportingV2"
-              :disabled="csvExporting"
+              :disabled="csvExporting || trendCsvExporting"
               @tap="exportStatsCsvV2"
             >导出报表二期 CSV（双表）</button>
+            <button
+              class="action-btn action-btn--export action-btn--export-trend"
+              :loading="trendCsvExporting"
+              :disabled="csvExporting || csvExportingV2"
+              @tap="exportTrendCsv"
+            >导出周/月趋势 CSV</button>
           </view>
           <text class="export-tip">导出总览统计 + 操作记录明细（当前筛选 + 当前时间范围）</text>
           <view class="export-config">
@@ -393,6 +399,36 @@
                 :class="{ 'chip--active': exportSelectedFields.includes(item.key) }"
                 @tap="toggleExportField(item.key)"
               >{{ item.label }}</view>
+            </view>
+          </view>
+          <view class="export-config">
+            <view class="title-row">
+              <text class="export-config-title">趋势窗口（运营看板口径）</text>
+              <text class="export-config-tip">周 {{ trendWeekWindow }} / 月 {{ trendMonthWindow }}</text>
+            </view>
+            <view class="export-actions export-actions--trend">
+              <text class="export-tip">周窗口</text>
+              <view class="chip-row">
+                <view
+                  v-for="item in trendWeekOptions"
+                  :key="'week_' + item"
+                  class="chip chip--sort"
+                  :class="{ 'chip--active': trendWeekWindow === item }"
+                  @tap="trendWeekWindow = item"
+                >近{{ item }}周</view>
+              </view>
+            </view>
+            <view class="export-actions export-actions--trend">
+              <text class="export-tip">月窗口</text>
+              <view class="chip-row">
+                <view
+                  v-for="item in trendMonthOptions"
+                  :key="'month_' + item"
+                  class="chip chip--sort"
+                  :class="{ 'chip--active': trendMonthWindow === item }"
+                  @tap="trendMonthWindow = item"
+                >近{{ item }}月</view>
+              </view>
             </view>
           </view>
         </view>
@@ -540,6 +576,9 @@ export default {
       reportHighlightTimer: null,
       csvExporting: false,
       csvExportingV2: false,
+      trendCsvExporting: false,
+      trendWeekWindow: 12,
+      trendMonthWindow: 6,
       loading: false,
       hasAccess: true,
       currentAdminOpenid: '',
@@ -715,6 +754,14 @@ export default {
         { key: 'adminOpenid', label: '操作者OPENID' },
         { key: 'reason', label: '原因' },
       ]
+    },
+
+    trendWeekOptions() {
+      return [8, 12, 16, 24]
+    },
+
+    trendMonthOptions() {
+      return [3, 6, 12]
     },
 
     logActivityAggregateList() {
@@ -1440,6 +1487,268 @@ export default {
       return values.map((item) => this.escapeCsvCell(item)).join(',')
     },
 
+    toTimestamp(value) {
+      const ts = new Date(value).getTime()
+      return Number.isFinite(ts) ? ts : NaN
+    },
+
+    formatYmd(dateLike) {
+      const date = new Date(dateLike)
+      if (Number.isNaN(date.getTime())) return ''
+      const y = date.getFullYear()
+      const mo = `${date.getMonth() + 1}`.padStart(2, '0')
+      const day = `${date.getDate()}`.padStart(2, '0')
+      return `${y}-${mo}-${day}`
+    },
+
+    formatMd(dateLike) {
+      const date = new Date(dateLike)
+      if (Number.isNaN(date.getTime())) return '--'
+      return `${date.getMonth() + 1}/${date.getDate()}`
+    },
+
+    getWeekStartDate(dateLike) {
+      const date = new Date(dateLike)
+      if (Number.isNaN(date.getTime())) return null
+      const day = date.getDay()
+      const diff = day === 0 ? 6 : day - 1
+      const start = new Date(date.getFullYear(), date.getMonth(), date.getDate() - diff, 0, 0, 0, 0)
+      return start
+    },
+
+    buildWeekPeriods(windowSize = 12) {
+      const safeWindow = Math.min(Math.max(Number(windowSize) || 12, 4), 24)
+      const currentWeekStart = this.getWeekStartDate(new Date())
+      const periods = []
+      if (!currentWeekStart) return periods
+
+      for (let i = safeWindow - 1; i >= 0; i -= 1) {
+        const start = new Date(currentWeekStart.getTime() - i * 7 * 24 * 60 * 60 * 1000)
+        const end = new Date(start.getTime() + 6 * 24 * 60 * 60 * 1000)
+        end.setHours(23, 59, 59, 999)
+        periods.push({
+          key: this.formatYmd(start),
+          label: `${this.formatMd(start)}-${this.formatMd(end)}`,
+          startTs: start.getTime(),
+          endTs: end.getTime(),
+        })
+      }
+      return periods
+    },
+
+    buildMonthPeriods(windowSize = 6) {
+      const safeWindow = Math.min(Math.max(Number(windowSize) || 6, 3), 18)
+      const now = new Date()
+      const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0)
+      const periods = []
+
+      for (let i = safeWindow - 1; i >= 0; i -= 1) {
+        const start = new Date(currentMonthStart.getFullYear(), currentMonthStart.getMonth() - i, 1, 0, 0, 0, 0)
+        const end = new Date(start.getFullYear(), start.getMonth() + 1, 0, 23, 59, 59, 999)
+        const y = start.getFullYear()
+        const mo = `${start.getMonth() + 1}`.padStart(2, '0')
+        periods.push({
+          key: `${y}-${mo}`,
+          label: `${y}-${mo}`,
+          startTs: start.getTime(),
+          endTs: end.getTime(),
+        })
+      }
+      return periods
+    },
+
+    resolveActionActivityId(item = {}) {
+      if (item.linkedActivityId) return item.linkedActivityId
+      if (item.targetType === 'activity' && item.targetId) return item.targetId
+      return ''
+    },
+
+    isInPeriod(ts, period) {
+      return Number.isFinite(ts) && ts >= period.startTs && ts <= period.endTs
+    },
+
+    formatRate(current, previous) {
+      if (!Number.isFinite(current) || !Number.isFinite(previous)) return '-'
+      if (previous === 0) {
+        if (current === 0) return '0.0%'
+        return '+∞'
+      }
+      const value = ((current - previous) / previous) * 100
+      const sign = value > 0 ? '+' : ''
+      return `${sign}${value.toFixed(1)}%`
+    },
+
+    buildTrendRows(periods = []) {
+      const highRiskActionSet = new Set(['hide', 'ban', 'resolve_report_hide', 'reject_verify'])
+      const reportHandledStatusSet = new Set(['HANDLED', 'IGNORED'])
+      const reportHandleActionSet = new Set(['resolve_report_hide', 'resolve_report_ignore'])
+
+      const rows = periods.map((period) => {
+        const touchedActivities = new Set()
+        const activeAdmins = new Set()
+
+        const publishedActivityCount = this.activityList.reduce((count, item) => {
+          const ts = this.toTimestamp(item.createdAt)
+          return count + (this.isInPeriod(ts, period) ? 1 : 0)
+        }, 0)
+
+        const publishedRecommendedCount = this.activityList.reduce((count, item) => {
+          const ts = this.toTimestamp(item.createdAt)
+          return count + ((this.isInPeriod(ts, period) && item.isRecommended) ? 1 : 0)
+        }, 0)
+
+        const newReportCount = this.reportList.reduce((count, item) => {
+          const ts = this.toTimestamp(item.createdAt)
+          return count + (this.isInPeriod(ts, period) ? 1 : 0)
+        }, 0)
+
+        const handledReportCount = this.reportList.reduce((count, item) => {
+          if (!reportHandledStatusSet.has(item.reportStatus)) return count
+          const ts = this.toTimestamp(item.handledAt)
+          return count + (this.isInPeriod(ts, period) ? 1 : 0)
+        }, 0)
+
+        let adminActionCount = 0
+        let highRiskActionCount = 0
+        let reportHandleActionCount = 0
+        this.actionLogList.forEach((item) => {
+          const ts = this.toTimestamp(item.createdAt)
+          if (!this.isInPeriod(ts, period)) return
+          adminActionCount += 1
+          if (highRiskActionSet.has(item.action)) highRiskActionCount += 1
+          if (reportHandleActionSet.has(item.action)) reportHandleActionCount += 1
+          const activityId = this.resolveActionActivityId(item)
+          if (activityId) touchedActivities.add(activityId)
+          if (item.adminOpenid) activeAdmins.add(item.adminOpenid)
+        })
+
+        return {
+          ...period,
+          publishedActivityCount,
+          publishedRecommendedCount,
+          newReportCount,
+          handledReportCount,
+          adminActionCount,
+          highRiskActionCount,
+          reportHandleActionCount,
+          touchedActivityCount: touchedActivities.size,
+          activeAdminCount: activeAdmins.size,
+        }
+      })
+
+      return rows.map((row, index) => {
+        const prev = rows[index - 1]
+        return {
+          ...row,
+          activityGrowthRate: prev ? this.formatRate(row.publishedActivityCount, prev.publishedActivityCount) : '-',
+          reportGrowthRate: prev ? this.formatRate(row.newReportCount, prev.newReportCount) : '-',
+          actionGrowthRate: prev ? this.formatRate(row.adminActionCount, prev.adminActionCount) : '-',
+        }
+      })
+    },
+
+    buildTrendCsv() {
+      const lines = []
+      const append = (values = []) => lines.push(this.buildCsvLine(values))
+      const now = new Date()
+      const weekPeriods = this.buildWeekPeriods(this.trendWeekWindow)
+      const monthPeriods = this.buildMonthPeriods(this.trendMonthWindow)
+      const weekRows = this.buildTrendRows(weekPeriods)
+      const monthRows = this.buildTrendRows(monthPeriods)
+
+      append(['搭里运营看板趋势报表（周/月）'])
+      append(['导出时间', this.formatExportTime(now)])
+      append(['导出角色', this.adminRoleLabel])
+      append(['城市范围', this.cityIdLabel])
+      append(['周窗口', `近${this.trendWeekWindow}周`])
+      append(['月窗口', `近${this.trendMonthWindow}月`])
+      append(['数据口径', 'activityList.createdAt / reportList.createdAt|handledAt / actionLogList.createdAt'])
+      append([])
+
+      append(['一、周趋势（运营看板口径）'])
+      append([
+        '周序',
+        '周范围',
+        '新发布活动',
+        '新发布推荐活动',
+        '新增举报',
+        '已处理举报',
+        '管理动作',
+        '高风险动作',
+        '举报处理动作',
+        '触达活动数',
+        '活跃管理员数',
+        '活动发布环比',
+        '举报环比',
+        '管理动作环比',
+      ])
+      if (weekRows.length === 0) {
+        append(['-', '-', 0, 0, 0, 0, 0, 0, 0, 0, 0, '-', '-', '-'])
+      } else {
+        weekRows.forEach((row, index) => {
+          append([
+            index + 1,
+            row.label,
+            row.publishedActivityCount,
+            row.publishedRecommendedCount,
+            row.newReportCount,
+            row.handledReportCount,
+            row.adminActionCount,
+            row.highRiskActionCount,
+            row.reportHandleActionCount,
+            row.touchedActivityCount,
+            row.activeAdminCount,
+            row.activityGrowthRate,
+            row.reportGrowthRate,
+            row.actionGrowthRate,
+          ])
+        })
+      }
+      append([])
+
+      append(['二、月趋势（运营看板口径）'])
+      append([
+        '月序',
+        '月份',
+        '新发布活动',
+        '新发布推荐活动',
+        '新增举报',
+        '已处理举报',
+        '管理动作',
+        '高风险动作',
+        '举报处理动作',
+        '触达活动数',
+        '活跃管理员数',
+        '活动发布环比',
+        '举报环比',
+        '管理动作环比',
+      ])
+      if (monthRows.length === 0) {
+        append(['-', '-', 0, 0, 0, 0, 0, 0, 0, 0, 0, '-', '-', '-'])
+      } else {
+        monthRows.forEach((row, index) => {
+          append([
+            index + 1,
+            row.label,
+            row.publishedActivityCount,
+            row.publishedRecommendedCount,
+            row.newReportCount,
+            row.handledReportCount,
+            row.adminActionCount,
+            row.highRiskActionCount,
+            row.reportHandleActionCount,
+            row.touchedActivityCount,
+            row.activeAdminCount,
+            row.activityGrowthRate,
+            row.reportGrowthRate,
+            row.actionGrowthRate,
+          ])
+        })
+      }
+
+      return lines.join('\n')
+    },
+
     getCurrentLogExportContext() {
       const exportLogList = this.filteredActionLogList
       const exportDetailFieldDefs = this.getExportDetailFieldDefs()
@@ -1795,7 +2104,7 @@ export default {
     },
 
     async exportStatsCsv() {
-      if (this.csvExporting || this.csvExportingV2) return
+      if (this.csvExporting || this.csvExportingV2 || this.trendCsvExporting) return
       this.csvExporting = true
       try {
         const csvText = this.buildStatsCsv()
@@ -1825,7 +2134,7 @@ export default {
     },
 
     async exportStatsCsvV2() {
-      if (this.csvExportingV2 || this.csvExporting) return
+      if (this.csvExportingV2 || this.csvExporting || this.trendCsvExporting) return
       this.csvExportingV2 = true
       try {
         const token = this.formatDateToken(new Date())
@@ -1863,6 +2172,35 @@ export default {
         uni.showToast({ title: '导出失败，请重试', icon: 'none' })
       } finally {
         this.csvExportingV2 = false
+      }
+    },
+
+    async exportTrendCsv() {
+      if (this.trendCsvExporting || this.csvExporting || this.csvExportingV2) return
+      this.trendCsvExporting = true
+      try {
+        const csvText = this.buildTrendCsv()
+        const fileName = `dali_admin_trend_${this.formatDateToken(new Date())}.csv`
+        try {
+          const filePath = await this.saveCsvToFile(csvText, fileName)
+          await this.openCsvFile(filePath)
+          uni.showToast({ title: '趋势CSV已生成', icon: 'success' })
+          return
+        } catch (fileErr) {
+          console.warn('保存趋势CSV失败，回退剪贴板', fileErr)
+        }
+
+        await this.saveCsvToClipboard(csvText)
+        uni.showModal({
+          title: '已复制趋势CSV内容',
+          content: '当前环境不支持直接打开文件，已复制到剪贴板，可粘贴到表格工具保存为 .csv',
+          showCancel: false,
+        })
+      } catch (e) {
+        console.error('导出趋势CSV失败', e)
+        uni.showToast({ title: '导出失败，请重试', icon: 'none' })
+      } finally {
+        this.trendCsvExporting = false
       }
     },
   }
@@ -2002,6 +2340,10 @@ export default {
   background: #0B6E4F;
   color: #fff;
 }
+.action-btn--export-trend {
+  background: #8A5A00;
+  color: #fff;
+}
 .export-config {
   background: #fff;
   border-radius: 12rpx;
@@ -2021,6 +2363,10 @@ export default {
   margin-top: 10rpx;
   display: flex;
   gap: 10rpx;
+}
+.export-actions--trend {
+  align-items: center;
+  flex-wrap: wrap;
 }
 .mini-btn {
   height: 54rpx;
