@@ -431,6 +431,83 @@
               </view>
             </view>
           </view>
+
+          <view class="trend-dashboard">
+            <view class="title-row">
+              <text class="export-config-title">运营趋势看板预览</text>
+              <view class="chip-row">
+                <view
+                  class="chip chip--sort"
+                  :class="{ 'chip--active': trendDashboardMode === 'week' }"
+                  @tap="trendDashboardMode = 'week'"
+                >周趋势</view>
+                <view
+                  class="chip chip--sort"
+                  :class="{ 'chip--active': trendDashboardMode === 'month' }"
+                  @tap="trendDashboardMode = 'month'"
+                >月趋势</view>
+              </view>
+            </view>
+
+            <view class="trend-kpi-grid">
+              <view
+                v-for="card in trendSummaryCards"
+                :key="card.key"
+                class="trend-kpi-card"
+              >
+                <text class="trend-kpi-label">{{ card.label }}</text>
+                <text class="trend-kpi-value">{{ card.value }}</text>
+                <text class="trend-kpi-sub">{{ card.sub }}</text>
+              </view>
+            </view>
+
+            <view class="trend-legend">
+              <text class="trend-legend-item trend-legend-item--activity">活动</text>
+              <text class="trend-legend-item trend-legend-item--report">举报</text>
+              <text class="trend-legend-item trend-legend-item--action">管理动作</text>
+            </view>
+
+            <view v-if="trendDashboardRows.length === 0" class="empty">
+              <text class="empty-text">暂无趋势数据，可先导入趋势测试数据</text>
+            </view>
+            <view v-else class="trend-list">
+              <view
+                v-for="row in trendDashboardRows"
+                :key="row.key"
+                class="trend-row"
+              >
+                <view class="title-row">
+                  <text class="card-sub">{{ row.label }}</text>
+                  <text class="card-openid">活动{{ row.publishedActivityCount }} · 举报{{ row.newReportCount }} · 动作{{ row.adminActionCount }}</text>
+                </view>
+
+                <view class="trend-bar-wrap">
+                  <view class="trend-bar-track">
+                    <view
+                      class="trend-bar-fill trend-bar-fill--activity"
+                      :style="{ width: trendMetricBarWidth(row.publishedActivityCount) }"
+                    />
+                  </view>
+                  <view class="trend-bar-track">
+                    <view
+                      class="trend-bar-fill trend-bar-fill--report"
+                      :style="{ width: trendMetricBarWidth(row.newReportCount) }"
+                    />
+                  </view>
+                  <view class="trend-bar-track">
+                    <view
+                      class="trend-bar-fill trend-bar-fill--action"
+                      :style="{ width: trendMetricBarWidth(row.adminActionCount) }"
+                    />
+                  </view>
+                </view>
+              </view>
+            </view>
+
+            <view class="export-actions">
+              <button class="mini-btn mini-btn--ghost" @tap="copyTrendInsight">复制看板解读</button>
+            </view>
+          </view>
         </view>
 
         <view v-if="logViewMode === 'flat' && filteredActionLogList.length > 0" class="logs-overview">
@@ -579,6 +656,7 @@ export default {
       trendCsvExporting: false,
       trendWeekWindow: 12,
       trendMonthWindow: 6,
+      trendDashboardMode: 'week',
       loading: false,
       hasAccess: true,
       currentAdminOpenid: '',
@@ -762,6 +840,57 @@ export default {
 
     trendMonthOptions() {
       return [3, 6, 12]
+    },
+
+    trendWeekRows() {
+      return this.buildTrendRows(this.buildWeekPeriods(this.trendWeekWindow))
+    },
+
+    trendMonthRows() {
+      return this.buildTrendRows(this.buildMonthPeriods(this.trendMonthWindow))
+    },
+
+    trendDashboardRows() {
+      return this.trendDashboardMode === 'month' ? this.trendMonthRows : this.trendWeekRows
+    },
+
+    trendDashboardScaleMax() {
+      return this.trendDashboardRows.reduce((max, row) => {
+        return Math.max(max, row.publishedActivityCount || 0, row.newReportCount || 0, row.adminActionCount || 0)
+      }, 1)
+    },
+
+    trendSummaryCards() {
+      const rows = this.trendDashboardRows
+      const latest = rows[rows.length - 1]
+      if (!latest) {
+        return [
+          { key: 'activity', label: '新发布活动', value: 0, sub: '环比 -' },
+          { key: 'report', label: '新增举报', value: 0, sub: '环比 -' },
+          { key: 'action', label: '管理动作', value: 0, sub: '环比 -' },
+        ]
+      }
+
+      return [
+        {
+          key: 'activity',
+          label: '新发布活动',
+          value: latest.publishedActivityCount || 0,
+          sub: `环比 ${latest.activityGrowthRate || '-'}`,
+        },
+        {
+          key: 'report',
+          label: '新增举报',
+          value: latest.newReportCount || 0,
+          sub: `环比 ${latest.reportGrowthRate || '-'}`,
+        },
+        {
+          key: 'action',
+          label: '管理动作',
+          value: latest.adminActionCount || 0,
+          sub: `环比 ${latest.actionGrowthRate || '-'}`,
+        },
+      ]
     },
 
     logActivityAggregateList() {
@@ -1647,6 +1776,42 @@ export default {
       })
     },
 
+    trendMetricBarWidth(value) {
+      const safeValue = Number(value) || 0
+      if (safeValue <= 0) return '0%'
+      const max = Number(this.trendDashboardScaleMax) || 1
+      const pct = Math.max(8, Math.round((safeValue / max) * 100))
+      return `${Math.min(100, pct)}%`
+    },
+
+    buildTrendInsightText() {
+      const modeText = this.trendDashboardMode === 'month'
+        ? `月趋势（近${this.trendMonthWindow}月）`
+        : `周趋势（近${this.trendWeekWindow}周）`
+      const rows = this.trendDashboardRows
+      const latest = rows[rows.length - 1]
+      if (!latest) {
+        return `【搭里运营看板解读】\n口径：${modeText}\n暂无可分析数据，可先导入趋势测试数据。`
+      }
+
+      const topActionRow = [...rows]
+        .sort((a, b) => (b.adminActionCount || 0) - (a.adminActionCount || 0))[0]
+      const topReportRow = [...rows]
+        .sort((a, b) => (b.newReportCount || 0) - (a.newReportCount || 0))[0]
+
+      return [
+        '【搭里运营看板解读】',
+        `口径：${modeText}`,
+        `当前周期：${latest.label}`,
+        `新发布活动：${latest.publishedActivityCount}（环比 ${latest.activityGrowthRate}）`,
+        `新增举报：${latest.newReportCount}（环比 ${latest.reportGrowthRate}）`,
+        `管理动作：${latest.adminActionCount}（环比 ${latest.actionGrowthRate}）`,
+        `本周期已处理举报：${latest.handledReportCount}，高风险动作：${latest.highRiskActionCount}`,
+        `管理最繁忙周期：${topActionRow?.label || '-'}（动作 ${topActionRow?.adminActionCount || 0}）`,
+        `举报最高周期：${topReportRow?.label || '-'}（新增举报 ${topReportRow?.newReportCount || 0}）`,
+      ].join('\n')
+    },
+
     buildTrendCsv() {
       const lines = []
       const append = (values = []) => lines.push(this.buildCsvLine(values))
@@ -1747,6 +1912,17 @@ export default {
       }
 
       return lines.join('\n')
+    },
+
+    async copyTrendInsight() {
+      try {
+        const text = this.buildTrendInsightText()
+        await this.saveCsvToClipboard(text)
+        uni.showToast({ title: '看板解读已复制', icon: 'success' })
+      } catch (e) {
+        console.error('复制看板解读失败', e)
+        uni.showToast({ title: '复制失败，请重试', icon: 'none' })
+      }
     },
 
     getCurrentLogExportContext() {
@@ -2350,6 +2526,12 @@ export default {
   border: 1rpx solid #e7ecf3;
   padding: 14rpx;
 }
+.trend-dashboard {
+  background: #fff;
+  border-radius: 12rpx;
+  border: 1rpx solid #e7ecf3;
+  padding: 14rpx;
+}
 .export-config-title {
   font-size: 22rpx;
   color: #344054;
@@ -2367,6 +2549,95 @@ export default {
 .export-actions--trend {
   align-items: center;
   flex-wrap: wrap;
+}
+.trend-kpi-grid {
+  margin-top: 12rpx;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10rpx;
+}
+.trend-kpi-card {
+  background: #f8fafc;
+  border-radius: 10rpx;
+  padding: 10rpx 12rpx;
+}
+.trend-kpi-label {
+  display: block;
+  font-size: 20rpx;
+  color: #667085;
+}
+.trend-kpi-value {
+  display: block;
+  margin-top: 6rpx;
+  font-size: 30rpx;
+  font-weight: 700;
+  color: #1A3C5E;
+}
+.trend-kpi-sub {
+  display: block;
+  margin-top: 4rpx;
+  font-size: 20rpx;
+  color: #667085;
+}
+.trend-legend {
+  margin-top: 12rpx;
+  display: flex;
+  gap: 10rpx;
+  flex-wrap: wrap;
+}
+.trend-legend-item {
+  font-size: 20rpx;
+  padding: 4rpx 10rpx;
+  border-radius: 999rpx;
+}
+.trend-legend-item--activity {
+  color: #0b6e4f;
+  background: #e9f7f0;
+}
+.trend-legend-item--report {
+  color: #ad3307;
+  background: #fff1eb;
+}
+.trend-legend-item--action {
+  color: #1A3C5E;
+  background: #eef4fb;
+}
+.trend-list {
+  margin-top: 10rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 10rpx;
+}
+.trend-row {
+  padding: 10rpx 12rpx;
+  border-radius: 10rpx;
+  background: #f9fafb;
+}
+.trend-bar-wrap {
+  margin-top: 8rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+.trend-bar-track {
+  width: 100%;
+  height: 10rpx;
+  border-radius: 999rpx;
+  background: #e5e7eb;
+  overflow: hidden;
+}
+.trend-bar-fill {
+  height: 100%;
+  border-radius: 999rpx;
+}
+.trend-bar-fill--activity {
+  background: #0b6e4f;
+}
+.trend-bar-fill--report {
+  background: #d9480f;
+}
+.trend-bar-fill--action {
+  background: #1A3C5E;
 }
 .mini-btn {
   height: 54rpx;
