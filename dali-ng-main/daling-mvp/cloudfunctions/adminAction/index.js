@@ -75,11 +75,32 @@ exports.main = async (event) => {
   }
 
   const { action, targetId, targetType, reason, cityId } = event
+  const actionSource = event.actionSource === 'ai' ? 'ai' : 'human'
+  const canAutoExecute = typeof event.canAutoExecute === 'boolean' ? event.canAutoExecute : false
+  const manualOverride = !!event.manualOverride
+  const dryRun = !!event.dryRun
+  const agentTraceId = event.agentTraceId ? String(event.agentTraceId).slice(0, 120) : ''
   if (!reason || reason.trim().length < 2) {
     return { success: false, error: 'REASON_REQUIRED', message: '请填写操作原因（至少2个字）' }
   }
 
   const normalizedReason = reason.trim()
+  if (dryRun) {
+    return {
+      success: true,
+      dryRun: true,
+      message: '预检查通过（未执行）',
+      preview: {
+        action,
+        targetId: targetId || '',
+        targetType: targetType || '',
+        actionSource,
+        canAutoExecute,
+        manualOverride,
+      },
+    }
+  }
+
   let finalTargetId = targetId
   let beforeState = null
   let afterState = null
@@ -232,6 +253,11 @@ exports.main = async (event) => {
       afterState: afterState || null,
       linkedActivityId: linkedActivityId || '',
       linkedReportId: linkedReportId || '',
+      actionSource,
+      canAutoExecute,
+      manualOverride,
+      dryRun: false,
+      agentTraceId,
       result: result.message,
       cityId: finalCityId,
       outcomeVerified: null,

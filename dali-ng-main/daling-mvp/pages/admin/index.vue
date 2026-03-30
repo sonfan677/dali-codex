@@ -4,6 +4,18 @@
     <view class="header">
       <text class="title">管理后台</text>
       <text class="subtitle">{{ adminRoleLabel }} · {{ cityIdLabel }}</text>
+      <view class="mode-switch-row">
+        <view
+          class="chip chip--sort"
+          :class="{ 'chip--active': adminUiMode === 'lite' }"
+          @tap="setAdminUiMode('lite')"
+        >精简模式</view>
+        <view
+          class="chip chip--sort"
+          :class="{ 'chip--active': adminUiMode === 'pro' }"
+          @tap="setAdminUiMode('pro')"
+        >完整模式</view>
+      </view>
     </view>
 
     <view v-if="hasAccess && !loading" class="summary-grid">
@@ -236,7 +248,13 @@
           </view>
         </view>
 
-        <view class="card">
+        <view v-if="isLiteMode" class="todo-batch-toolbar">
+          <button class="mini-btn mini-btn--ghost" @tap="toggleTodoAdvanced">
+            {{ showTodoAdvanced ? '收起高级区' : '展开高级区（日报归档/SLA细分）' }}
+          </button>
+        </view>
+
+        <view v-if="!isLiteMode || showTodoAdvanced" class="card">
           <view class="title-row">
             <text class="card-title">运营日报自动归档（近7天）</text>
             <text class="status-pill status-pill--log">{{ dailyReportHistoryPreview.length }}</text>
@@ -565,7 +583,7 @@
               <text class="logs-overview-label">24h内闭环</text>
             </view>
           </view>
-          <view class="sla-board">
+          <view v-if="!isLiteMode || showTodoAdvanced" class="sla-board">
             <view class="title-row">
               <text class="card-sub">SLA 细分看板</text>
               <text class="card-openid">阈值 {{ todoSlaHours }}h</text>
@@ -591,50 +609,52 @@
               </view>
             </view>
           </view>
-          <view v-if="recentClosureList.length === 0" class="empty empty--inline">
-            <text class="empty-text">暂无闭环记录</text>
-          </view>
-          <view v-for="item in recentClosureList" :key="item._id" class="todo-item">
-            <view class="title-row">
-              <text class="card-sub">{{ item.targetActivity?.title || item.targetId }}</text>
-              <text class="card-openid">耗时 {{ item.handleHoursText }}</text>
+          <template v-if="!isLiteMode || showTodoAdvanced">
+            <view v-if="recentClosureList.length === 0" class="empty empty--inline">
+              <text class="empty-text">暂无闭环记录</text>
             </view>
-            <text class="card-openid">结果：{{ reportStatusText(item.reportStatus) }} · {{ formatTime(item.handledAt) }}</text>
-          </view>
-          <view class="closure-trend-panel">
-            <view class="title-row">
-              <text class="card-sub">近7天处理趋势</text>
-              <text class="card-openid">新增举报 vs 闭环数</text>
+            <view v-for="item in recentClosureList" :key="item._id" class="todo-item">
+              <view class="title-row">
+                <text class="card-sub">{{ item.targetActivity?.title || item.targetId }}</text>
+                <text class="card-openid">耗时 {{ item.handleHoursText }}</text>
+              </view>
+              <text class="card-openid">结果：{{ reportStatusText(item.reportStatus) }} · {{ formatTime(item.handledAt) }}</text>
             </view>
-            <view class="trend-legend">
-              <text class="trend-legend-item trend-legend-item--report">新增举报</text>
-              <text class="trend-legend-item trend-legend-item--action">闭环处理</text>
-            </view>
-            <view class="trend-list">
-              <view v-for="item in closureTrend7Days" :key="item.key" class="trend-row">
-                <view class="title-row">
-                  <text class="card-sub">{{ item.label }}</text>
-                  <text class="card-openid">
-                    新增{{ item.newReportCount }} · 闭环{{ item.closedCount }} · 24h内{{ item.withinSlaRate }}
-                  </text>
-                </view>
-                <view class="trend-bar-wrap">
-                  <view class="trend-bar-track">
-                    <view
-                      class="trend-bar-fill trend-bar-fill--report"
-                      :style="{ width: closureTrendBarWidth(item.newReportCount) }"
-                    />
+            <view class="closure-trend-panel">
+              <view class="title-row">
+                <text class="card-sub">近7天处理趋势</text>
+                <text class="card-openid">新增举报 vs 闭环数</text>
+              </view>
+              <view class="trend-legend">
+                <text class="trend-legend-item trend-legend-item--report">新增举报</text>
+                <text class="trend-legend-item trend-legend-item--action">闭环处理</text>
+              </view>
+              <view class="trend-list">
+                <view v-for="item in closureTrend7Days" :key="item.key" class="trend-row">
+                  <view class="title-row">
+                    <text class="card-sub">{{ item.label }}</text>
+                    <text class="card-openid">
+                      新增{{ item.newReportCount }} · 闭环{{ item.closedCount }} · 24h内{{ item.withinSlaRate }}
+                    </text>
                   </view>
-                  <view class="trend-bar-track">
-                    <view
-                      class="trend-bar-fill trend-bar-fill--action"
-                      :style="{ width: closureTrendBarWidth(item.closedCount) }"
-                    />
+                  <view class="trend-bar-wrap">
+                    <view class="trend-bar-track">
+                      <view
+                        class="trend-bar-fill trend-bar-fill--report"
+                        :style="{ width: closureTrendBarWidth(item.newReportCount) }"
+                      />
+                    </view>
+                    <view class="trend-bar-track">
+                      <view
+                        class="trend-bar-fill trend-bar-fill--action"
+                        :style="{ width: closureTrendBarWidth(item.closedCount) }"
+                      />
+                    </view>
                   </view>
                 </view>
               </view>
             </view>
-          </view>
+          </template>
         </view>
       </template>
 
@@ -798,7 +818,13 @@
 
       <!-- 操作记录 -->
       <template v-else>
-        <view class="export-toolbar">
+        <view v-if="isLiteMode" class="todo-batch-toolbar">
+          <button class="mini-btn mini-btn--ghost" @tap="toggleLogAdvanced">
+            {{ showLogAdvanced ? '收起高级分析' : '展开高级分析（导出/趋势看板）' }}
+          </button>
+        </view>
+
+        <view v-if="!isLiteMode || showLogAdvanced" class="export-toolbar">
           <view class="export-main-actions">
             <button
               class="action-btn action-btn--export"
@@ -1015,6 +1041,9 @@
                 <text class="status-pill" :class="resultToneClass(item.action)">{{ item.result || '已执行' }}</text>
               </view>
               <text class="card-sub">原因：{{ item.reason || '--' }}</text>
+              <text class="card-openid">
+                来源：{{ actionSourceText(item.actionSource) }}{{ item.manualOverride ? ' · 人工干预' : '' }}{{ item.canAutoExecute ? ' · 允许自动' : '' }}
+              </text>
               <text class="card-openid">对象ID: {{ item.targetId ? item.targetId.slice(0,12) + '...' : '--' }}</text>
               <text v-if="item.linkedActivityId" class="card-openid">
                 关联活动ID: {{ item.linkedActivityId.slice(0,12) + '...' }}
@@ -1109,6 +1138,9 @@ export default {
       activeTab: 'todo',
       activeFilter: 'all',
       searchKeyword: '',
+      adminUiMode: 'lite',
+      showTodoAdvanced: false,
+      showLogAdvanced: false,
       todoSlaHours: 24,
       todoOnlyOverdue: false,
       todoAutoRemindEnabled: true,
@@ -1156,6 +1188,7 @@ export default {
         'createdAt',
         'actionText',
         'action',
+        'actionSource',
         'result',
         'targetType',
         'targetId',
@@ -1168,6 +1201,10 @@ export default {
   },
 
   computed: {
+    isLiteMode() {
+      return this.adminUiMode !== 'pro'
+    },
+
     pendingReportCount() {
       return this.reportList.filter((item) => item.reportStatus === 'PENDING').length
     },
@@ -1679,6 +1716,7 @@ export default {
         { key: 'createdAt', label: '时间' },
         { key: 'actionText', label: '动作中文' },
         { key: 'action', label: '动作编码' },
+        { key: 'actionSource', label: '执行来源' },
         { key: 'result', label: '结果' },
         { key: 'targetType', label: '对象类型' },
         { key: 'targetId', label: '对象ID' },
@@ -2030,6 +2068,8 @@ export default {
       this.logViewMode = 'flat'
       this.logOperator = 'all'
       this.logRole = 'all'
+      this.showTodoAdvanced = false
+      this.showLogAdvanced = false
       this.reportBatchMode = false
       this.selectedReportTodoIds = []
       this.verifyBatchMode = false
@@ -2077,6 +2117,23 @@ export default {
         this.logCustomStartDate = value
       }
       this.logCustomEndDate = value
+    },
+
+    setAdminUiMode(mode = 'lite') {
+      this.adminUiMode = mode === 'pro' ? 'pro' : 'lite'
+      if (this.isLiteMode) {
+        this.showTodoAdvanced = false
+        this.showLogAdvanced = false
+      }
+      this.saveTodoPreferences()
+    },
+
+    toggleTodoAdvanced() {
+      this.showTodoAdvanced = !this.showTodoAdvanced
+    },
+
+    toggleLogAdvanced() {
+      this.showLogAdvanced = !this.showLogAdvanced
     },
 
     onTodoOverdueSwitchChange(e) {
@@ -2429,6 +2486,7 @@ export default {
         'createdAt',
         'actionText',
         'action',
+        'actionSource',
         'result',
         'targetType',
         'targetId',
@@ -2444,6 +2502,7 @@ export default {
         createdAt: (item) => this.formatExportTime(new Date(item.createdAt || Date.now())),
         actionText: (item) => this.actionText(item.action),
         action: (item) => item.action || '',
+        actionSource: (item) => this.actionSourceText(item.actionSource),
         result: (item) => item.result || '',
         targetType: (item) => item.targetType || '',
         targetId: (item) => item.targetId || '',
@@ -2506,6 +2565,9 @@ export default {
         if ([12, 24, 48].includes(Number(pref.todoSlaHours))) {
           this.todoSlaHours = Number(pref.todoSlaHours)
         }
+        if (pref.adminUiMode === 'lite' || pref.adminUiMode === 'pro') {
+          this.adminUiMode = pref.adminUiMode
+        }
         if (typeof pref.todoAutoRemindEnabled === 'boolean') {
           this.todoAutoRemindEnabled = pref.todoAutoRemindEnabled
         }
@@ -2523,6 +2585,7 @@ export default {
     saveTodoPreferences() {
       try {
         uni.setStorageSync('dali_admin_todo_pref_v1', {
+          adminUiMode: this.adminUiMode,
           todoSlaHours: this.todoSlaHours,
           todoAutoRemindEnabled: this.todoAutoRemindEnabled,
           dailyReportAutoEnabled: this.dailyReportAutoEnabled,
@@ -3012,6 +3075,11 @@ export default {
         resolve_report_ignore: '举报处理并忽略',
       }
       return map[action] || action
+    },
+
+    actionSourceText(source) {
+      if (source === 'ai') return 'AI'
+      return '人工'
     },
 
     targetTypeText(type) {
@@ -3998,6 +4066,20 @@ export default {
 }
 .title { font-size: 40rpx; font-weight: bold; color: white; }
 .subtitle { display: block; margin-top: 10rpx; font-size: 24rpx; color: rgba(255,255,255,0.75); }
+.mode-switch-row {
+  margin-top: 14rpx;
+  display: flex;
+  gap: 10rpx;
+  flex-wrap: wrap;
+}
+.mode-switch-row .chip {
+  background: rgba(255, 255, 255, 0.18);
+  color: #eaf2fb;
+}
+.mode-switch-row .chip--active {
+  background: #ffffff;
+  color: #1A3C5E;
+}
 
 .summary-grid {
   display: grid;
