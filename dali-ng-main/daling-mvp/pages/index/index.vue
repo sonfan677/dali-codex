@@ -157,6 +157,10 @@ import {
 // false: 不回退，直接显示“附近暂时没有活动”
 // true: 回退示例数据
 const NEARBY_EMPTY_USE_MOCK = false
+const SUB_PROMPT_SCENE = 'index_first_open'
+const TMPL_START   = 'zgiN-rGOY7w4igxoQA5cwB6DqO9jsFlPkXQund_ZBiM'
+const TMPL_CANCEL  = '3wPqnwBSWK5LnfA-BIDxFeXkSkD01D5meepLNQw6lVY'
+const TMPL_FORMING = 'LC4Z3cL8VoDl679__aRVVvuh4VRCys70b5ZQc0edI0o'
 
 // 3条示例数据（位置未授权时展示）
 const MOCK_ACTIVITIES = [
@@ -246,6 +250,8 @@ export default {
       distanceOptions: DISTANCE_FILTER_OPTIONS,
       distanceIndex: Math.max(0, DISTANCE_FILTER_OPTIONS.findIndex((item) => item.radius === 50000)),
       distanceTouched: false,
+      nearbySubPrompting: false,
+      nearbySubPromptChecked: false,
     }
   },
 
@@ -389,6 +395,7 @@ export default {
             if (ok) {
               this.applyDefaultDistanceForMode('nearby')
               await this.loadActivities()
+              await this.maybePromptNearbySubscription()
               return
             }
           } catch(e) {
@@ -398,10 +405,12 @@ export default {
         // 无论有没有位置权限，都用默认坐标加载活动
         this.applyDefaultDistanceForMode('default')
         await this.loadActivitiesWithDefault()
+        await this.maybePromptNearbySubscription()
       },
       fail: async () => {
         this.applyDefaultDistanceForMode('default')
         await this.loadActivitiesWithDefault()
+        await this.maybePromptNearbySubscription()
       }
     })
     // #endif
@@ -410,6 +419,109 @@ export default {
 
 
   methods: {
+    async touchSubscriptionState(action) {
+      try {
+        const res = await callCloud('updateSubscriptionState', {
+          action,
+          scene: SUB_PROMPT_SCENE,
+        })
+        const gd = getApp().globalData || {}
+        gd.subscriptions = res?.subscriptions || gd.subscriptions || {}
+        gd.shouldPromptNearbySubscription = !!res?.shouldPromptNearbySubscription
+      } catch (e) {
+        console.warn('更新订阅状态失败:', e)
+      }
+    },
+
+    requestNearbySubscribeAuth() {
+      return new Promise((resolve) => {
+        // #ifdef MP-WEIXIN
+        if (typeof wx === 'undefined' || typeof wx.requestSubscribeMessage !== 'function') {
+          resolve({ ok: false, reason: 'UNSUPPORTED' })
+          return
+        }
+
+        const tmplIds = [TMPL_START, TMPL_CANCEL, TMPL_FORMING].filter(Boolean)
+        wx.requestSubscribeMessage({
+          tmplIds,
+          success: (res) => {
+            const states = Object.keys(res || {})
+              .filter((k) => k !== 'errMsg')
+              .map((k) => String(res[k] || ''))
+            resolve({
+              ok: true,
+              accepted: states.includes('accept'),
+              rejected: states.includes('reject'),
+              banned: states.includes('ban'),
+              raw: res,
+            })
+          },
+          fail: (err) => {
+            resolve({
+              ok: false,
+              reason: 'FAIL',
+              errMsg: String(err?.errMsg || ''),
+              raw: err,
+            })
+          },
+        })
+        // #endif
+
+        // #ifndef MP-WEIXIN
+        resolve({ ok: false, reason: 'NON_MP' })
+        // #endif
+      })
+    },
+
+    async maybePromptNearbySubscription() {
+      if (this.nearbySubPromptChecked || this.nearbySubPrompting) return
+      const gd = getApp().globalData || {}
+      if (!gd?.isLoggedIn) return
+
+      const shouldPrompt = !!gd.shouldPromptNearbySubscription
+      if (!shouldPrompt) {
+        this.nearbySubPromptChecked = true
+        return
+      }
+
+      this.nearbySubPrompting = true
+      try {
+        // 记录已触发“首次打开时机”弹窗，防止重复打扰
+        await this.touchSubscriptionState('prompted')
+
+        const modalRes = await new Promise((resolve) => {
+          uni.showModal({
+            title: '接收附近活动提醒',
+            content: '首次进入可开启订阅：附近有新活动或成团状态变化时会提醒你。',
+            confirmText: '立即开启',
+            cancelText: '暂不开启',
+            success: (res) => resolve(res),
+            fail: () => resolve({ confirm: false }),
+          })
+        })
+
+        if (!modalRes?.confirm) {
+          this.nearbySubPromptChecked = true
+          return
+        }
+
+        const subRes = await this.requestNearbySubscribeAuth()
+        if (subRes?.ok && subRes.accepted) {
+          await this.touchSubscriptionState('accepted')
+          uni.showToast({ title: '已开启活动提醒', icon: 'none' })
+        } else if (subRes?.ok && (subRes.rejected || subRes.banned)) {
+          await this.touchSubscriptionState('rejected')
+          uni.showToast({ title: '你暂未开启提醒，可在设置中调整', icon: 'none' })
+        } else {
+          await this.touchSubscriptionState('rejected')
+          uni.showToast({ title: '订阅弹窗未成功，不影响使用', icon: 'none' })
+        }
+      } finally {
+        this.nearbySubPrompting = false
+        this.nearbySubPromptChecked = true
+      }
+    },
+
     async ensureAdminVisibility(force = false) {
       const now = Date.now()
       // 5分钟内复用缓存，避免每次 onShow 都打云函数

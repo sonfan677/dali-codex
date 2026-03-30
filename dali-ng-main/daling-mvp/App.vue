@@ -21,6 +21,8 @@ export default {
         getApp().globalData.isLoggedIn   = true
         getApp().globalData.nickname     = res.nickname || ''
         getApp().globalData.avatarUrl    = res.avatarUrl || ''
+        getApp().globalData.subscriptions = res.subscriptions || {}
+        getApp().globalData.shouldPromptNearbySubscription = !!res.shouldPromptNearbySubscription
 
         if (res.isNewUser && !res.nickname && !res.avatarUrl) {
           setTimeout(() => {

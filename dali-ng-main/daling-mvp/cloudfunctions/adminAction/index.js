@@ -171,6 +171,8 @@ exports.main = async (event) => {
   const dryRun = !!event.dryRun
   const notifyAfterAction = !!event.notifyAfterAction
   const agentTraceId = event.agentTraceId ? String(event.agentTraceId).slice(0, 120) : ''
+  const expiresAtMs = new Date(event.expiresAt).getTime()
+  const expiresAt = Number.isFinite(expiresAtMs) ? new Date(expiresAtMs) : null
   if (!reason || reason.trim().length < 2) {
     return { success: false, error: 'REASON_REQUIRED', message: '请填写操作原因（至少2个字）' }
   }
@@ -188,6 +190,7 @@ exports.main = async (event) => {
         actionSource,
         canAutoExecute,
         manualOverride,
+        expiresAt,
       },
     }
   }
@@ -378,6 +381,9 @@ exports.main = async (event) => {
       linkedReportId: linkedReportId || '',
       notifyAfterAction,
       notifySummary,
+      expiresAt,
+      rollbackAt: null,
+      rollbackResult: null,
       actionSource,
       canAutoExecute,
       manualOverride,

@@ -33,6 +33,7 @@ exports.main = async (event, context) => {
   }
 
   // 加密存储
+  const cityId = users[0].cityId || 'dali'
   await db.collection('users').where({ _openid: OPENID }).update({
     data: {
       realName: encrypt(realName.trim()),
@@ -47,12 +48,23 @@ exports.main = async (event, context) => {
   try {
     await db.collection('adminActions').add({
       data: {
+        actionId: `verify_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        adminId: 'system',
         adminOpenid: 'system',
+        adminRole: 'system',
         targetId: OPENID,
         targetType: 'user',
         action: 'verify_request',
+        actionType: 'verify_request',
         reason: `用户申请实名认证：${realName.trim().slice(0,1)}**`,
+        cityId,
+        expiresAt: null,
+        rollbackAt: null,
+        rollbackResult: null,
+        outcomeVerified: null,
+        outcomeNote: null,
         createdAt: db.serverDate(),
+        updatedAt: db.serverDate(),
       }
     })
   } catch(e) {

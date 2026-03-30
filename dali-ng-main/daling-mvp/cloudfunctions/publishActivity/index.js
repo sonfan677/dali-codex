@@ -40,15 +40,22 @@ function buildTrustProfileForPublish(user) {
   const trustLevel = user?.platformVerified || user?.trustVerified ? 'A' : 'B'
   const displayStars = trustLevel === 'A' ? 5 : 4
   const identityLabel = trustLevel === 'A' ? '平台核验' : '已认证'
+  const riskLevel = trustLevel === 'A' ? 'L0' : 'L1'
   return {
     trustLevel,
     displayStars,
     starText: `${'★'.repeat(displayStars)}${'☆'.repeat(5 - displayStars)}`,
     identityLabel,
     riskTags: [],
-    riskLevel: trustLevel === 'A' ? 'L0' : 'L1',
+    riskLevel,
     internalScore: trustLevel === 'A' ? 90 : 75,
   }
+}
+
+function getBaseEffectiveScore(trustLevel = 'C') {
+  if (trustLevel === 'A') return 85
+  if (trustLevel === 'B') return 70
+  return 60
 }
 
 function normalizeNumber(value, fallback) {
@@ -205,6 +212,9 @@ exports.main = async (event, context) => {
     : null
 
   // 4. 写入数据库
+  const trustProfile = buildTrustProfileForPublish(user)
+  const baseEffectiveScore = getBaseEffectiveScore(trustProfile.trustLevel)
+
   const result = await db.collection('activities').add({
     data: {
       _openid: OPENID,
@@ -253,7 +263,29 @@ exports.main = async (event, context) => {
         value: '',
         cityId: finalCityId,
       },
-      trustProfile: buildTrustProfileForPublish(user),
+      trustProfile,
+      effectiveScore: baseEffectiveScore,
+      decayStartedAt: null,
+      participantFeedback: {
+        held: 0,
+        notHeld: 0,
+      },
+      riskTags: [],
+      riskTagMeta: [],
+      riskLevel: trustProfile.riskLevel,
+      riskScore: trustProfile.trustLevel === 'A' ? 8 : 18,
+      riskReasonCodes: [],
+      riskControl: {
+        autoDecisionCoverage: 0.8,
+        autoRiskScore: trustProfile.trustLevel === 'A' ? 8 : 18,
+        autoRiskLevel: trustProfile.riskLevel,
+        autoReasonCodes: [],
+        manualReviewRequired: false,
+        needsBatchReview: false,
+        lastEvaluatedAt: db.serverDate(),
+        ttlRollbackCount: 0,
+      },
+      riskAutoVersion: 'v1.0',
       modificationRiskScore: 0,
       publisherId: OPENID,
       publisherNickname: user.nickname,

@@ -22,6 +22,27 @@ function parseAdminMeta(openid) {
   }
 }
 
+function mapRiskLevelByScore(score = 0) {
+  const n = Number(score || 0)
+  if (n >= 70) return 'L3'
+  if (n >= 40) return 'L2'
+  if (n >= 20) return 'L1'
+  return 'L0'
+}
+
+function getActiveRiskTagsFromMeta(meta = [], nowMs = Date.now()) {
+  if (!Array.isArray(meta)) return []
+  return meta
+    .filter((item) => {
+      if (!item || item.status === 'expired') return false
+      const expiresAtMs = new Date(item.expiresAt).getTime()
+      if (Number.isFinite(expiresAtMs) && expiresAtMs <= nowMs) return false
+      return true
+    })
+    .map((item) => item.label || item.code || '')
+    .filter(Boolean)
+}
+
 function buildTrustProfile(activity, user, nowMs) {
   const hasPlatformVerified = !!(
     user?.platformVerified ||
@@ -42,18 +63,30 @@ function buildTrustProfile(activity, user, nowMs) {
       ? '已认证'
       : '新入驻'
 
-  const tags = []
-  if (trustLevel === 'C') tags.push('新入驻')
+  const tags = new Set()
+  if (trustLevel === 'C') tags.add('新入驻')
   const startMs = new Date(activity.startTime).getTime()
   if (Number.isFinite(startMs) && startMs > nowMs && startMs - nowMs <= 24 * 60 * 60 * 1000) {
-    tags.push('临时组织')
+    tags.add('临时组织')
   }
   const modificationRiskScore = Number(activity.modificationRiskScore || activity.modificationRisk || 0)
-  if (modificationRiskScore >= 2) tags.push('曾发生变更')
+  if (modificationRiskScore >= 2) tags.add('曾发生变更')
 
+  const riskTagsFromMeta = getActiveRiskTagsFromMeta(activity?.riskTagMeta, nowMs)
+  riskTagsFromMeta.forEach((tag) => tags.add(tag))
+  ;(Array.isArray(activity?.riskTags) ? activity.riskTags : []).forEach((tag) => tags.add(tag))
   const presetTags = Array.isArray(activity?.trustProfile?.riskTags) ? activity.trustProfile.riskTags : []
-  const riskTags = [...new Set([...presetTags, ...tags])].slice(0, 3)
-  const riskLevel = activity?.trustProfile?.riskLevel || (trustLevel === 'A' ? 'L0' : trustLevel === 'B' ? 'L1' : 'L2')
+  presetTags.forEach((tag) => tags.add(tag))
+  const riskTags = [...tags].slice(0, 3)
+
+  const fallbackScore = trustLevel === 'A' ? 8 : trustLevel === 'B' ? 18 : 32
+  const riskScore = Number.isFinite(Number(activity?.riskScore))
+    ? Number(activity.riskScore)
+    : fallbackScore + (modificationRiskScore >= 3 ? 30 : modificationRiskScore >= 2 ? 16 : 0)
+  const riskLevel = activity?.riskLevel ||
+    activity?.riskControl?.autoRiskLevel ||
+    activity?.trustProfile?.riskLevel ||
+    mapRiskLevelByScore(riskScore)
 
   return {
     trustLevel,
@@ -62,6 +95,7 @@ function buildTrustProfile(activity, user, nowMs) {
     identityLabel,
     riskTags,
     riskLevel,
+    riskScore,
     internalScore: trustLevel === 'A' ? 90 : trustLevel === 'B' ? 75 : 60,
   }
 }

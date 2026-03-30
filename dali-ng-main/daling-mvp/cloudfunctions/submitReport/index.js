@@ -67,6 +67,11 @@ exports.main = async (event) => {
       handledAt: null,
       handlerOpenid: null,
       cityId: activity.cityId || 'dali',
+      expiresAt: null,
+      rollbackAt: null,
+      rollbackResult: null,
+      outcomeVerified: null,
+      outcomeNote: null,
       createdAt: db.serverDate(),
       updatedAt: db.serverDate(),
     }

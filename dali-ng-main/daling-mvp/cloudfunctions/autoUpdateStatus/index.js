@@ -132,6 +132,462 @@ async function safeCount(queryBuilder, fallbackMaxFetch = 5000) {
   return list.length
 }
 
+function chunkArray(arr = [], size = 20) {
+  const list = []
+  for (let i = 0; i < arr.length; i += size) {
+    list.push(arr.slice(i, i + size))
+  }
+  return list
+}
+
+function safeArray(value) {
+  return Array.isArray(value) ? value : []
+}
+
+function mapRiskLevelByScore(score = 0) {
+  const n = Number(score || 0)
+  if (n >= 70) return 'L3'
+  if (n >= 40) return 'L2'
+  if (n >= 20) return 'L1'
+  return 'L0'
+}
+
+function mapLabelToCode(label = '') {
+  const map = {
+    新入驻: 'new_entry',
+    临时组织: 'temporary_org',
+    曾发生变更: 'activity_volatility',
+    举报待处理: 'pending_report',
+    待发布者决策: 'pending_organizer',
+    参与波动: 'participant_volatility',
+  }
+  return map[label] || `legacy_${label}`
+}
+
+function toJson(value) {
+  try {
+    return JSON.stringify(value)
+  } catch (e) {
+    return ''
+  }
+}
+
+async function buildReportStatsMap(activityIds = []) {
+  const statsMap = {}
+  const ids = [...new Set(activityIds.filter(Boolean))]
+  if (!ids.length) return statsMap
+
+  for (const group of chunkArray(ids, 20)) {
+    const { data: reports } = await db.collection('adminActions')
+      .where({
+        action: 'report',
+        targetId: _.in(group),
+      })
+      .field({
+        targetId: true,
+        reportStatus: true,
+        createdAt: true,
+      })
+      .limit(500)
+      .get()
+      .catch(() => ({ data: [] }))
+
+    ;(reports || []).forEach((item) => {
+      const key = item.targetId
+      if (!key) return
+      if (!statsMap[key]) {
+        statsMap[key] = {
+          totalReports: 0,
+          pendingReports: 0,
+          handledReports: 0,
+          ignoredReports: 0,
+          latestReportAt: null,
+        }
+      }
+      const row = statsMap[key]
+      row.totalReports += 1
+      const status = item.reportStatus || 'PENDING'
+      if (status === 'HANDLED') row.handledReports += 1
+      else if (status === 'IGNORED') row.ignoredReports += 1
+      else row.pendingReports += 1
+
+      const ts = new Date(item.createdAt).getTime()
+      const latestTs = new Date(row.latestReportAt).getTime()
+      if (Number.isFinite(ts) && (!Number.isFinite(latestTs) || ts > latestTs)) {
+        row.latestReportAt = item.createdAt
+      }
+    })
+  }
+  return statsMap
+}
+
+function computeRiskEvaluation(activity, reportStats = {}, nowMs = Date.now()) {
+  const trustLevel = activity?.trustProfile?.trustLevel ||
+    (activity?.isVerified ? 'B' : 'C')
+  const baseRiskScore = trustLevel === 'A' ? 6 : trustLevel === 'B' ? 16 : 30
+
+  let riskScore = baseRiskScore
+  const reasonCodes = []
+  if (trustLevel === 'C') reasonCodes.push('BASE_TRUST_C')
+  else if (trustLevel === 'B') reasonCodes.push('BASE_TRUST_B')
+
+  const modificationRiskScore = Number(activity.modificationRiskScore || 0)
+  if (modificationRiskScore >= 3) {
+    riskScore += 36
+    reasonCodes.push('MODIFICATION_HIGH')
+  } else if (modificationRiskScore >= 2) {
+    riskScore += 18
+    reasonCodes.push('MODIFICATION_MEDIUM')
+  }
+
+  const pendingReports = Number(reportStats.pendingReports || 0)
+  if (pendingReports > 0) {
+    riskScore += Math.min(45, pendingReports * 15)
+    reasonCodes.push('PENDING_REPORT')
+  }
+
+  const startMs = new Date(activity.startTime).getTime()
+  const endMs = new Date(activity.endTime).getTime()
+  if (Number.isFinite(startMs) && startMs > nowMs && startMs - nowMs <= 24 * 60 * 60 * 1000) {
+    riskScore += 8
+    reasonCodes.push('TEMPORARY_ORG')
+  }
+  if (Number.isFinite(startMs) && startMs > nowMs && startMs - nowMs <= 2 * 60 * 60 * 1000) {
+    riskScore += 6
+    reasonCodes.push('STARTING_SOON')
+  }
+  if (activity.formationStatus === 'PENDING_ORGANIZER') {
+    riskScore += 18
+    reasonCodes.push('PENDING_ORGANIZER')
+  }
+  if (activity.status === 'CANCELLED') {
+    riskScore += 25
+    reasonCodes.push('ACTIVITY_CANCELLED')
+  }
+  if (activity.isRecommended && trustLevel === 'A') {
+    riskScore = Math.max(0, riskScore - 3)
+    reasonCodes.push('OFFICIAL_RECOMMENDED')
+  }
+
+  const tagRules = [
+    {
+      code: 'new_entry',
+      label: '新入驻',
+      enabled: trustLevel === 'C',
+      expiresAt: null,
+      reasonCode: 'BASE_TRUST_C',
+    },
+    {
+      code: 'activity_volatility',
+      label: '曾发生变更',
+      enabled: modificationRiskScore >= 2,
+      expiresAt: new Date(nowMs + 30 * DAY_MS),
+      reasonCode: modificationRiskScore >= 3 ? 'MODIFICATION_HIGH' : 'MODIFICATION_MEDIUM',
+    },
+    {
+      code: 'temporary_org',
+      label: '临时组织',
+      enabled: Number.isFinite(startMs) && startMs > nowMs && startMs - nowMs <= 24 * 60 * 60 * 1000,
+      expiresAt: Number.isFinite(endMs) ? new Date(endMs) : new Date(nowMs + DAY_MS),
+      reasonCode: 'TEMPORARY_ORG',
+    },
+    {
+      code: 'pending_report',
+      label: '举报待处理',
+      enabled: pendingReports > 0,
+      expiresAt: new Date(nowMs + 7 * DAY_MS),
+      reasonCode: 'PENDING_REPORT',
+    },
+    {
+      code: 'pending_organizer',
+      label: '待发布者决策',
+      enabled: activity.formationStatus === 'PENDING_ORGANIZER',
+      expiresAt: activity.organizerDecisionDeadline ? new Date(activity.organizerDecisionDeadline) : new Date(nowMs + DAY_MS),
+      reasonCode: 'PENDING_ORGANIZER',
+    },
+  ]
+
+  const riskLevel = mapRiskLevelByScore(riskScore)
+  return {
+    trustLevel,
+    riskScore,
+    riskLevel,
+    reasonCodes: [...new Set(reasonCodes)],
+    tagRules,
+  }
+}
+
+function normalizeRiskTagMeta(activity = {}, nowMs = Date.now()) {
+  const nowDate = new Date(nowMs)
+  const legacyTags = safeArray(activity?.riskTags)
+  const fromTrustProfile = safeArray(activity?.trustProfile?.riskTags)
+  const current = safeArray(activity?.riskTagMeta).map((item) => ({
+    code: item?.code || '',
+    label: item?.label || item?.code || '',
+    source: item?.source || 'manual',
+    status: item?.status || 'active',
+    createdAt: item?.createdAt || activity?.createdAt || nowDate,
+    expiresAt: item?.expiresAt || null,
+    rollbackAt: item?.rollbackAt || null,
+    reasonCode: item?.reasonCode || '',
+  })).filter((item) => item.code && item.label)
+
+  const knownCodes = new Set(current.map((item) => item.code))
+  ;[...legacyTags, ...fromTrustProfile].forEach((label) => {
+    const code = mapLabelToCode(label)
+    if (knownCodes.has(code)) return
+    current.push({
+      code,
+      label,
+      source: 'manual',
+      status: 'active',
+      createdAt: activity?.createdAt || nowDate,
+      expiresAt: null,
+      rollbackAt: null,
+      reasonCode: 'LEGACY_TAG',
+    })
+    knownCodes.add(code)
+  })
+
+  let ttlExpiredCount = 0
+  current.forEach((item) => {
+    if (item.status !== 'active') return
+    const expiresAtMs = new Date(item.expiresAt).getTime()
+    if (!Number.isFinite(expiresAtMs) || expiresAtMs > nowMs) return
+    item.status = 'expired'
+    item.rollbackAt = nowDate
+    item.reasonCode = item.reasonCode || 'TTL_EXPIRED'
+    ttlExpiredCount += 1
+  })
+
+  return { meta: current, ttlExpiredCount }
+}
+
+function applyAutoTagRules(meta = [], tagRules = [], nowMs = Date.now()) {
+  const nowDate = new Date(nowMs)
+  let autoRollbackCount = 0
+  const list = safeArray(meta).map((item) => ({ ...item }))
+
+  const findActiveAuto = (code) => list.find((item) => item.code === code && item.source === 'auto' && item.status === 'active')
+
+  safeArray(tagRules).forEach((rule) => {
+    const exists = findActiveAuto(rule.code)
+    if (rule.enabled) {
+      if (exists) {
+        exists.label = rule.label
+        exists.expiresAt = rule.expiresAt || null
+        exists.reasonCode = rule.reasonCode || exists.reasonCode || ''
+      } else {
+        list.push({
+          code: rule.code,
+          label: rule.label,
+          source: 'auto',
+          status: 'active',
+          createdAt: nowDate,
+          expiresAt: rule.expiresAt || null,
+          rollbackAt: null,
+          reasonCode: rule.reasonCode || '',
+        })
+      }
+      return
+    }
+
+    if (exists) {
+      exists.status = 'expired'
+      exists.rollbackAt = nowDate
+      exists.reasonCode = 'AUTO_RECOVERED'
+      autoRollbackCount += 1
+    }
+  })
+
+  return {
+    meta: list,
+    autoRollbackCount,
+  }
+}
+
+function getActiveTagLabels(meta = [], nowMs = Date.now()) {
+  return safeArray(meta)
+    .filter((item) => {
+      if (item.status !== 'active') return false
+      const expiresAtMs = new Date(item.expiresAt).getTime()
+      if (Number.isFinite(expiresAtMs) && expiresAtMs <= nowMs) return false
+      return true
+    })
+    .map((item) => item.label || item.code || '')
+    .filter(Boolean)
+}
+
+async function refreshActivityRiskLayers(nowMs) {
+  const activeActivities = await fetchByPage(
+    () => db.collection('activities')
+      .where({ status: _.in(['OPEN', 'FULL']) })
+      .orderBy('createdAt', 'asc'),
+    100,
+    2000
+  )
+  if (!activeActivities.length) {
+    return { scanned: 0, updated: 0, ttlRollbackCount: 0, manualOverrideRollbackCount: 0 }
+  }
+
+  const reportStatsMap = await buildReportStatsMap(activeActivities.map((item) => item._id))
+  let updated = 0
+  let ttlRollbackCount = 0
+
+  for (const activity of activeActivities) {
+    const reportStats = reportStatsMap[activity._id] || {}
+    const evalResult = computeRiskEvaluation(activity, reportStats, nowMs)
+
+    const normalized = normalizeRiskTagMeta(activity, nowMs)
+    ttlRollbackCount += normalized.ttlExpiredCount
+    const applied = applyAutoTagRules(normalized.meta, evalResult.tagRules, nowMs)
+    ttlRollbackCount += applied.autoRollbackCount
+
+    const activeTags = getActiveTagLabels(applied.meta, nowMs)
+    const currentDecayStartedAt = activity.decayStartedAt || null
+    const currentParticipantFeedback = activity.participantFeedback && typeof activity.participantFeedback === 'object'
+      ? activity.participantFeedback
+      : { held: 0, notHeld: 0 }
+    const effectiveScore = Number.isFinite(Number(activity.effectiveScore))
+      ? Number(activity.effectiveScore)
+      : (evalResult.trustLevel === 'A' ? 85 : evalResult.trustLevel === 'B' ? 70 : 60)
+
+    const riskControl = {
+      autoDecisionCoverage: 0.8,
+      autoRiskScore: evalResult.riskScore,
+      autoRiskLevel: evalResult.riskLevel,
+      autoReasonCodes: evalResult.reasonCodes,
+      manualReviewRequired: evalResult.riskLevel === 'L3',
+      needsBatchReview: evalResult.riskLevel === 'L2',
+      lastEvaluatedAt: new Date(nowMs),
+      ttlRollbackCount: Number(activity?.riskControl?.ttlRollbackCount || 0) + normalized.ttlExpiredCount + applied.autoRollbackCount,
+    }
+
+    const nextTrustProfile = {
+      ...(activity.trustProfile || {}),
+      riskTags: activeTags.slice(0, 3),
+      riskLevel: evalResult.riskLevel,
+    }
+
+    const nextSnapshot = {
+      riskLevel: evalResult.riskLevel,
+      riskScore: evalResult.riskScore,
+      riskReasonCodes: evalResult.reasonCodes,
+      riskTags: activeTags,
+      riskTagMeta: applied.meta,
+      riskControl,
+      effectiveScore,
+      decayStartedAt: currentDecayStartedAt,
+      participantFeedback: currentParticipantFeedback,
+      trustProfile: nextTrustProfile,
+    }
+    const prevSnapshot = {
+      riskLevel: activity.riskLevel || '',
+      riskScore: Number(activity.riskScore || 0),
+      riskReasonCodes: safeArray(activity.riskReasonCodes),
+      riskTags: safeArray(activity.riskTags),
+      riskTagMeta: safeArray(activity.riskTagMeta),
+      riskControl: {
+        autoRiskScore: Number(activity?.riskControl?.autoRiskScore || 0),
+        autoRiskLevel: activity?.riskControl?.autoRiskLevel || '',
+        autoReasonCodes: safeArray(activity?.riskControl?.autoReasonCodes),
+        manualReviewRequired: !!activity?.riskControl?.manualReviewRequired,
+        needsBatchReview: !!activity?.riskControl?.needsBatchReview,
+      },
+      effectiveScore: Number.isFinite(Number(activity.effectiveScore)) ? Number(activity.effectiveScore) : null,
+      decayStartedAt: activity.decayStartedAt || null,
+      participantFeedback: activity.participantFeedback && typeof activity.participantFeedback === 'object'
+        ? activity.participantFeedback
+        : { held: 0, notHeld: 0 },
+      trustProfile: {
+        ...(activity.trustProfile || {}),
+        riskTags: safeArray(activity?.trustProfile?.riskTags),
+        riskLevel: activity?.trustProfile?.riskLevel || '',
+      },
+    }
+
+    if (toJson(prevSnapshot) === toJson(nextSnapshot)) continue
+
+    await db.collection('activities').doc(activity._id).update({
+      data: {
+        ...nextSnapshot,
+        riskAutoVersion: 'v1.0',
+        riskAutoEvaluatedAt: db.serverDate(),
+      },
+    })
+    updated += 1
+  }
+
+  let manualOverrideRollbackCount = 0
+  const expiringActions = await fetchByPage(
+    () => db.collection('adminActions')
+      .where({
+        targetType: 'activity',
+        expiresAt: _.lte(new Date(nowMs)),
+        rollbackAt: null,
+      })
+      .orderBy('createdAt', 'asc'),
+    50,
+    500
+  )
+
+  for (const actionRow of expiringActions) {
+    const beforeActivity = actionRow?.beforeState?.activity || actionRow?.beforeState || null
+    const targetActivityId = actionRow?.linkedActivityId || actionRow?.targetId
+    if (!targetActivityId || !beforeActivity || typeof beforeActivity !== 'object') {
+      await db.collection('adminActions').doc(actionRow._id).update({
+        data: {
+          rollbackAt: db.serverDate(),
+          rollbackResult: 'SKIPPED_NO_BEFORE_STATE',
+          updatedAt: db.serverDate(),
+        },
+      })
+      continue
+    }
+
+    const restorePatch = {}
+    ;[
+      'status',
+      'isRecommended',
+      'riskTags',
+      'riskTagMeta',
+      'riskLevel',
+      'riskScore',
+      'riskReasonCodes',
+      'trustProfile',
+      'effectiveScore',
+      'decayStartedAt',
+      'participantFeedback',
+      'riskControl',
+    ].forEach((key) => {
+      if (Object.prototype.hasOwnProperty.call(beforeActivity, key)) {
+        restorePatch[key] = beforeActivity[key]
+      }
+    })
+
+    if (Object.keys(restorePatch).length > 0) {
+      restorePatch.updatedAt = db.serverDate()
+      await db.collection('activities').doc(targetActivityId).update({ data: restorePatch }).catch(() => null)
+      manualOverrideRollbackCount += 1
+    }
+
+    await db.collection('adminActions').doc(actionRow._id).update({
+      data: {
+        rollbackAt: db.serverDate(),
+        rollbackResult: Object.keys(restorePatch).length > 0 ? 'ROLLBACK_DONE' : 'SKIPPED_EMPTY_PATCH',
+        updatedAt: db.serverDate(),
+      },
+    })
+  }
+
+  return {
+    scanned: activeActivities.length,
+    updated,
+    ttlRollbackCount,
+    manualOverrideRollbackCount,
+  }
+}
+
 async function fetchByPage(queryBuilder, pageSize = 100, maxFetch = 1000) {
   const list = []
   let skip = 0
@@ -289,6 +745,28 @@ async function buildAndSaveSupplyMetrics(nowMs) {
       cityId,
       createdAt: _.gte(todayRange.start).and(_.lt(todayRange.end)),
     }))
+    const { data: todayPublishedRows } = await db.collection('activities')
+      .where({
+        cityId,
+        createdAt: _.gte(todayRange.start).and(_.lt(todayRange.end)),
+      })
+      .field({
+        publisherId: true,
+      })
+      .limit(500)
+      .get()
+      .catch(() => ({ data: [] }))
+    const publisherCounter = {}
+    ;(todayPublishedRows || []).forEach((item) => {
+      const key = String(item.publisherId || '').trim()
+      if (!key) return
+      publisherCounter[key] = (publisherCounter[key] || 0) + 1
+    })
+    const uniquePublishers = Object.keys(publisherCounter).length
+    const repeatPublishers = Object.keys(publisherCounter)
+      .filter((key) => Number(publisherCounter[key] || 0) > 1)
+      .length
+
     const joinedCount = await safeCount(() => db.collection('participations').where({
       cityId,
       joinedAt: _.gte(todayRange.start).and(_.lt(todayRange.end)),
@@ -315,6 +793,10 @@ async function buildAndSaveSupplyMetrics(nowMs) {
       updatedAt: _.gte(todayRange.start).and(_.lt(todayRange.end)),
     }))
     const formationResolvedCount = formationConfirmedCount + formationFailedCount
+    const activitiesArchived = await safeCount(() => db.collection('activities').where({
+      cityId,
+      autoArchivedAt: _.gte(todayRange.start).and(_.lt(todayRange.end)),
+    }))
 
     const d1EligibleCount = await safeCount(() => db.collection('users').where({
       cityId,
@@ -416,6 +898,14 @@ async function buildAndSaveSupplyMetrics(nowMs) {
       dayStartAt: todayRange.start,
       dayEndAt: todayRange.end,
       activitiesCreatedCount,
+      activitiesPublished: activitiesCreatedCount,
+      activitiesFormed: formationConfirmedCount,
+      activitiesArchived,
+      formationRate: formationResolvedCount > 0
+        ? Number((formationConfirmedCount / formationResolvedCount).toFixed(4))
+        : 0,
+      uniquePublishers,
+      repeatPublishers,
       joinedCount,
       newUsersCount,
       dauCount,
@@ -438,6 +928,7 @@ async function buildAndSaveSupplyMetrics(nowMs) {
       },
       threshold,
       alertFlags,
+      alertReasons: alertFlags,
       alertLevel: alertFlags.length >= 2 ? 'high' : alertFlags.length === 1 ? 'medium' : 'normal',
     })
 
@@ -644,6 +1135,15 @@ exports.main = async () => {
   }
   console.log(`[autoUpdateStatus] 成团状态扫描数: ${formationWatchedActivities.length}，转待决策: ${formationPendingCount}，确认成团: ${formationConfirmedCount}，超时归档: ${pendingAutoArchivedCount}`)
 
+  let riskLayerResult = null
+  let riskLayerError = ''
+  try {
+    riskLayerResult = await refreshActivityRiskLayers(nowMs)
+  } catch (e) {
+    riskLayerError = String(e?.message || e)
+    console.error('[autoUpdateStatus] 自动风险分层失败', e)
+  }
+
   let metricsResult = null
   let metricsError = ''
   try {
@@ -662,6 +1162,8 @@ exports.main = async () => {
     formationConfirmedCount,
     formationPendingCount,
     pendingAutoArchivedCount,
+    riskLayerResult,
+    riskLayerError,
     metricsResult,
     metricsError,
     executedAt: now.toISOString(),

@@ -805,6 +805,12 @@ export default {
     // 请求订阅消息授权
     requestSubscribe() {
       return new Promise((resolve) => {
+        const gd = getApp().globalData || {}
+        if (gd?.subscriptions?.nearbyActivity) {
+          resolve({ ok: true, accepted: true, fromStoredPreference: true })
+          return
+        }
+
         // #ifdef MP-WEIXIN
         if (typeof wx === 'undefined' || typeof wx.requestSubscribeMessage !== 'function') {
           resolve({ ok: false, reason: 'UNSUPPORTED' })
@@ -907,9 +913,21 @@ export default {
       // 请求订阅授权（不影响报名主流程）
       const subRes = await this.requestSubscribe()
       if (subRes?.ok && subRes.accepted) {
+        callCloud('updateSubscriptionState', {
+          action: 'accepted',
+          scene: 'detail_join',
+        }).then((syncRes) => {
+          const gd = getApp().globalData || {}
+          gd.subscriptions = syncRes?.subscriptions || gd.subscriptions || {}
+          gd.shouldPromptNearbySubscription = !!syncRes?.shouldPromptNearbySubscription
+        }).catch(() => {})
         const title = subRes.degraded ? '已开启核心通知（其余模板待核对）' : '已开启活动通知'
         uni.showToast({ title, icon: 'none', duration: 1500 })
       } else if (subRes?.ok && (subRes.rejected || subRes.banned)) {
+        callCloud('updateSubscriptionState', {
+          action: 'rejected',
+          scene: 'detail_join',
+        }).catch(() => {})
         uni.showModal({
           title: '未开启订阅消息',
           content: '你可在设置中开启“订阅消息”，以便接收活动提醒',
@@ -921,6 +939,10 @@ export default {
           }
         })
       } else if (!subRes?.ok) {
+        callCloud('updateSubscriptionState', {
+          action: 'prompted',
+          scene: 'detail_join',
+        }).catch(() => {})
         const detail = subRes?.errMsg || ''
         uni.showModal({
           title: '订阅授权未弹出',
