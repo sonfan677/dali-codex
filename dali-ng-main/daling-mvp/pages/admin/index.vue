@@ -401,6 +401,24 @@
             <text class="card-title">待审核认证</text>
             <text class="status-pill status-pill--pending">{{ displayPendingVerifyTodoList.length }}</text>
           </view>
+          <view class="todo-batch-toolbar">
+            <button class="mini-btn" @tap="toggleVerifyBatchMode">{{ verifyBatchMode ? '退出批量' : '开启批量' }}</button>
+            <view v-if="verifyBatchMode" class="todo-batch-actions">
+              <button class="mini-btn mini-btn--ghost" @tap="selectAllVisibleVerifyTodos">全选当前</button>
+              <button class="mini-btn mini-btn--ghost" @tap="clearSelectedVerifyTodos">清空</button>
+              <button
+                class="mini-btn"
+                :disabled="batchSelectedVerifyCount === 0 || verifyBatchProcessing"
+                @tap="batchHandleVerify('verify')"
+              >批量通过({{ batchSelectedVerifyCount }})</button>
+              <button
+                class="mini-btn mini-btn--ghost"
+                :disabled="batchSelectedVerifyCount === 0 || verifyBatchProcessing"
+                @tap="batchHandleVerify('reject_verify')"
+              >批量拒绝({{ batchSelectedVerifyCount }})</button>
+            </view>
+          </view>
+          <view v-if="verifyBatchMode" class="card-openid">批量模式已开启：已选 {{ batchSelectedVerifyCount }} 条</view>
           <view v-if="displayPendingVerifyTodoList.length === 0" class="empty empty--inline">
             <text class="empty-text">{{ todoOnlyOverdue ? '暂无超时认证待办' : '暂无待审核认证' }}</text>
           </view>
@@ -412,7 +430,15 @@
           >
             <view class="title-row">
               <text class="card-sub">{{ item.nickname || shortOpenid(item._openid) }}</text>
-              <text class="card-openid">已等待 {{ item.waitHoursText }}</text>
+              <view class="todo-title-actions">
+                <text class="card-openid">已等待 {{ item.waitHoursText }}</text>
+                <button
+                  v-if="verifyBatchMode"
+                  class="mini-btn mini-btn--ghost mini-btn--pick"
+                  :disabled="verifyBatchProcessing"
+                  @tap="toggleVerifySelection(item._openid)"
+                >{{ isVerifySelected(item._openid) ? '已选' : '选择' }}</button>
+              </view>
             </view>
             <text class="card-openid">{{ item._openid ? item._openid.slice(0, 20) + '...' : '--' }}</text>
             <view class="card-actions">
@@ -420,6 +446,44 @@
               <button class="action-btn action-btn--reject" @tap="verifyUserQuick(item._openid, 'reject_verify')">拒绝(快捷)</button>
             </view>
           </view>
+        </view>
+
+        <view class="card">
+          <view class="title-row">
+            <text class="card-title">批量执行结果</text>
+            <text class="card-openid">{{ batchLastRun ? batchLastRun.timeText : '--' }}</text>
+          </view>
+          <view v-if="!batchLastRun" class="empty empty--inline">
+            <text class="empty-text">暂无批量执行记录</text>
+          </view>
+          <template v-else>
+            <view class="inline-badges">
+              <text class="mini-pill mini-pill--log">{{ batchLastRun.scopeLabel }}</text>
+              <text class="mini-pill mini-pill--report">总计 {{ batchLastRun.total }}</text>
+              <text class="mini-pill mini-pill--handled">成功 {{ batchLastRun.successCount }}</text>
+              <text class="mini-pill mini-pill--risk">失败 {{ batchLastRun.failCount }}</text>
+            </view>
+            <view class="todo-batch-toolbar">
+              <button
+                class="mini-btn"
+                :disabled="batchLastRun.failCount === 0 || retryBatchProcessing"
+                @tap="retryFailedBatch"
+              >重试失败项({{ batchLastRun.failCount }})</button>
+              <button class="mini-btn mini-btn--ghost" @tap="copyBatchResult">复制结果</button>
+            </view>
+            <view v-if="batchLastRun.items.length === 0" class="empty empty--inline">
+              <text class="empty-text">本次批量暂无明细</text>
+            </view>
+            <view v-for="item in batchLastRun.items.slice(0, 8)" :key="item.resultId" class="todo-item">
+              <view class="title-row">
+                <text class="card-sub">{{ item.label }}</text>
+                <text class="status-pill" :class="item.success ? 'status-pill--handled' : 'status-pill--ignored'">
+                  {{ item.success ? '成功' : '失败' }}
+                </text>
+              </view>
+              <text class="card-openid">{{ item.message }}</text>
+            </view>
+          </template>
         </view>
 
         <view class="card">
@@ -994,6 +1058,11 @@ export default {
       reportBatchMode: false,
       reportBatchProcessing: false,
       selectedReportTodoIds: [],
+      verifyBatchMode: false,
+      verifyBatchProcessing: false,
+      selectedVerifyOpenids: [],
+      retryBatchProcessing: false,
+      batchLastRun: null,
       reportSort: 'created_desc',
       logTimeRange: 'all',
       logCustomStartDate: today,
@@ -1258,6 +1327,10 @@ export default {
 
     batchSelectedReportCount() {
       return this.selectedReportTodoIds.length
+    },
+
+    batchSelectedVerifyCount() {
+      return this.selectedVerifyOpenids.length
     },
 
     recentClosureList() {
@@ -1828,6 +1901,8 @@ export default {
       this.logRole = 'all'
       this.reportBatchMode = false
       this.selectedReportTodoIds = []
+      this.verifyBatchMode = false
+      this.selectedVerifyOpenids = []
     },
   },
 
@@ -1896,8 +1971,19 @@ export default {
       }
     },
 
+    toggleVerifyBatchMode() {
+      this.verifyBatchMode = !this.verifyBatchMode
+      if (!this.verifyBatchMode) {
+        this.selectedVerifyOpenids = []
+      }
+    },
+
     isReportSelected(reportId) {
       return this.selectedReportTodoIds.includes(reportId)
+    },
+
+    isVerifySelected(openid) {
+      return this.selectedVerifyOpenids.includes(openid)
     },
 
     toggleReportSelection(reportId) {
@@ -1909,13 +1995,111 @@ export default {
       this.selectedReportTodoIds = [...this.selectedReportTodoIds, reportId]
     },
 
+    toggleVerifySelection(openid) {
+      if (!openid) return
+      if (this.isVerifySelected(openid)) {
+        this.selectedVerifyOpenids = this.selectedVerifyOpenids.filter((id) => id !== openid)
+        return
+      }
+      this.selectedVerifyOpenids = [...this.selectedVerifyOpenids, openid]
+    },
+
     selectAllVisibleReportTodos() {
       const ids = this.displayPendingReportTodoList.map((item) => item._id)
       this.selectedReportTodoIds = [...new Set(ids)]
     },
 
+    selectAllVisibleVerifyTodos() {
+      const ids = this.displayPendingVerifyTodoList.map((item) => item._openid).filter(Boolean)
+      this.selectedVerifyOpenids = [...new Set(ids)]
+    },
+
     clearSelectedReportTodos() {
       this.selectedReportTodoIds = []
+    },
+
+    clearSelectedVerifyTodos() {
+      this.selectedVerifyOpenids = []
+    },
+
+    formatBatchScopeLabel(scope) {
+      const map = {
+        report: '举报批量处理',
+        verify: '认证批量处理',
+        retry: '失败项重试',
+      }
+      return map[scope] || '批量处理'
+    },
+
+    formatBatchActionLabel(action) {
+      const map = {
+        resolve_report_hide: '批量下架举报',
+        resolve_report_ignore: '批量忽略举报',
+        verify: '批量通过认证',
+        reject_verify: '批量拒绝认证',
+      }
+      return map[action] || action
+    },
+
+    createBatchResultId() {
+      return `batch_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
+    },
+
+    async executeBatchActions({
+      scope = 'report',
+      action = '',
+      rows = [],
+      reason = '',
+      payloadBuilder = () => ({}),
+      labelBuilder = () => '待处理项',
+      successToast = '批量处理完成',
+    }) {
+      let successCount = 0
+      let failCount = 0
+      const items = []
+
+      for (const row of rows) {
+        const payload = payloadBuilder(row)
+        let success = false
+        let message = ''
+        try {
+          const result = await callCloud('adminAction', payload)
+          success = !!result?.success
+          message = result?.message || (success ? '操作成功' : (result?.error || '操作失败'))
+        } catch (e) {
+          success = false
+          message = e?.message || e?.errMsg || '请求异常'
+        }
+        if (success) successCount += 1
+        else failCount += 1
+        items.push({
+          resultId: this.createBatchResultId(),
+          success,
+          label: labelBuilder(row),
+          message,
+          retryPayload: payload,
+        })
+      }
+
+      this.batchLastRun = {
+        scope,
+        scopeLabel: this.formatBatchScopeLabel(scope),
+        action,
+        actionLabel: this.formatBatchActionLabel(action),
+        reason,
+        total: rows.length,
+        successCount,
+        failCount,
+        timeText: this.formatExportTime(new Date()),
+        items,
+      }
+
+      await this.loadData()
+      uni.showModal({
+        title: successToast,
+        content: `成功 ${successCount} 条，失败 ${failCount} 条`,
+        showCancel: false,
+      })
     },
 
     async batchHandleReports(action) {
@@ -1936,36 +2120,131 @@ export default {
         success: async (res) => {
           if (!res.confirm) return
           this.reportBatchProcessing = true
-          let successCount = 0
-          let failCount = 0
           try {
-            for (const item of selectedRows) {
-              try {
-                const result = await callCloud('adminAction', {
-                  action,
-                  reportId: item._id,
-                  targetId: item.targetId,
-                  targetType: 'report',
-                  reason,
-                })
-                if (result?.success) successCount += 1
-                else failCount += 1
-              } catch (e) {
-                failCount += 1
-              }
-            }
-            await this.loadData()
-            this.selectedReportTodoIds = []
-            uni.showModal({
-              title: '批量处理完成',
-              content: `成功 ${successCount} 条，失败 ${failCount} 条`,
-              showCancel: false,
+            await this.executeBatchActions({
+              scope: 'report',
+              action,
+              rows: selectedRows,
+              reason,
+              payloadBuilder: (item) => ({
+                action,
+                reportId: item._id,
+                targetId: item.targetId,
+                targetType: 'report',
+                reason,
+              }),
+              labelBuilder: (item) => item.targetActivity?.title || item.targetId || '举报活动',
+              successToast: '举报批量处理完成',
             })
+            this.selectedReportTodoIds = []
           } finally {
             this.reportBatchProcessing = false
           }
         },
       })
+    },
+
+    async batchHandleVerify(action) {
+      if (this.verifyBatchProcessing) return
+      const selectedIdSet = new Set(this.selectedVerifyOpenids)
+      const selectedRows = this.displayPendingVerifyTodoList.filter((item) => selectedIdSet.has(item._openid))
+      if (selectedRows.length === 0) {
+        uni.showToast({ title: '请先选择认证用户', icon: 'none' })
+        return
+      }
+
+      const reason = await this.pickReasonTemplate(action)
+      if (!reason) return
+      const actionText = action === 'verify' ? '批量通过认证' : '批量拒绝认证'
+      uni.showModal({
+        title: `确认${actionText}？`,
+        content: `将处理 ${selectedRows.length} 位用户，原因：${reason}`,
+        success: async (res) => {
+          if (!res.confirm) return
+          this.verifyBatchProcessing = true
+          try {
+            await this.executeBatchActions({
+              scope: 'verify',
+              action,
+              rows: selectedRows,
+              reason,
+              payloadBuilder: (item) => ({
+                action,
+                targetId: item._openid,
+                targetType: 'user',
+                reason,
+              }),
+              labelBuilder: (item) => item.nickname || this.shortOpenid(item._openid) || '待审核用户',
+              successToast: '认证批量处理完成',
+            })
+            this.selectedVerifyOpenids = []
+          } finally {
+            this.verifyBatchProcessing = false
+          }
+        },
+      })
+    },
+
+    async retryFailedBatch() {
+      if (!this.batchLastRun || this.retryBatchProcessing) return
+      const failedItems = (this.batchLastRun.items || []).filter((item) => !item.success && item.retryPayload)
+      if (failedItems.length === 0) {
+        uni.showToast({ title: '暂无失败项可重试', icon: 'none' })
+        return
+      }
+      uni.showModal({
+        title: '确认重试失败项？',
+        content: `将重试 ${failedItems.length} 条失败记录`,
+        success: async (res) => {
+          if (!res.confirm) return
+          this.retryBatchProcessing = true
+          try {
+            await this.executeBatchActions({
+              scope: 'retry',
+              action: this.batchLastRun.action || '',
+              rows: failedItems,
+              reason: this.batchLastRun.reason || '',
+              payloadBuilder: (item) => item.retryPayload,
+              labelBuilder: (item) => item.label || '失败项',
+              successToast: '失败项重试完成',
+            })
+          } finally {
+            this.retryBatchProcessing = false
+          }
+        },
+      })
+    },
+
+    buildBatchResultText() {
+      if (!this.batchLastRun) return '暂无批量执行结果'
+      const run = this.batchLastRun
+      const lines = [
+        '【搭里批量执行结果】',
+        `时间：${run.timeText}`,
+        `范围：${run.scopeLabel}`,
+        `动作：${run.actionLabel}`,
+        `原因：${run.reason || '-'}`,
+        `总计：${run.total}，成功：${run.successCount}，失败：${run.failCount}`,
+        '',
+      ]
+      ;(run.items || []).forEach((item, index) => {
+        lines.push(`${index + 1}. [${item.success ? '成功' : '失败'}] ${item.label}｜${item.message}`)
+      })
+      return lines.join('\n')
+    },
+
+    async copyBatchResult() {
+      if (!this.batchLastRun) {
+        uni.showToast({ title: '暂无批量结果可复制', icon: 'none' })
+        return
+      }
+      try {
+        const text = this.buildBatchResultText()
+        await this.saveCsvToClipboard(text)
+        uni.showToast({ title: '批量结果已复制', icon: 'success' })
+      } catch (e) {
+        uni.showToast({ title: '复制失败，请重试', icon: 'none' })
+      }
     },
 
     goPriorityQueueDetail(item) {
@@ -2158,6 +2437,8 @@ export default {
             .map((item) => item._id)
         )
         this.selectedReportTodoIds = this.selectedReportTodoIds.filter((id) => pendingReportIdSet.has(id))
+        const pendingVerifyOpenidSet = new Set((this.pendingVerifyList || []).map((item) => item._openid).filter(Boolean))
+        this.selectedVerifyOpenids = this.selectedVerifyOpenids.filter((id) => pendingVerifyOpenidSet.has(id))
       } catch(e) {
         console.error('加载管理数据失败', e)
         uni.showToast({ title: '加载失败', icon: 'none' })
@@ -3979,6 +4260,10 @@ export default {
 .mini-pill--risk {
   background: #FFF1F2;
   color: #9F1239;
+}
+.mini-pill--handled {
+  background: #EEF7EE;
+  color: #1E7145;
 }
 .title-row {
   display: flex;
