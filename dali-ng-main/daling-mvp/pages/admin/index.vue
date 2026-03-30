@@ -212,6 +212,9 @@
             <text class="card-title">今日待办摘要</text>
             <text class="card-openid">{{ todoTodaySummary.dateLabel }}</text>
           </view>
+          <view class="card-actions card-actions--single">
+            <button class="action-btn action-btn--detail" @tap="copyTodoBrief">复制今日简报</button>
+          </view>
           <view class="todo-summary-grid">
             <view class="logs-overview-card">
               <text class="logs-overview-value">{{ todoTodaySummary.newReportsToday }}</text>
@@ -244,6 +247,18 @@
             @change="onTodoOverdueSwitchChange"
           />
         </view>
+        <view class="todo-sla-row">
+          <text class="todo-filter-sub">SLA 阈值</text>
+          <view class="chip-row">
+            <view
+              v-for="item in todoSlaHourOptions"
+              :key="`sla_${item}`"
+              class="chip chip--sort"
+              :class="{ 'chip--active': todoSlaHours === item }"
+              @tap="onPickTodoSla(item)"
+            >{{ item }}h</view>
+          </view>
+        </view>
 
         <view class="logs-overview">
           <view class="logs-overview-card">
@@ -257,6 +272,62 @@
           <view class="logs-overview-card">
             <text class="logs-overview-value">{{ displayUpcomingActivityTodoList.length }}</text>
             <text class="logs-overview-label">{{ todoOnlyOverdue ? '2h内紧急活动' : '24h即将开始' }}</text>
+          </view>
+        </view>
+
+        <view class="card">
+          <view class="title-row">
+            <text class="card-title">优先处理队列 Top8</text>
+            <text class="status-pill status-pill--pending">风险 {{ todoPriorityRiskCount }}</text>
+          </view>
+          <view v-if="todoPriorityQueue.length === 0" class="empty empty--inline">
+            <text class="empty-text">暂无可处理待办</text>
+          </view>
+          <view v-for="item in todoPriorityQueue" :key="item.queueId" class="todo-item">
+            <view class="title-row">
+              <view class="inline-badges">
+                <text class="mini-pill mini-pill--log">{{ item.typeLabel }}</text>
+                <text v-if="item.isRisk" class="mini-pill mini-pill--risk">风险项</text>
+              </view>
+              <text class="card-openid">{{ item.urgencyText }}</text>
+            </view>
+            <text class="card-sub">{{ item.title }}</text>
+            <text class="card-openid">{{ item.subTitle }}</text>
+            <view class="card-actions">
+              <button class="action-btn action-btn--detail" @tap="goPriorityQueueDetail(item)">定位</button>
+              <button
+                v-if="item.type === 'report'"
+                class="action-btn action-btn--approve"
+                :disabled="isHandlingReport(item.raw._id)"
+                @tap="handleReportQuick(item.raw)"
+              >下架</button>
+              <button
+                v-if="item.type === 'report'"
+                class="action-btn action-btn--reject"
+                :disabled="isHandlingReport(item.raw._id)"
+                @tap="ignoreReportQuick(item.raw)"
+              >忽略</button>
+              <button
+                v-if="item.type === 'verify'"
+                class="action-btn action-btn--approve"
+                @tap="verifyUserQuick(item.raw._openid, 'verify')"
+              >通过</button>
+              <button
+                v-if="item.type === 'verify'"
+                class="action-btn action-btn--reject"
+                @tap="verifyUserQuick(item.raw._openid, 'reject_verify')"
+              >拒绝</button>
+              <button
+                v-if="item.type === 'activity' && !item.raw.isRecommended"
+                class="action-btn action-btn--recommend"
+                @tap="recommendActivity(item.raw._id, 'recommend')"
+              >推荐</button>
+              <button
+                v-if="item.type === 'activity' && item.raw.isRecommended"
+                class="action-btn action-btn--unrecommend"
+                @tap="recommendActivity(item.raw._id, 'unrecommend')"
+              >取消推荐</button>
+            </view>
           </view>
         </view>
 
@@ -1053,6 +1124,10 @@ export default {
         + this.upcomingActivityTodoList.filter((item) => item.isUrgent).length
     },
 
+    todoSlaHourOptions() {
+      return [12, 24, 48]
+    },
+
     todoTodaySummary() {
       const now = new Date()
       const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).getTime()
@@ -1073,6 +1148,56 @@ export default {
           + this.pendingVerifyTodoList.filter((item) => item.isOverSla).length,
         upcoming24h: this.upcomingActivityTodoList.length,
       }
+    },
+
+    todoPriorityQueue() {
+      const reportRows = this.displayPendingReportTodoList.map((item) => ({
+        queueId: `report_${item._id}`,
+        type: 'report',
+        typeLabel: '举报待办',
+        isRisk: item.isOverSla,
+        urgencyText: `已等待 ${item.waitHoursText}`,
+        priorityScore: (item.isOverSla ? 300 : 180) + Math.round(Number(item.waitHours || 0)),
+        title: item.targetActivity?.title || item.targetId || '举报活动',
+        subTitle: `原因：${item.reason || '待补充'}${item.reporterNickname ? ` · 举报人：${item.reporterNickname}` : ''}`,
+        raw: item,
+      }))
+
+      const verifyRows = this.displayPendingVerifyTodoList.map((item) => ({
+        queueId: `verify_${item._id}`,
+        type: 'verify',
+        typeLabel: '认证待办',
+        isRisk: item.isOverSla,
+        urgencyText: `已等待 ${item.waitHoursText}`,
+        priorityScore: (item.isOverSla ? 260 : 150) + Math.round(Number(item.waitHours || 0)),
+        title: item.nickname || this.shortOpenid(item._openid) || '待审核用户',
+        subTitle: `OPENID：${item._openid ? `${item._openid.slice(0, 20)}...` : '--'}`,
+        raw: item,
+      }))
+
+      const activityRows = this.displayUpcomingActivityTodoList.map((item) => {
+        const startInHours = Number(item.startInHours)
+        const safeStart = Number.isFinite(startInHours) ? Math.max(0, startInHours) : 24
+        return {
+          queueId: `activity_${item._id}`,
+          type: 'activity',
+          typeLabel: '活动开场',
+          isRisk: item.isUrgent,
+          urgencyText: `距开始 ${item.startInText}`,
+          priorityScore: (item.isUrgent ? 220 : 120) + Math.round(24 - Math.min(24, safeStart)),
+          title: item.title || '未命名活动',
+          subTitle: `地点：${item.location?.address || '--'} · 分类：${item.categoryLabel || '其他'}`,
+          raw: item,
+        }
+      })
+
+      return [...reportRows, ...verifyRows, ...activityRows]
+        .sort((a, b) => b.priorityScore - a.priorityScore)
+        .slice(0, 8)
+    },
+
+    todoPriorityRiskCount() {
+      return this.todoPriorityQueue.filter((item) => item.isRisk).length
     },
 
     recentClosureList() {
@@ -1683,6 +1808,30 @@ export default {
 
     onTodoOverdueSwitchChange(e) {
       this.todoOnlyOverdue = Boolean(e?.detail?.value)
+    },
+
+    onPickTodoSla(hours) {
+      const next = Number(hours) || 24
+      this.todoSlaHours = next
+    },
+
+    goPriorityQueueDetail(item) {
+      if (!item || !item.type) return
+      if (item.type === 'report') {
+        this.goActivityDetail(item.raw?.targetId)
+        return
+      }
+      if (item.type === 'activity') {
+        this.goActivityDetail(item.raw?._id)
+        return
+      }
+      if (item.type === 'verify') {
+        const openid = item.raw?._openid || ''
+        this.activeTab = 'verify'
+        this.$nextTick(() => {
+          this.searchKeyword = openid
+        })
+      }
     },
 
     toggleExportField(fieldKey) {
@@ -2478,6 +2627,32 @@ export default {
       ].join('\n')
     },
 
+    buildTodoBriefText() {
+      const summary = this.todoTodaySummary
+      const topRows = this.todoPriorityQueue
+      const topText = topRows.length > 0
+        ? topRows.map((item, index) => (
+          `${index + 1}. [${item.typeLabel}] ${item.title}｜${item.urgencyText}`
+        )).join('\n')
+        : '暂无待办'
+      const riskText = this.todoOnlyOverdue ? '只看风险项：开启' : '只看风险项：关闭'
+      return [
+        '【搭里运营闭环日报】',
+        `日期：${summary.dateLabel}`,
+        `SLA阈值：${this.todoSlaHours}h`,
+        riskText,
+        `今日新增举报：${summary.newReportsToday}`,
+        `今日已闭环：${summary.closedToday}`,
+        `超时未处理：${summary.overdueUnhandled}`,
+        `24h即将开始：${summary.upcoming24h}`,
+        `当前待办总数：${this.todoViewTotalCount}`,
+        `风险待办：${this.overdueTodoCount}`,
+        '',
+        '优先处理队列 Top8：',
+        topText,
+      ].join('\n')
+    },
+
     buildTrendCsv() {
       const lines = []
       const append = (values = []) => lines.push(this.buildCsvLine(values))
@@ -2592,6 +2767,17 @@ export default {
       }
 
       return lines.join('\n')
+    },
+
+    async copyTodoBrief() {
+      try {
+        const text = this.buildTodoBriefText()
+        await this.saveCsvToClipboard(text)
+        uni.showToast({ title: '今日简报已复制', icon: 'success' })
+      } catch (e) {
+        console.error('复制今日简报失败', e)
+        uni.showToast({ title: '复制失败，请重试', icon: 'none' })
+      }
     },
 
     async copyTrendInsight() {
@@ -3214,6 +3400,17 @@ export default {
 .todo-filter-switch {
   transform: scale(0.9);
   transform-origin: right center;
+}
+.todo-sla-row {
+  margin: 0 0 14rpx;
+  padding: 10rpx 14rpx;
+  border-radius: 12rpx;
+  background: #fff;
+  border: 1rpx solid #e7ecf3;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10rpx;
 }
 .export-toolbar {
   display: flex;
