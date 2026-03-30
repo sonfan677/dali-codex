@@ -214,6 +214,7 @@
           </view>
           <view class="card-actions card-actions--single">
             <button class="action-btn action-btn--detail" @tap="copyTodoBrief">复制今日简报</button>
+            <button class="action-btn action-btn--detail" @tap="copyLatestArchivedReport">复制最近归档</button>
           </view>
           <view class="todo-summary-grid">
             <view class="logs-overview-card">
@@ -231,6 +232,38 @@
             <view class="logs-overview-card">
               <text class="logs-overview-value">{{ todoTodaySummary.upcoming24h }}</text>
               <text class="logs-overview-label">24h即将开始</text>
+            </view>
+          </view>
+        </view>
+
+        <view class="card">
+          <view class="title-row">
+            <text class="card-title">运营日报自动归档（近7天）</text>
+            <text class="status-pill status-pill--log">{{ dailyReportHistoryPreview.length }}</text>
+          </view>
+          <view class="todo-filter-row">
+            <view class="todo-filter-copy">
+              <text class="todo-filter-title">自动归档开关</text>
+              <text class="todo-filter-sub">{{ dailyReportAutoEnabled ? '已开启：每天首次进入后台自动归档一条' : '已关闭自动归档' }}</text>
+            </view>
+            <switch
+              class="todo-filter-switch"
+              :checked="dailyReportAutoEnabled"
+              color="#1A3C5E"
+              @change="onDailyReportAutoSwitchChange"
+            />
+          </view>
+          <view v-if="dailyReportHistoryPreview.length === 0" class="empty empty--inline">
+            <text class="empty-text">暂无日报归档</text>
+          </view>
+          <view v-for="item in dailyReportHistoryPreview" :key="item.dateKey" class="todo-item">
+            <view class="title-row">
+              <text class="card-sub">{{ item.dateLabel }}</text>
+              <text class="card-openid">风险 {{ item.overdueTotal }} · 闭环率 {{ item.withinSlaRate }}</text>
+            </view>
+            <text class="card-openid">新增举报 {{ item.newReportsToday }} · 已闭环 {{ item.closedToday }} · 24h活动 {{ item.upcoming24h }}</text>
+            <view class="card-actions card-actions--single">
+              <button class="action-btn action-btn--detail" @tap="copyArchivedReport(item.dateKey)">复制该日简报</button>
             </view>
           </view>
         </view>
@@ -530,6 +563,32 @@
             <view class="logs-overview-card">
               <text class="logs-overview-value">{{ closureStats.withinSlaCount }}</text>
               <text class="logs-overview-label">24h内闭环</text>
+            </view>
+          </view>
+          <view class="sla-board">
+            <view class="title-row">
+              <text class="card-sub">SLA 细分看板</text>
+              <text class="card-openid">阈值 {{ todoSlaHours }}h</text>
+            </view>
+            <view class="sla-board-grid">
+              <view v-for="group in slaSegmentBoard.groups" :key="group.key" class="sla-board-card">
+                <view class="title-row">
+                  <text class="card-openid">{{ group.label }}</text>
+                  <text class="card-openid">总计 {{ group.total }}</text>
+                </view>
+                <view class="trend-mini-bars">
+                  <view v-for="bucket in group.buckets" :key="`${group.key}_${bucket.key}`" class="trend-mini-row">
+                    <text class="trend-mini-label">{{ bucket.label }}</text>
+                    <view class="trend-mini-track">
+                      <view
+                        class="trend-mini-fill trend-mini-fill--reading"
+                        :style="{ width: slaBucketWidth(bucket.count) }"
+                      />
+                    </view>
+                    <text class="trend-mini-value">{{ bucket.count }}</text>
+                  </view>
+                </view>
+              </view>
             </view>
           </view>
           <view v-if="recentClosureList.length === 0" class="empty empty--inline">
@@ -1054,6 +1113,8 @@ export default {
       todoOnlyOverdue: false,
       todoAutoRemindEnabled: true,
       todoLastRemindDate: '',
+      dailyReportAutoEnabled: true,
+      dailyReportHistory: [],
       todoPrefReady: false,
       reportBatchMode: false,
       reportBatchProcessing: false,
@@ -1331,6 +1392,75 @@ export default {
 
     batchSelectedVerifyCount() {
       return this.selectedVerifyOpenids.length
+    },
+
+    dailyReportHistoryPreview() {
+      return [...(this.dailyReportHistory || [])]
+        .sort((a, b) => (a.dateKey < b.dateKey ? 1 : -1))
+        .slice(0, 7)
+    },
+
+    slaSegmentBoard() {
+      const buildBuckets = (values = []) => {
+        const ranges = [
+          { key: 'lt6', label: '<6h', min: 0, max: 6 },
+          { key: 'lt12', label: '6-12h', min: 6, max: 12 },
+          { key: 'lt24', label: '12-24h', min: 12, max: 24 },
+          { key: 'gte24', label: '>=24h', min: 24, max: Infinity },
+        ]
+        return ranges.map((range) => {
+          const count = values.filter((value) => {
+            const safe = Number(value)
+            if (!Number.isFinite(safe) || safe < 0) return false
+            if (range.max === Infinity) return safe >= range.min
+            return safe >= range.min && safe < range.max
+          }).length
+          return { ...range, count }
+        })
+      }
+
+      const reportBuckets = buildBuckets(this.pendingReportTodoList.map((item) => Number(item.waitHours || 0)))
+      const verifyBuckets = buildBuckets(this.pendingVerifyTodoList.map((item) => Number(item.waitHours || 0)))
+      const closedHours = this.reportList
+        .filter((item) => ['HANDLED', 'IGNORED'].includes(item.reportStatus) && item.handledAt)
+        .map((item) => {
+          const createdTs = this.toTimestamp(item.createdAt)
+          const handledTs = this.toTimestamp(item.handledAt)
+          if (!Number.isFinite(createdTs) || !Number.isFinite(handledTs) || handledTs < createdTs) return 0
+          return (handledTs - createdTs) / 3600000
+        })
+      const closedBuckets = buildBuckets(closedHours)
+
+      const groups = [
+        {
+          key: 'report_pending',
+          label: '举报待办等待时长',
+          total: this.pendingReportTodoList.length,
+          buckets: reportBuckets,
+        },
+        {
+          key: 'verify_pending',
+          label: '认证待办等待时长',
+          total: this.pendingVerifyTodoList.length,
+          buckets: verifyBuckets,
+        },
+        {
+          key: 'closed_handle',
+          label: '已闭环处理时长',
+          total: closedHours.length,
+          buckets: closedBuckets,
+        },
+      ]
+
+      const maxBucketCount = groups.reduce((max, group) => {
+        const groupMax = group.buckets.reduce((localMax, item) => (item.count > localMax ? item.count : localMax), 0)
+        return groupMax > max ? groupMax : max
+      }, 1)
+
+      return {
+        groups,
+        maxBucketCount: maxBucketCount > 0 ? maxBucketCount : 1,
+      }
     },
 
     recentClosureList() {
@@ -1880,6 +2010,7 @@ export default {
   async onShow() {
     if (!this.todoPrefReady) {
       this.initTodoPreferences()
+      this.initDailyReportHistory()
       this.todoPrefReady = true
     }
     await this.loadData()
@@ -1956,6 +2087,15 @@ export default {
       this.todoAutoRemindEnabled = Boolean(e?.detail?.value)
       this.saveTodoPreferences()
       uni.showToast({ title: this.todoAutoRemindEnabled ? '已开启自动提醒' : '已关闭自动提醒', icon: 'none' })
+    },
+
+    onDailyReportAutoSwitchChange(e) {
+      this.dailyReportAutoEnabled = Boolean(e?.detail?.value)
+      this.saveTodoPreferences()
+      uni.showToast({ title: this.dailyReportAutoEnabled ? '已开启自动归档' : '已关闭自动归档', icon: 'none' })
+      if (this.dailyReportAutoEnabled) {
+        this.autoArchiveDailyReport()
+      }
     },
 
     onPickTodoSla(hours) {
@@ -2369,6 +2509,9 @@ export default {
         if (typeof pref.todoAutoRemindEnabled === 'boolean') {
           this.todoAutoRemindEnabled = pref.todoAutoRemindEnabled
         }
+        if (typeof pref.dailyReportAutoEnabled === 'boolean') {
+          this.dailyReportAutoEnabled = pref.dailyReportAutoEnabled
+        }
         if (pref.todoLastRemindDate && /^\d{4}-\d{2}-\d{2}$/.test(pref.todoLastRemindDate)) {
           this.todoLastRemindDate = pref.todoLastRemindDate
         }
@@ -2382,11 +2525,108 @@ export default {
         uni.setStorageSync('dali_admin_todo_pref_v1', {
           todoSlaHours: this.todoSlaHours,
           todoAutoRemindEnabled: this.todoAutoRemindEnabled,
+          dailyReportAutoEnabled: this.dailyReportAutoEnabled,
           todoLastRemindDate: this.todoLastRemindDate,
         })
       } catch (e) {
         console.warn('保存待办偏好失败', e)
       }
+    },
+
+    initDailyReportHistory() {
+      try {
+        const list = uni.getStorageSync('dali_admin_daily_report_history_v1')
+        if (!Array.isArray(list)) return
+        this.dailyReportHistory = list
+          .filter((item) => item && item.dateKey && typeof item.text === 'string')
+          .slice(0, 30)
+      } catch (e) {
+        console.warn('读取日报归档失败', e)
+      }
+    },
+
+    saveDailyReportHistory() {
+      try {
+        uni.setStorageSync('dali_admin_daily_report_history_v1', this.dailyReportHistory.slice(0, 30))
+      } catch (e) {
+        console.warn('保存日报归档失败', e)
+      }
+    },
+
+    createDailyReportSnapshot() {
+      const now = new Date()
+      const dateKey = this.getTodayDateToken()
+      const summary = this.todoTodaySummary
+      const topRows = this.todoPriorityQueue
+      const topText = topRows.length > 0
+        ? topRows.map((item, index) => `${index + 1}. [${item.typeLabel}] ${item.title}｜${item.urgencyText}`).join('\n')
+        : '暂无待办'
+      const text = [
+        '【搭里运营闭环日报】',
+        `日期：${summary.dateLabel}`,
+        `SLA阈值：${this.todoSlaHours}h`,
+        `今日新增举报：${summary.newReportsToday}`,
+        `今日已闭环：${summary.closedToday}`,
+        `超时未处理：${summary.overdueUnhandled}`,
+        `24h即将开始：${summary.upcoming24h}`,
+        `当前风险待办：${this.overdueTodoCount}`,
+        `24h内闭环率：${this.closureStats.withinSlaRate}`,
+        '',
+        '优先处理队列 Top8：',
+        topText,
+      ].join('\n')
+
+      return {
+        dateKey,
+        dateLabel: summary.dateLabel,
+        timeText: this.formatExportTime(now),
+        newReportsToday: summary.newReportsToday,
+        closedToday: summary.closedToday,
+        overdueTotal: this.overdueTodoCount,
+        upcoming24h: summary.upcoming24h,
+        withinSlaRate: this.closureStats.withinSlaRate,
+        text,
+      }
+    },
+
+    autoArchiveDailyReport() {
+      if (!this.dailyReportAutoEnabled || !this.hasAccess || this.loading) return
+      const snapshot = this.createDailyReportSnapshot()
+      const next = [...this.dailyReportHistory]
+      const idx = next.findIndex((item) => item.dateKey === snapshot.dateKey)
+      if (idx >= 0) next[idx] = snapshot
+      else next.unshift(snapshot)
+      this.dailyReportHistory = next
+        .sort((a, b) => (a.dateKey < b.dateKey ? 1 : -1))
+        .slice(0, 30)
+      this.saveDailyReportHistory()
+    },
+
+    getArchivedReportByDate(dateKey = '') {
+      return (this.dailyReportHistory || []).find((item) => item.dateKey === dateKey) || null
+    },
+
+    async copyArchivedReport(dateKey = '') {
+      const report = this.getArchivedReportByDate(dateKey)
+      if (!report) {
+        uni.showToast({ title: '未找到该日归档', icon: 'none' })
+        return
+      }
+      try {
+        await this.saveCsvToClipboard(report.text || '')
+        uni.showToast({ title: '日报已复制', icon: 'success' })
+      } catch (e) {
+        uni.showToast({ title: '复制失败，请重试', icon: 'none' })
+      }
+    },
+
+    async copyLatestArchivedReport() {
+      const latest = this.dailyReportHistoryPreview[0]
+      if (!latest) {
+        uni.showToast({ title: '暂无归档日报', icon: 'none' })
+        return
+      }
+      await this.copyArchivedReport(latest.dateKey)
     },
 
     maybeAutoRemindRiskTodos() {
@@ -2439,6 +2679,7 @@ export default {
         this.selectedReportTodoIds = this.selectedReportTodoIds.filter((id) => pendingReportIdSet.has(id))
         const pendingVerifyOpenidSet = new Set((this.pendingVerifyList || []).map((item) => item._openid).filter(Boolean))
         this.selectedVerifyOpenids = this.selectedVerifyOpenids.filter((id) => pendingVerifyOpenidSet.has(id))
+        this.autoArchiveDailyReport()
       } catch(e) {
         console.error('加载管理数据失败', e)
         uni.showToast({ title: '加载失败', icon: 'none' })
@@ -3077,6 +3318,14 @@ export default {
       const safeValue = Number(value) || 0
       if (safeValue <= 0) return '0%'
       const max = Number(this.closureTrendScaleMax) || 1
+      const pct = Math.max(8, Math.round((safeValue / max) * 100))
+      return `${Math.min(100, pct)}%`
+    },
+
+    slaBucketWidth(value) {
+      const safeValue = Number(value) || 0
+      if (safeValue <= 0) return '0%'
+      const max = Number(this.slaSegmentBoard.maxBucketCount) || 1
       const pct = Math.max(8, Math.round((safeValue / max) * 100))
       return `${Math.min(100, pct)}%`
     },
@@ -3919,6 +4168,24 @@ export default {
   display: flex;
   align-items: center;
   gap: 10rpx;
+}
+.sla-board {
+  margin: 6rpx 0 12rpx;
+  padding: 10rpx 12rpx;
+  border-radius: 12rpx;
+  background: #f8fafc;
+  border: 1rpx solid #e7ecf3;
+}
+.sla-board-grid {
+  margin-top: 8rpx;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8rpx;
+}
+.sla-board-card {
+  background: #fff;
+  border-radius: 10rpx;
+  padding: 10rpx 12rpx;
 }
 .export-toolbar {
   display: flex;
