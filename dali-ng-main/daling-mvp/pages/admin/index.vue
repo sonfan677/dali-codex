@@ -29,6 +29,11 @@
     <view class="tabs">
       <view
         class="tab"
+        :class="{ 'tab--active': activeTab === 'todo' }"
+        @tap="activeTab = 'todo'"
+      >待办中心 {{ todoTotalCount > 0 ? '(' + todoTotalCount + ')' : '' }}</view>
+      <view
+        class="tab"
         :class="{ 'tab--active': activeTab === 'verify' }"
         @tap="activeTab = 'verify'"
       >待审核认证 {{ pendingVerifyList.length > 0 ? '(' + pendingVerifyList.length + ')' : '' }}</view>
@@ -200,8 +205,137 @@
         </view>
       </scroll-view>
 
+      <!-- 待办中心 -->
+      <template v-if="activeTab === 'todo'">
+        <view class="logs-overview">
+          <view class="logs-overview-card">
+            <text class="logs-overview-value">{{ todoTotalCount }}</text>
+            <text class="logs-overview-label">待办总数</text>
+          </view>
+          <view class="logs-overview-card">
+            <text class="logs-overview-value">{{ overdueTodoCount }}</text>
+            <text class="logs-overview-label">超时预警</text>
+          </view>
+          <view class="logs-overview-card">
+            <text class="logs-overview-value">{{ upcomingActivityTodoList.length }}</text>
+            <text class="logs-overview-label">24h即将开始</text>
+          </view>
+        </view>
+
+        <view class="card">
+          <view class="title-row">
+            <text class="card-title">待处理举报</text>
+            <text class="status-pill status-pill--pending">{{ pendingReportTodoList.length }}</text>
+          </view>
+          <view v-if="pendingReportTodoList.length === 0" class="empty empty--inline">
+            <text class="empty-text">暂无待处理举报</text>
+          </view>
+          <view
+            v-for="item in pendingReportTodoList"
+            :key="item._id"
+            class="todo-item"
+            :class="{ 'todo-item--overdue': item.isOverSla }"
+          >
+            <view class="title-row">
+              <text class="card-sub">{{ item.reason || '举报待处理' }}</text>
+              <text class="card-openid">已等待 {{ item.waitHoursText }}</text>
+            </view>
+            <text class="card-openid">活动：{{ item.targetActivity?.title || item.targetId }}</text>
+            <view class="card-actions">
+              <button class="action-btn action-btn--detail" @tap="goActivityDetail(item.targetId)">查看</button>
+              <button class="action-btn action-btn--approve" :disabled="isHandlingReport(item._id)" @tap="handleReportQuick(item)">下架(快捷)</button>
+              <button class="action-btn action-btn--reject" :disabled="isHandlingReport(item._id)" @tap="ignoreReportQuick(item)">忽略(快捷)</button>
+            </view>
+          </view>
+        </view>
+
+        <view class="card">
+          <view class="title-row">
+            <text class="card-title">待审核认证</text>
+            <text class="status-pill status-pill--pending">{{ pendingVerifyTodoList.length }}</text>
+          </view>
+          <view v-if="pendingVerifyTodoList.length === 0" class="empty empty--inline">
+            <text class="empty-text">暂无待审核认证</text>
+          </view>
+          <view
+            v-for="item in pendingVerifyTodoList"
+            :key="item._id"
+            class="todo-item"
+            :class="{ 'todo-item--overdue': item.isOverSla }"
+          >
+            <view class="title-row">
+              <text class="card-sub">{{ item.nickname || shortOpenid(item._openid) }}</text>
+              <text class="card-openid">已等待 {{ item.waitHoursText }}</text>
+            </view>
+            <text class="card-openid">{{ item._openid ? item._openid.slice(0, 20) + '...' : '--' }}</text>
+            <view class="card-actions">
+              <button class="action-btn action-btn--approve" @tap="verifyUserQuick(item._openid, 'verify')">通过(快捷)</button>
+              <button class="action-btn action-btn--reject" @tap="verifyUserQuick(item._openid, 'reject_verify')">拒绝(快捷)</button>
+            </view>
+          </view>
+        </view>
+
+        <view class="card">
+          <view class="title-row">
+            <text class="card-title">即将开始活动（24h）</text>
+            <text class="status-pill status-pill--open">{{ upcomingActivityTodoList.length }}</text>
+          </view>
+          <view v-if="upcomingActivityTodoList.length === 0" class="empty empty--inline">
+            <text class="empty-text">暂无24小时内开始的活动</text>
+          </view>
+          <view
+            v-for="item in upcomingActivityTodoList"
+            :key="item._id"
+            class="todo-item"
+            :class="{ 'todo-item--urgent': item.isUrgent }"
+          >
+            <view class="title-row">
+              <text class="card-sub">{{ item.title }}</text>
+              <text class="card-openid">距开始 {{ item.startInText }}</text>
+            </view>
+            <text class="card-openid">分类：{{ item.categoryLabel || '其他' }} · 地点：{{ item.location?.address || '--' }}</text>
+            <view class="card-actions">
+              <button class="action-btn action-btn--detail" @tap="goActivityDetail(item._id)">查看详情</button>
+              <button v-if="!item.isRecommended" class="action-btn action-btn--recommend" @tap="recommendActivity(item._id, 'recommend')">推荐</button>
+              <button v-else class="action-btn action-btn--unrecommend" @tap="recommendActivity(item._id, 'unrecommend')">取消推荐</button>
+            </view>
+          </view>
+        </view>
+
+        <view class="card">
+          <view class="title-row">
+            <text class="card-title">闭环追踪（举报处理 SLA）</text>
+            <text class="status-pill status-pill--handled">{{ closureStats.withinSlaRate }}</text>
+          </view>
+          <view class="logs-overview">
+            <view class="logs-overview-card">
+              <text class="logs-overview-value">{{ closureStats.closedCount }}</text>
+              <text class="logs-overview-label">已闭环举报</text>
+            </view>
+            <view class="logs-overview-card">
+              <text class="logs-overview-value">{{ closureStats.avgHandleHours }}</text>
+              <text class="logs-overview-label">平均处理时长(h)</text>
+            </view>
+            <view class="logs-overview-card">
+              <text class="logs-overview-value">{{ closureStats.withinSlaCount }}</text>
+              <text class="logs-overview-label">24h内闭环</text>
+            </view>
+          </view>
+          <view v-if="recentClosureList.length === 0" class="empty empty--inline">
+            <text class="empty-text">暂无闭环记录</text>
+          </view>
+          <view v-for="item in recentClosureList" :key="item._id" class="todo-item">
+            <view class="title-row">
+              <text class="card-sub">{{ item.targetActivity?.title || item.targetId }}</text>
+              <text class="card-openid">耗时 {{ item.handleHoursText }}</text>
+            </view>
+            <text class="card-openid">结果：{{ reportStatusText(item.reportStatus) }} · {{ formatTime(item.handledAt) }}</text>
+          </view>
+        </view>
+      </template>
+
       <!-- 待审核认证 -->
-      <template v-if="activeTab === 'verify'">
+      <template v-else-if="activeTab === 'verify'">
         <view v-if="filteredPendingVerifyList.length === 0" class="empty">
           <text class="empty-text">暂无待审核认证</text>
         </view>
@@ -668,9 +802,10 @@ export default {
     const today = `${yyyy}-${mm}-${dd}`
 
     return {
-      activeTab: 'verify',
+      activeTab: 'todo',
       activeFilter: 'all',
       searchKeyword: '',
+      todoSlaHours: 24,
       reportSort: 'created_desc',
       logTimeRange: 'all',
       logCustomStartDate: today,
@@ -733,12 +868,145 @@ export default {
 
     searchPlaceholder() {
       const map = {
+        todo: '搜索待办：用户/活动/原因',
         verify: '搜索昵称 / openid',
         reports: '搜索举报原因 / 举报人 / 活动ID',
         activities: '搜索标题 / 地址 / 发布者 / 活动ID',
         logs: '搜索原因 / 对象ID / 关联活动ID / 管理员',
       }
       return map[this.activeTab] || '搜索'
+    },
+
+    pendingReportTodoList() {
+      const keyword = this.normalizeKeyword(this.searchKeyword)
+      const nowTs = Date.now()
+      const list = this.reportList
+        .filter((item) => (item.reportStatus || 'PENDING') === 'PENDING')
+        .map((item) => {
+          const createdTs = this.toTimestamp(item.createdAt)
+          const waitHours = Number.isFinite(createdTs) ? Math.max(0, (nowTs - createdTs) / 3600000) : 0
+          const title = item.targetActivity?.title || ''
+          return {
+            ...item,
+            waitHours,
+            waitHoursText: this.formatHoursText(waitHours),
+            isOverSla: waitHours >= this.todoSlaHours,
+            _searchText: [item.reason, title, item.targetId, item.reporterNickname, item.reporterOpenid].join(' '),
+          }
+        })
+        .filter((item) => !keyword || String(item._searchText || '').toLowerCase().includes(keyword))
+        .sort((a, b) => {
+          if (a.isOverSla !== b.isOverSla) return a.isOverSla ? -1 : 1
+          return b.waitHours - a.waitHours
+        })
+
+      return list
+    },
+
+    pendingVerifyTodoList() {
+      const keyword = this.normalizeKeyword(this.searchKeyword)
+      const nowTs = Date.now()
+      return this.pendingVerifyList
+        .map((item) => {
+          const baseTs = this.toTimestamp(item.verifySubmittedAt || item.updatedAt || item.createdAt)
+          const waitHours = Number.isFinite(baseTs) ? Math.max(0, (nowTs - baseTs) / 3600000) : 0
+          return {
+            ...item,
+            waitHours,
+            waitHoursText: this.formatHoursText(waitHours),
+            isOverSla: waitHours >= this.todoSlaHours,
+            _searchText: [item.nickname, item._openid].join(' '),
+          }
+        })
+        .filter((item) => !keyword || String(item._searchText || '').toLowerCase().includes(keyword))
+        .sort((a, b) => {
+          if (a.isOverSla !== b.isOverSla) return a.isOverSla ? -1 : 1
+          return b.waitHours - a.waitHours
+        })
+    },
+
+    upcomingActivityTodoList() {
+      const keyword = this.normalizeKeyword(this.searchKeyword)
+      const nowTs = Date.now()
+      const maxTs = nowTs + 24 * 3600000
+
+      return this.activityList
+        .filter((item) => ['OPEN', 'FULL'].includes(item.status))
+        .map((item) => {
+          const startTs = this.toTimestamp(item.startTime)
+          const startInHours = Number.isFinite(startTs) ? (startTs - nowTs) / 3600000 : NaN
+          return {
+            ...item,
+            startTs,
+            startInHours,
+            startInText: this.formatHoursText(startInHours),
+            isUrgent: Number.isFinite(startInHours) && startInHours <= 2,
+            _searchText: [item.title, item.categoryLabel, item.location?.address].join(' '),
+          }
+        })
+        .filter((item) => Number.isFinite(item.startTs) && item.startTs >= nowTs && item.startTs <= maxTs)
+        .filter((item) => !keyword || String(item._searchText || '').toLowerCase().includes(keyword))
+        .sort((a, b) => a.startTs - b.startTs)
+    },
+
+    todoTotalCount() {
+      return this.pendingReportTodoList.length + this.pendingVerifyTodoList.length + this.upcomingActivityTodoList.length
+    },
+
+    overdueTodoCount() {
+      return this.pendingReportTodoList.filter((item) => item.isOverSla).length
+        + this.pendingVerifyTodoList.filter((item) => item.isOverSla).length
+        + this.upcomingActivityTodoList.filter((item) => item.isUrgent).length
+    },
+
+    recentClosureList() {
+      return this.reportList
+        .filter((item) => ['HANDLED', 'IGNORED'].includes(item.reportStatus) && item.handledAt)
+        .map((item) => {
+          const createdTs = this.toTimestamp(item.createdAt)
+          const handledTs = this.toTimestamp(item.handledAt)
+          const handleHours = (Number.isFinite(createdTs) && Number.isFinite(handledTs) && handledTs >= createdTs)
+            ? (handledTs - createdTs) / 3600000
+            : 0
+          return {
+            ...item,
+            handleHours,
+            handleHoursText: this.formatHoursText(handleHours),
+          }
+        })
+        .sort((a, b) => this.toTimestamp(b.handledAt) - this.toTimestamp(a.handledAt))
+        .slice(0, 8)
+    },
+
+    closureStats() {
+      const allClosed = this.reportList
+        .filter((item) => ['HANDLED', 'IGNORED'].includes(item.reportStatus) && item.handledAt)
+        .map((item) => {
+          const createdTs = this.toTimestamp(item.createdAt)
+          const handledTs = this.toTimestamp(item.handledAt)
+          const hours = (Number.isFinite(createdTs) && Number.isFinite(handledTs) && handledTs >= createdTs)
+            ? (handledTs - createdTs) / 3600000
+            : 0
+          return { ...item, handleHours: hours }
+        })
+
+      if (allClosed.length === 0) {
+        return {
+          closedCount: 0,
+          avgHandleHours: '0.0',
+          withinSlaCount: 0,
+          withinSlaRate: '0.0%',
+        }
+      }
+
+      const totalHours = allClosed.reduce((sum, item) => sum + (item.handleHours || 0), 0)
+      const withinSlaCount = allClosed.filter((item) => (item.handleHours || 0) <= this.todoSlaHours).length
+      return {
+        closedCount: allClosed.length,
+        avgHandleHours: (totalHours / allClosed.length).toFixed(1),
+        withinSlaCount,
+        withinSlaRate: `${((withinSlaCount / allClosed.length) * 100).toFixed(1)}%`,
+      }
     },
 
     filterOptions() {
@@ -1306,6 +1574,39 @@ export default {
         }))
     },
 
+    formatHoursText(hours) {
+      const safe = Number(hours)
+      if (!Number.isFinite(safe) || safe <= 0) return '<1h'
+      if (safe < 1) return '<1h'
+      if (safe < 24) return `${Math.round(safe)}h`
+      return `${(safe / 24).toFixed(1)}d`
+    },
+
+    getReasonTemplateOptions(scene) {
+      const map = {
+        verify: ['实名资料齐全，审核通过', '信息一致，允许发布活动'],
+        reject_verify: ['资料不完整，请补充后重试', '信息不一致，暂不通过'],
+        resolve_report_hide: ['举报成立，先下架复核', '内容违规，按规则下架处理'],
+        resolve_report_ignore: ['举报不成立，已记录并忽略', '核查无异常，本次不处理'],
+        recommend: ['活动质量高，进入推荐位', '符合运营主题，给予推荐'],
+        unrecommend: ['活动热度下降，退出推荐位', '推荐策略调整，先取消推荐'],
+      }
+      return map[scene] || ['按平台规则处理']
+    },
+
+    pickReasonTemplate(scene) {
+      const options = this.getReasonTemplateOptions(scene)
+      return new Promise((resolve) => {
+        uni.showActionSheet({
+          itemList: options,
+          success: (res) => {
+            resolve(options[res.tapIndex] || '')
+          },
+          fail: () => resolve(''),
+        })
+      })
+    },
+
     async loadData() {
       this.loading = true
       try {
@@ -1335,9 +1636,40 @@ export default {
       }
     },
 
-    // 审核认证
-    async verifyUser(openid, action) {
+    // 审核认证（支持快捷模板）
+    async verifyUser(openid, action, presetReason = '') {
       const actionText = action === 'verify' ? '通过认证' : '拒绝认证'
+      const execute = async (reasonText) => {
+        try {
+          const result = await callCloud('adminAction', {
+            action,
+            targetId: openid,
+            targetType: 'user',
+            reason: reasonText,
+          })
+          if (result.success) {
+            uni.showToast({ title: result.message, icon: 'success' })
+            await this.loadData()
+          } else {
+            uni.showToast({ title: result.message || '操作失败', icon: 'none' })
+          }
+        } catch (e) {
+          uni.showToast({ title: '操作失败，请重试', icon: 'none' })
+        }
+      }
+
+      if (presetReason) {
+        uni.showModal({
+          title: `确认${actionText}？`,
+          content: `将使用模板原因：${presetReason}`,
+          success: async (res) => {
+            if (!res.confirm) return
+            await execute(presetReason)
+          },
+        })
+        return
+      }
+
       uni.showModal({
         title: `确认${actionText}？`,
         editable: true,
@@ -1348,28 +1680,58 @@ export default {
             uni.showToast({ title: '请填写原因（至少2个字）', icon: 'none' })
             return
           }
-          try {
-            const result = await callCloud('adminAction', {
-              action,
-              targetId: openid,
-              targetType: 'user',
-              reason: res.content,
-            })
-            if (result.success) {
-              uni.showToast({ title: result.message, icon: 'success' })
-              await this.loadData()
-            } else {
-              uni.showToast({ title: result.message || '操作失败', icon: 'none' })
-            }
-          } catch(e) {
-            uni.showToast({ title: '操作失败，请重试', icon: 'none' })
-          }
-        }
+          await execute(res.content.trim())
+        },
       })
     },
 
-    // 处理举报：下架活动
-    async handleReport(reportItem) {
+    async verifyUserQuick(openid, action) {
+      const reason = await this.pickReasonTemplate(action)
+      if (!reason) return
+      await this.verifyUser(openid, action, reason)
+    },
+
+    // 处理举报：下架活动（支持快捷模板）
+    async handleReport(reportItem, presetReason = '') {
+      const execute = async (reasonText) => {
+        this.reportHandlingId = reportItem._id
+        this.reportHandlingAction = 'resolve_report_hide'
+        try {
+          const result = await callCloud('adminAction', {
+            action: 'resolve_report_hide',
+            reportId: reportItem._id,
+            targetId: reportItem.targetId,
+            targetType: 'report',
+            reason: reasonText,
+          })
+          if (result.success) {
+            if (this.activeFilter === 'PENDING') this.activeFilter = 'all'
+            uni.showToast({ title: result.message || '举报已处理', icon: 'success' })
+            await this.loadData()
+            this.markReportHandled(reportItem._id, 'HANDLED')
+          } else {
+            uni.showToast({ title: result.message || '操作失败', icon: 'none' })
+          }
+        } catch (e) {
+          uni.showToast({ title: '操作失败', icon: 'none' })
+        } finally {
+          this.reportHandlingId = ''
+          this.reportHandlingAction = ''
+        }
+      }
+
+      if (presetReason) {
+        uni.showModal({
+          title: '确认下架并处理？',
+          content: `将使用模板原因：${presetReason}`,
+          success: async (res) => {
+            if (!res.confirm) return
+            await execute(presetReason)
+          },
+        })
+        return
+      }
+
       uni.showModal({
         title: '确认下架此活动？',
         editable: true,
@@ -1380,34 +1742,58 @@ export default {
             uni.showToast({ title: '请填写原因', icon: 'none' })
             return
           }
-          this.reportHandlingId = reportItem._id
-          this.reportHandlingAction = 'resolve_report_hide'
-          try {
-            const result = await callCloud('adminAction', {
-              action: 'resolve_report_hide',
-              reportId: reportItem._id,
-              targetId: reportItem.targetId,
-              targetType: 'report',
-              reason: res.content,
-            })
-            if (result.success) {
-              if (this.activeFilter === 'PENDING') this.activeFilter = 'all'
-              uni.showToast({ title: result.message || '举报已处理', icon: 'success' })
-              await this.loadData()
-              this.markReportHandled(reportItem._id, 'HANDLED')
-            }
-          } catch(e) {
-            uni.showToast({ title: '操作失败', icon: 'none' })
-          } finally {
-            this.reportHandlingId = ''
-            this.reportHandlingAction = ''
-          }
-        }
+          await execute(res.content.trim())
+        },
       })
     },
 
-    // 忽略举报
-    async ignoreReport(reportItem) {
+    async handleReportQuick(reportItem) {
+      const reason = await this.pickReasonTemplate('resolve_report_hide')
+      if (!reason) return
+      await this.handleReport(reportItem, reason)
+    },
+
+    // 忽略举报（支持快捷模板）
+    async ignoreReport(reportItem, presetReason = '') {
+      const execute = async (reasonText) => {
+        this.reportHandlingId = reportItem._id
+        this.reportHandlingAction = 'resolve_report_ignore'
+        try {
+          const result = await callCloud('adminAction', {
+            action: 'resolve_report_ignore',
+            reportId: reportItem._id,
+            targetId: reportItem.targetId,
+            targetType: 'report',
+            reason: reasonText,
+          })
+          if (result.success) {
+            if (this.activeFilter === 'PENDING') this.activeFilter = 'all'
+            uni.showToast({ title: result.message || '举报已处理', icon: 'success' })
+            await this.loadData()
+            this.markReportHandled(reportItem._id, 'IGNORED')
+          } else {
+            uni.showToast({ title: result.message || '操作失败', icon: 'none' })
+          }
+        } catch (e) {
+          uni.showToast({ title: '操作失败', icon: 'none' })
+        } finally {
+          this.reportHandlingId = ''
+          this.reportHandlingAction = ''
+        }
+      }
+
+      if (presetReason) {
+        uni.showModal({
+          title: '确认忽略并处理？',
+          content: `将使用模板原因：${presetReason}`,
+          success: async (res) => {
+            if (!res.confirm) return
+            await execute(presetReason)
+          },
+        })
+        return
+      }
+
       uni.showModal({
         title: '确认忽略该举报？',
         editable: true,
@@ -1418,32 +1804,15 @@ export default {
             uni.showToast({ title: '请填写原因', icon: 'none' })
             return
           }
-          this.reportHandlingId = reportItem._id
-          this.reportHandlingAction = 'resolve_report_ignore'
-          try {
-            const result = await callCloud('adminAction', {
-              action: 'resolve_report_ignore',
-              reportId: reportItem._id,
-              targetId: reportItem.targetId,
-              targetType: 'report',
-              reason: res.content,
-            })
-            if (result.success) {
-              if (this.activeFilter === 'PENDING') this.activeFilter = 'all'
-              uni.showToast({ title: result.message || '举报已处理', icon: 'success' })
-              await this.loadData()
-              this.markReportHandled(reportItem._id, 'IGNORED')
-            } else {
-              uni.showToast({ title: result.message || '操作失败', icon: 'none' })
-            }
-          } catch (e) {
-            uni.showToast({ title: '操作失败', icon: 'none' })
-          } finally {
-            this.reportHandlingId = ''
-            this.reportHandlingAction = ''
-          }
-        }
+          await execute(res.content.trim())
+        },
       })
+    },
+
+    async ignoreReportQuick(reportItem) {
+      const reason = await this.pickReasonTemplate('resolve_report_ignore')
+      if (!reason) return
+      await this.ignoreReport(reportItem, reason)
     },
 
     // 推荐/取消推荐活动
@@ -2621,6 +2990,9 @@ export default {
   display: flex; flex-direction: column;
   align-items: center; padding: 80rpx 40rpx;
 }
+.empty--inline {
+  padding: 32rpx 20rpx;
+}
 .empty-text { font-size: 28rpx; color: #999; }
 
 .logs-overview {
@@ -2827,6 +3199,20 @@ export default {
   font-size: 20rpx;
   color: #344054;
   text-align: right;
+}
+.todo-item {
+  margin-top: 12rpx;
+  padding: 12rpx;
+  border-radius: 10rpx;
+  background: #f8fafc;
+}
+.todo-item--overdue {
+  background: #fff1f2;
+  box-shadow: 0 0 0 1rpx #fecdd3 inset;
+}
+.todo-item--urgent {
+  background: #fff7ed;
+  box-shadow: 0 0 0 1rpx #fed7aa inset;
 }
 .mini-btn {
   height: 54rpx;

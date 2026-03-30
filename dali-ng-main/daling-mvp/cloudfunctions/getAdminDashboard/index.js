@@ -57,6 +57,8 @@ async function fetchActivitiesByIds(ids = []) {
         status: true,
         isRecommended: true,
         location: true,
+        startTime: true,
+        endTime: true,
         createdAt: true,
         updatedAt: true,
       })
@@ -120,7 +122,15 @@ exports.main = async () => {
   const [pendingUsersRes, reportsRes, activitiesRes, actionLogsRes] = await Promise.all([
     db.collection('users')
       .where({ verifyStatus: 'pending' })
-      .field({ _id: true, _openid: true, nickname: true, avatarUrl: true })
+      .field({
+        _id: true,
+        _openid: true,
+        nickname: true,
+        avatarUrl: true,
+        verifySubmittedAt: true,
+        createdAt: true,
+        updatedAt: true,
+      })
       .get(),
     db.collection('adminActions')
       .where({ action: 'report' })
@@ -155,6 +165,8 @@ exports.main = async () => {
         status: true,
         isRecommended: true,
         location: true,
+        startTime: true,
+        endTime: true,
         createdAt: true,
         updatedAt: true,
       })
