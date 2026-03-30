@@ -361,11 +361,20 @@
       <!-- 操作记录 -->
       <template v-else>
         <view class="export-toolbar">
-          <button
-            class="action-btn action-btn--export"
-            :loading="csvExporting"
-            @tap="exportStatsCsv"
-          >导出统计报表 CSV</button>
+          <view class="export-main-actions">
+            <button
+              class="action-btn action-btn--export"
+              :loading="csvExporting"
+              :disabled="csvExportingV2"
+              @tap="exportStatsCsv"
+            >导出基础报表 CSV</button>
+            <button
+              class="action-btn action-btn--export action-btn--export-v2"
+              :loading="csvExportingV2"
+              :disabled="csvExporting"
+              @tap="exportStatsCsvV2"
+            >导出报表二期 CSV（双表）</button>
+          </view>
           <text class="export-tip">导出总览统计 + 操作记录明细（当前筛选 + 当前时间范围）</text>
           <view class="export-config">
             <view class="title-row">
@@ -530,6 +539,7 @@ export default {
       lastHandledReportStatus: '',
       reportHighlightTimer: null,
       csvExporting: false,
+      csvExportingV2: false,
       loading: false,
       hasAccess: true,
       currentAdminOpenid: '',
@@ -1430,15 +1440,30 @@ export default {
       return values.map((item) => this.escapeCsvCell(item)).join(',')
     },
 
-    buildStatsCsv() {
-      const lines = []
-      const append = (values = []) => lines.push(this.buildCsvLine(values))
+    getCurrentLogExportContext() {
       const exportLogList = this.filteredActionLogList
       const exportDetailFieldDefs = this.getExportDetailFieldDefs()
       const exportRangeText = this.logTimeRange === 'custom'
         ? `${this.logCustomStartDate || '--'} 至 ${this.logCustomEndDate || '--'}`
         : this.logTimeRange
       const selectedFieldText = exportDetailFieldDefs.map((item) => item.label).join(' / ')
+      return {
+        exportLogList,
+        exportDetailFieldDefs,
+        exportRangeText,
+        selectedFieldText,
+      }
+    },
+
+    buildStatsCsv() {
+      const lines = []
+      const append = (values = []) => lines.push(this.buildCsvLine(values))
+      const {
+        exportLogList,
+        exportDetailFieldDefs,
+        exportRangeText,
+        selectedFieldText,
+      } = this.getCurrentLogExportContext()
 
       const now = new Date()
       const statusCounter = { OPEN: 0, FULL: 0, ENDED: 0, CANCELLED: 0 }
@@ -1540,6 +1565,191 @@ export default {
       return lines.join('\n')
     },
 
+    buildSummaryCsvV2() {
+      const lines = []
+      const append = (values = []) => lines.push(this.buildCsvLine(values))
+      const now = new Date()
+      const { exportLogList, exportRangeText, selectedFieldText } = this.getCurrentLogExportContext()
+      const highRiskActionSet = new Set(['hide', 'ban', 'resolve_report_hide', 'reject_verify'])
+      const reportHandleActionSet = new Set(['resolve_report_hide', 'resolve_report_ignore'])
+      const activityMap = this.activityList.reduce((acc, item) => {
+        if (item && item._id) acc[item._id] = item
+        return acc
+      }, {})
+
+      const activityAggMap = {}
+      exportLogList.forEach((item) => {
+        const activityId = item.linkedActivityId || (item.targetType === 'activity' ? item.targetId : '')
+        if (!activityId) return
+        const baseActivity = activityMap[activityId] || item.linkedActivity || {}
+        if (!activityAggMap[activityId]) {
+          activityAggMap[activityId] = {
+            activityId,
+            title: baseActivity.title || '',
+            status: baseActivity.status || '',
+            publisherNickname: baseActivity.publisherNickname || '',
+            actionCount: 0,
+            highRiskCount: 0,
+            reportHandleCount: 0,
+            recommendCount: 0,
+            latestActionAt: '',
+            latestTs: 0,
+            totalReports: Number(baseActivity.reportMeta?.total || 0),
+            pendingReports: Number(baseActivity.reportMeta?.pending || 0),
+          }
+        }
+        const row = activityAggMap[activityId]
+        row.actionCount += 1
+        if (highRiskActionSet.has(item.action)) row.highRiskCount += 1
+        if (reportHandleActionSet.has(item.action)) row.reportHandleCount += 1
+        if (item.action === 'recommend' || item.action === 'unrecommend') row.recommendCount += 1
+        const ts = new Date(item.createdAt).getTime()
+        if (Number.isFinite(ts) && ts > row.latestTs) {
+          row.latestTs = ts
+          row.latestActionAt = item.createdAt || ''
+        }
+      })
+      const activityAggList = Object.values(activityAggMap).sort((a, b) => (
+        b.actionCount - a.actionCount || b.latestTs - a.latestTs
+      ))
+
+      const operatorAggMap = {}
+      exportLogList.forEach((item) => {
+        const key = `${item.adminOpenid || ''}__${item.adminRole || 'superAdmin'}`
+        if (!operatorAggMap[key]) {
+          operatorAggMap[key] = {
+            adminOpenid: item.adminOpenid || '',
+            adminRole: item.adminRole || 'superAdmin',
+            actionCount: 0,
+            highRiskCount: 0,
+            reportHandleCount: 0,
+            touchedActivities: new Set(),
+            latestActionAt: '',
+            latestTs: 0,
+          }
+        }
+        const row = operatorAggMap[key]
+        row.actionCount += 1
+        if (highRiskActionSet.has(item.action)) row.highRiskCount += 1
+        if (reportHandleActionSet.has(item.action)) row.reportHandleCount += 1
+        const activityId = item.linkedActivityId || (item.targetType === 'activity' ? item.targetId : '')
+        if (activityId) row.touchedActivities.add(activityId)
+        const ts = new Date(item.createdAt).getTime()
+        if (Number.isFinite(ts) && ts > row.latestTs) {
+          row.latestTs = ts
+          row.latestActionAt = item.createdAt || ''
+        }
+      })
+      const operatorAggList = Object.values(operatorAggMap)
+        .map((row) => ({
+          ...row,
+          touchedActivityCount: row.touchedActivities.size,
+        }))
+        .sort((a, b) => b.actionCount - a.actionCount || b.latestTs - a.latestTs)
+
+      const actionCounter = {}
+      exportLogList.forEach((item) => {
+        const action = item.action || 'unknown'
+        actionCounter[action] = (actionCounter[action] || 0) + 1
+      })
+      const actionRows = Object.keys(actionCounter)
+        .sort((a, b) => actionCounter[b] - actionCounter[a])
+        .map((action) => [action, this.actionText(action), actionCounter[action]])
+
+      append(['搭里管理统计报表（二期-汇总）'])
+      append(['导出时间', this.formatExportTime(now)])
+      append(['导出角色', this.adminRoleLabel])
+      append(['城市范围', this.cityIdLabel])
+      append(['筛选上下文', `filter=${this.activeFilter}; keyword=${this.searchKeyword || '-'}; logTime=${exportRangeText}; logView=${this.logViewMode}; logSort=${this.logSort}; operator=${this.logOperator}; role=${this.logRole}`])
+      append(['明细字段', selectedFieldText || '-'])
+      append(['导出范围操作记录', exportLogList.length])
+      append([])
+
+      append(['一、活动维度聚合（按当前筛选日志）'])
+      append(['活动ID', '活动标题', '状态', '发布者', '管理动作总数', '高风险动作', '举报处理动作', '推荐相关动作', '累计举报', '待处理举报', '最近动作时间'])
+      if (activityAggList.length === 0) {
+        append(['-', '暂无', '-', '-', 0, 0, 0, 0, 0, 0, '-'])
+      } else {
+        activityAggList.forEach((row) => {
+          append([
+            row.activityId,
+            row.title,
+            row.status,
+            row.publisherNickname,
+            row.actionCount,
+            row.highRiskCount,
+            row.reportHandleCount,
+            row.recommendCount,
+            row.totalReports,
+            row.pendingReports,
+            row.latestActionAt ? this.formatExportTime(new Date(row.latestActionAt)) : '',
+          ])
+        })
+      }
+      append([])
+
+      append(['二、管理员维度聚合（按当前筛选日志）'])
+      append(['管理员OPENID', '管理员角色', '管理动作总数', '高风险动作', '举报处理动作', '触达活动数', '最近动作时间'])
+      if (operatorAggList.length === 0) {
+        append(['-', '-', 0, 0, 0, 0, '-'])
+      } else {
+        operatorAggList.forEach((row) => {
+          append([
+            row.adminOpenid,
+            row.adminRole,
+            row.actionCount,
+            row.highRiskCount,
+            row.reportHandleCount,
+            row.touchedActivityCount,
+            row.latestActionAt ? this.formatExportTime(new Date(row.latestActionAt)) : '',
+          ])
+        })
+      }
+      append([])
+
+      append(['三、动作维度聚合（按当前筛选日志）'])
+      append(['动作编码', '动作中文', '次数'])
+      if (actionRows.length === 0) {
+        append(['-', '-', 0])
+      } else {
+        actionRows.forEach((row) => append(row))
+      }
+
+      return lines.join('\n')
+    },
+
+    buildDetailCsvV2() {
+      const lines = []
+      const append = (values = []) => lines.push(this.buildCsvLine(values))
+      const now = new Date()
+      const {
+        exportLogList,
+        exportDetailFieldDefs,
+        exportRangeText,
+        selectedFieldText,
+      } = this.getCurrentLogExportContext()
+
+      append(['搭里管理统计报表（二期-明细）'])
+      append(['导出时间', this.formatExportTime(now)])
+      append(['导出角色', this.adminRoleLabel])
+      append(['城市范围', this.cityIdLabel])
+      append(['筛选上下文', `filter=${this.activeFilter}; keyword=${this.searchKeyword || '-'}; logTime=${exportRangeText}; logView=${this.logViewMode}; logSort=${this.logSort}; operator=${this.logOperator}; role=${this.logRole}`])
+      append(['明细字段', selectedFieldText || '-'])
+      append(['记录数量', exportLogList.length])
+      append([])
+
+      append(['序号', ...exportDetailFieldDefs.map((item) => item.label)])
+      if (exportLogList.length === 0) {
+        append(['-', ...exportDetailFieldDefs.map(() => '-')])
+      } else {
+        exportLogList.forEach((item, index) => {
+          append([index + 1, ...exportDetailFieldDefs.map((field) => field.value(item))])
+        })
+      }
+
+      return lines.join('\n')
+    },
+
     async saveCsvToClipboard(csvText) {
       return new Promise((resolve, reject) => {
         uni.setClipboardData({
@@ -1585,7 +1795,7 @@ export default {
     },
 
     async exportStatsCsv() {
-      if (this.csvExporting) return
+      if (this.csvExporting || this.csvExportingV2) return
       this.csvExporting = true
       try {
         const csvText = this.buildStatsCsv()
@@ -1611,6 +1821,48 @@ export default {
         uni.showToast({ title: '导出失败，请重试', icon: 'none' })
       } finally {
         this.csvExporting = false
+      }
+    },
+
+    async exportStatsCsvV2() {
+      if (this.csvExportingV2 || this.csvExporting) return
+      this.csvExportingV2 = true
+      try {
+        const token = this.formatDateToken(new Date())
+        const summaryFileName = `dali_admin_summary_v2_${token}.csv`
+        const detailFileName = `dali_admin_detail_v2_${token}.csv`
+        const summaryCsv = this.buildSummaryCsvV2()
+        const detailCsv = this.buildDetailCsvV2()
+
+        try {
+          const summaryPath = await this.saveCsvToFile(summaryCsv, summaryFileName)
+          await this.saveCsvToFile(detailCsv, detailFileName)
+          try {
+            await this.openCsvFile(summaryPath)
+          } catch (openErr) {
+            console.warn('打开汇总报表失败', openErr)
+          }
+          uni.showModal({
+            title: '二期双表已生成',
+            content: `已生成文件：\n1) ${summaryFileName}\n2) ${detailFileName}\n\n可在“最近文件”或右上角菜单中继续查看/转发。`,
+            showCancel: false,
+          })
+          return
+        } catch (fileErr) {
+          console.warn('双表保存失败，回退剪贴板', fileErr)
+        }
+
+        await this.saveCsvToClipboard(`${summaryCsv}\n\n${detailCsv}`)
+        uni.showModal({
+          title: '已复制二期报表内容',
+          content: '当前环境不支持直接写入双文件，已复制“汇总+明细”到剪贴板，可粘贴后分别保存为两个 CSV 文件。',
+          showCancel: false,
+        })
+      } catch (e) {
+        console.error('导出二期双表失败', e)
+        uni.showToast({ title: '导出失败，请重试', icon: 'none' })
+      } finally {
+        this.csvExportingV2 = false
       }
     },
   }
@@ -1737,9 +1989,18 @@ export default {
   gap: 10rpx;
   margin: 0 0 14rpx;
 }
+.export-main-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10rpx;
+}
 .export-tip {
   font-size: 22rpx;
   color: #667085;
+}
+.action-btn--export-v2 {
+  background: #0B6E4F;
+  color: #fff;
 }
 .export-config {
   background: #fff;
