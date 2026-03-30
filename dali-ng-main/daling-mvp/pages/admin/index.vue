@@ -207,31 +207,69 @@
 
       <!-- 待办中心 -->
       <template v-if="activeTab === 'todo'">
+        <view class="card">
+          <view class="title-row">
+            <text class="card-title">今日待办摘要</text>
+            <text class="card-openid">{{ todoTodaySummary.dateLabel }}</text>
+          </view>
+          <view class="todo-summary-grid">
+            <view class="logs-overview-card">
+              <text class="logs-overview-value">{{ todoTodaySummary.newReportsToday }}</text>
+              <text class="logs-overview-label">今日新增举报</text>
+            </view>
+            <view class="logs-overview-card">
+              <text class="logs-overview-value">{{ todoTodaySummary.closedToday }}</text>
+              <text class="logs-overview-label">今日已闭环</text>
+            </view>
+            <view class="logs-overview-card">
+              <text class="logs-overview-value">{{ todoTodaySummary.overdueUnhandled }}</text>
+              <text class="logs-overview-label">超时未处理</text>
+            </view>
+            <view class="logs-overview-card">
+              <text class="logs-overview-value">{{ todoTodaySummary.upcoming24h }}</text>
+              <text class="logs-overview-label">24h即将开始</text>
+            </view>
+          </view>
+        </view>
+
+        <view class="todo-filter-row">
+          <view class="todo-filter-copy">
+            <text class="todo-filter-title">只看超时/紧急</text>
+            <text class="todo-filter-sub">{{ todoOnlyOverdue ? `当前仅展示风险项（${todoViewTotalCount}）` : '关闭时展示全部待办' }}</text>
+          </view>
+          <switch
+            class="todo-filter-switch"
+            :checked="todoOnlyOverdue"
+            color="#1A3C5E"
+            @change="onTodoOverdueSwitchChange"
+          />
+        </view>
+
         <view class="logs-overview">
           <view class="logs-overview-card">
-            <text class="logs-overview-value">{{ todoTotalCount }}</text>
-            <text class="logs-overview-label">待办总数</text>
+            <text class="logs-overview-value">{{ todoViewTotalCount }}</text>
+            <text class="logs-overview-label">{{ todoOnlyOverdue ? '当前风险待办' : '待办总数' }}</text>
           </view>
           <view class="logs-overview-card">
             <text class="logs-overview-value">{{ overdueTodoCount }}</text>
-            <text class="logs-overview-label">超时预警</text>
+            <text class="logs-overview-label">超时/紧急</text>
           </view>
           <view class="logs-overview-card">
-            <text class="logs-overview-value">{{ upcomingActivityTodoList.length }}</text>
-            <text class="logs-overview-label">24h即将开始</text>
+            <text class="logs-overview-value">{{ displayUpcomingActivityTodoList.length }}</text>
+            <text class="logs-overview-label">{{ todoOnlyOverdue ? '2h内紧急活动' : '24h即将开始' }}</text>
           </view>
         </view>
 
         <view class="card">
           <view class="title-row">
             <text class="card-title">待处理举报</text>
-            <text class="status-pill status-pill--pending">{{ pendingReportTodoList.length }}</text>
+            <text class="status-pill status-pill--pending">{{ displayPendingReportTodoList.length }}</text>
           </view>
-          <view v-if="pendingReportTodoList.length === 0" class="empty empty--inline">
-            <text class="empty-text">暂无待处理举报</text>
+          <view v-if="displayPendingReportTodoList.length === 0" class="empty empty--inline">
+            <text class="empty-text">{{ todoOnlyOverdue ? '暂无超时举报待办' : '暂无待处理举报' }}</text>
           </view>
           <view
-            v-for="item in pendingReportTodoList"
+            v-for="item in displayPendingReportTodoList"
             :key="item._id"
             class="todo-item"
             :class="{ 'todo-item--overdue': item.isOverSla }"
@@ -252,13 +290,13 @@
         <view class="card">
           <view class="title-row">
             <text class="card-title">待审核认证</text>
-            <text class="status-pill status-pill--pending">{{ pendingVerifyTodoList.length }}</text>
+            <text class="status-pill status-pill--pending">{{ displayPendingVerifyTodoList.length }}</text>
           </view>
-          <view v-if="pendingVerifyTodoList.length === 0" class="empty empty--inline">
-            <text class="empty-text">暂无待审核认证</text>
+          <view v-if="displayPendingVerifyTodoList.length === 0" class="empty empty--inline">
+            <text class="empty-text">{{ todoOnlyOverdue ? '暂无超时认证待办' : '暂无待审核认证' }}</text>
           </view>
           <view
-            v-for="item in pendingVerifyTodoList"
+            v-for="item in displayPendingVerifyTodoList"
             :key="item._id"
             class="todo-item"
             :class="{ 'todo-item--overdue': item.isOverSla }"
@@ -278,13 +316,13 @@
         <view class="card">
           <view class="title-row">
             <text class="card-title">即将开始活动（24h）</text>
-            <text class="status-pill status-pill--open">{{ upcomingActivityTodoList.length }}</text>
+            <text class="status-pill status-pill--open">{{ displayUpcomingActivityTodoList.length }}</text>
           </view>
-          <view v-if="upcomingActivityTodoList.length === 0" class="empty empty--inline">
-            <text class="empty-text">暂无24小时内开始的活动</text>
+          <view v-if="displayUpcomingActivityTodoList.length === 0" class="empty empty--inline">
+            <text class="empty-text">{{ todoOnlyOverdue ? '暂无2小时内紧急活动' : '暂无24小时内开始的活动' }}</text>
           </view>
           <view
-            v-for="item in upcomingActivityTodoList"
+            v-for="item in displayUpcomingActivityTodoList"
             :key="item._id"
             class="todo-item"
             :class="{ 'todo-item--urgent': item.isUrgent }"
@@ -330,6 +368,40 @@
               <text class="card-openid">耗时 {{ item.handleHoursText }}</text>
             </view>
             <text class="card-openid">结果：{{ reportStatusText(item.reportStatus) }} · {{ formatTime(item.handledAt) }}</text>
+          </view>
+          <view class="closure-trend-panel">
+            <view class="title-row">
+              <text class="card-sub">近7天处理趋势</text>
+              <text class="card-openid">新增举报 vs 闭环数</text>
+            </view>
+            <view class="trend-legend">
+              <text class="trend-legend-item trend-legend-item--report">新增举报</text>
+              <text class="trend-legend-item trend-legend-item--action">闭环处理</text>
+            </view>
+            <view class="trend-list">
+              <view v-for="item in closureTrend7Days" :key="item.key" class="trend-row">
+                <view class="title-row">
+                  <text class="card-sub">{{ item.label }}</text>
+                  <text class="card-openid">
+                    新增{{ item.newReportCount }} · 闭环{{ item.closedCount }} · 24h内{{ item.withinSlaRate }}
+                  </text>
+                </view>
+                <view class="trend-bar-wrap">
+                  <view class="trend-bar-track">
+                    <view
+                      class="trend-bar-fill trend-bar-fill--report"
+                      :style="{ width: closureTrendBarWidth(item.newReportCount) }"
+                    />
+                  </view>
+                  <view class="trend-bar-track">
+                    <view
+                      class="trend-bar-fill trend-bar-fill--action"
+                      :style="{ width: closureTrendBarWidth(item.closedCount) }"
+                    />
+                  </view>
+                </view>
+              </view>
+            </view>
           </view>
         </view>
       </template>
@@ -806,6 +878,7 @@ export default {
       activeFilter: 'all',
       searchKeyword: '',
       todoSlaHours: 24,
+      todoOnlyOverdue: false,
       reportSort: 'created_desc',
       logTimeRange: 'all',
       logCustomStartDate: today,
@@ -903,6 +976,11 @@ export default {
       return list
     },
 
+    displayPendingReportTodoList() {
+      if (!this.todoOnlyOverdue) return this.pendingReportTodoList
+      return this.pendingReportTodoList.filter((item) => item.isOverSla)
+    },
+
     pendingVerifyTodoList() {
       const keyword = this.normalizeKeyword(this.searchKeyword)
       const nowTs = Date.now()
@@ -923,6 +1001,11 @@ export default {
           if (a.isOverSla !== b.isOverSla) return a.isOverSla ? -1 : 1
           return b.waitHours - a.waitHours
         })
+    },
+
+    displayPendingVerifyTodoList() {
+      if (!this.todoOnlyOverdue) return this.pendingVerifyTodoList
+      return this.pendingVerifyTodoList.filter((item) => item.isOverSla)
     },
 
     upcomingActivityTodoList() {
@@ -949,14 +1032,47 @@ export default {
         .sort((a, b) => a.startTs - b.startTs)
     },
 
+    displayUpcomingActivityTodoList() {
+      if (!this.todoOnlyOverdue) return this.upcomingActivityTodoList
+      return this.upcomingActivityTodoList.filter((item) => item.isUrgent)
+    },
+
     todoTotalCount() {
       return this.pendingReportTodoList.length + this.pendingVerifyTodoList.length + this.upcomingActivityTodoList.length
+    },
+
+    todoViewTotalCount() {
+      return this.displayPendingReportTodoList.length
+        + this.displayPendingVerifyTodoList.length
+        + this.displayUpcomingActivityTodoList.length
     },
 
     overdueTodoCount() {
       return this.pendingReportTodoList.filter((item) => item.isOverSla).length
         + this.pendingVerifyTodoList.filter((item) => item.isOverSla).length
         + this.upcomingActivityTodoList.filter((item) => item.isUrgent).length
+    },
+
+    todoTodaySummary() {
+      const now = new Date()
+      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).getTime()
+      const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).getTime()
+      const isInToday = (ts) => Number.isFinite(ts) && ts >= start && ts <= end
+
+      const newReportsToday = this.reportList.filter((item) => isInToday(this.toTimestamp(item.createdAt))).length
+      const closedToday = this.reportList
+        .filter((item) => ['HANDLED', 'IGNORED'].includes(item.reportStatus))
+        .filter((item) => isInToday(this.toTimestamp(item.handledAt)))
+        .length
+
+      return {
+        dateLabel: `今天 ${this.formatMd(now)}`,
+        newReportsToday,
+        closedToday,
+        overdueUnhandled: this.pendingReportTodoList.filter((item) => item.isOverSla).length
+          + this.pendingVerifyTodoList.filter((item) => item.isOverSla).length,
+        upcoming24h: this.upcomingActivityTodoList.length,
+      }
     },
 
     recentClosureList() {
@@ -1007,6 +1123,56 @@ export default {
         withinSlaCount,
         withinSlaRate: `${((withinSlaCount / allClosed.length) * 100).toFixed(1)}%`,
       }
+    },
+
+    closureTrend7Days() {
+      const dayMs = 24 * 60 * 60 * 1000
+      const now = new Date()
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).getTime()
+      const rows = []
+
+      for (let i = 6; i >= 0; i -= 1) {
+        const startTs = todayStart - i * dayMs
+        const endTs = startTs + dayMs - 1
+        const label = this.formatMd(startTs)
+        const newReportCount = this.reportList.filter((item) => {
+          const ts = this.toTimestamp(item.createdAt)
+          return Number.isFinite(ts) && ts >= startTs && ts <= endTs
+        }).length
+
+        const closedItems = this.reportList
+          .filter((item) => ['HANDLED', 'IGNORED'].includes(item.reportStatus))
+          .filter((item) => {
+            const handledTs = this.toTimestamp(item.handledAt)
+            return Number.isFinite(handledTs) && handledTs >= startTs && handledTs <= endTs
+          })
+          .map((item) => {
+            const createdTs = this.toTimestamp(item.createdAt)
+            const handledTs = this.toTimestamp(item.handledAt)
+            const handleHours = (Number.isFinite(createdTs) && Number.isFinite(handledTs) && handledTs >= createdTs)
+              ? (handledTs - createdTs) / 3600000
+              : 0
+            return { ...item, handleHours }
+          })
+
+        const closedCount = closedItems.length
+        const withinSlaCount = closedItems.filter((item) => item.handleHours <= this.todoSlaHours).length
+        rows.push({
+          key: `${startTs}`,
+          label,
+          newReportCount,
+          closedCount,
+          withinSlaRate: closedCount > 0 ? `${((withinSlaCount / closedCount) * 100).toFixed(0)}%` : '-',
+        })
+      }
+      return rows
+    },
+
+    closureTrendScaleMax() {
+      return this.closureTrend7Days.reduce((max, row) => {
+        const rowMax = Math.max(Number(row.newReportCount) || 0, Number(row.closedCount) || 0)
+        return rowMax > max ? rowMax : max
+      }, 1)
     },
 
     filterOptions() {
@@ -1461,6 +1627,7 @@ export default {
     activeTab() {
       this.activeFilter = 'all'
       this.searchKeyword = ''
+      this.todoOnlyOverdue = false
       this.reportSort = 'created_desc'
       this.logTimeRange = 'all'
       this.logCustomStartDate = this.getTodayDateToken()
@@ -1512,6 +1679,10 @@ export default {
         this.logCustomStartDate = value
       }
       this.logCustomEndDate = value
+    },
+
+    onTodoOverdueSwitchChange(e) {
+      this.todoOnlyOverdue = Boolean(e?.detail?.value)
     },
 
     toggleExportField(fieldKey) {
@@ -2262,6 +2433,14 @@ export default {
       return `${Math.min(100, pct)}%`
     },
 
+    closureTrendBarWidth(value) {
+      const safeValue = Number(value) || 0
+      if (safeValue <= 0) return '0%'
+      const max = Number(this.closureTrendScaleMax) || 1
+      const pct = Math.max(8, Math.round((safeValue / max) * 100))
+      return `${Math.min(100, pct)}%`
+    },
+
     buildTrendInsightText() {
       const modeText = this.trendDashboardMode === 'month'
         ? `月趋势（近${this.trendMonthWindow}月）`
@@ -3001,6 +3180,41 @@ export default {
   gap: 12rpx;
   margin: 0 0 14rpx;
 }
+.todo-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12rpx;
+  margin-top: 12rpx;
+}
+.todo-filter-row {
+  margin: 0 0 14rpx;
+  padding: 14rpx 16rpx;
+  background: #fff;
+  border: 1rpx solid #e7ecf3;
+  border-radius: 12rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12rpx;
+}
+.todo-filter-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+}
+.todo-filter-title {
+  font-size: 24rpx;
+  color: #344054;
+  font-weight: 600;
+}
+.todo-filter-sub {
+  font-size: 20rpx;
+  color: #667085;
+}
+.todo-filter-switch {
+  transform: scale(0.9);
+  transform-origin: right center;
+}
 .export-toolbar {
   display: flex;
   flex-direction: column;
@@ -3213,6 +3427,11 @@ export default {
 .todo-item--urgent {
   background: #fff7ed;
   box-shadow: 0 0 0 1rpx #fed7aa inset;
+}
+.closure-trend-panel {
+  margin-top: 12rpx;
+  padding-top: 12rpx;
+  border-top: 1rpx solid #eef2f6;
 }
 .mini-btn {
   height: 54rpx;
