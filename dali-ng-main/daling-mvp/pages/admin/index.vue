@@ -247,6 +247,18 @@
             @change="onTodoOverdueSwitchChange"
           />
         </view>
+        <view class="todo-filter-row">
+          <view class="todo-filter-copy">
+            <text class="todo-filter-title">自动风险提醒</text>
+            <text class="todo-filter-sub">{{ todoAutoRemindEnabled ? '开启后每天首次进入后台自动提醒风险待办' : '已关闭自动提醒' }}</text>
+          </view>
+          <switch
+            class="todo-filter-switch"
+            :checked="todoAutoRemindEnabled"
+            color="#1A3C5E"
+            @change="onTodoAutoRemindSwitchChange"
+          />
+        </view>
         <view class="todo-sla-row">
           <text class="todo-filter-sub">SLA 阈值</text>
           <view class="chip-row">
@@ -336,6 +348,24 @@
             <text class="card-title">待处理举报</text>
             <text class="status-pill status-pill--pending">{{ displayPendingReportTodoList.length }}</text>
           </view>
+          <view class="todo-batch-toolbar">
+            <button class="mini-btn" @tap="toggleReportBatchMode">{{ reportBatchMode ? '退出批量' : '开启批量' }}</button>
+            <view v-if="reportBatchMode" class="todo-batch-actions">
+              <button class="mini-btn mini-btn--ghost" @tap="selectAllVisibleReportTodos">全选当前</button>
+              <button class="mini-btn mini-btn--ghost" @tap="clearSelectedReportTodos">清空</button>
+              <button
+                class="mini-btn"
+                :disabled="batchSelectedReportCount === 0 || reportBatchProcessing"
+                @tap="batchHandleReports('resolve_report_hide')"
+              >批量下架({{ batchSelectedReportCount }})</button>
+              <button
+                class="mini-btn mini-btn--ghost"
+                :disabled="batchSelectedReportCount === 0 || reportBatchProcessing"
+                @tap="batchHandleReports('resolve_report_ignore')"
+              >批量忽略({{ batchSelectedReportCount }})</button>
+            </view>
+          </view>
+          <view v-if="reportBatchMode" class="card-openid">批量模式已开启：已选 {{ batchSelectedReportCount }} 条</view>
           <view v-if="displayPendingReportTodoList.length === 0" class="empty empty--inline">
             <text class="empty-text">{{ todoOnlyOverdue ? '暂无超时举报待办' : '暂无待处理举报' }}</text>
           </view>
@@ -347,7 +377,15 @@
           >
             <view class="title-row">
               <text class="card-sub">{{ item.reason || '举报待处理' }}</text>
-              <text class="card-openid">已等待 {{ item.waitHoursText }}</text>
+              <view class="todo-title-actions">
+                <text class="card-openid">已等待 {{ item.waitHoursText }}</text>
+                <button
+                  v-if="reportBatchMode"
+                  class="mini-btn mini-btn--ghost mini-btn--pick"
+                  :disabled="reportBatchProcessing"
+                  @tap="toggleReportSelection(item._id)"
+                >{{ isReportSelected(item._id) ? '已选' : '选择' }}</button>
+              </view>
             </view>
             <text class="card-openid">活动：{{ item.targetActivity?.title || item.targetId }}</text>
             <view class="card-actions">
@@ -950,6 +988,12 @@ export default {
       searchKeyword: '',
       todoSlaHours: 24,
       todoOnlyOverdue: false,
+      todoAutoRemindEnabled: true,
+      todoLastRemindDate: '',
+      todoPrefReady: false,
+      reportBatchMode: false,
+      reportBatchProcessing: false,
+      selectedReportTodoIds: [],
       reportSort: 'created_desc',
       logTimeRange: 'all',
       logCustomStartDate: today,
@@ -1198,6 +1242,22 @@ export default {
 
     todoPriorityRiskCount() {
       return this.todoPriorityQueue.filter((item) => item.isRisk).length
+    },
+
+    overdueReportTodoCount() {
+      return this.pendingReportTodoList.filter((item) => item.isOverSla).length
+    },
+
+    overdueVerifyTodoCount() {
+      return this.pendingVerifyTodoList.filter((item) => item.isOverSla).length
+    },
+
+    urgentActivityTodoCount() {
+      return this.upcomingActivityTodoList.filter((item) => item.isUrgent).length
+    },
+
+    batchSelectedReportCount() {
+      return this.selectedReportTodoIds.length
     },
 
     recentClosureList() {
@@ -1745,7 +1805,12 @@ export default {
   },
 
   async onShow() {
+    if (!this.todoPrefReady) {
+      this.initTodoPreferences()
+      this.todoPrefReady = true
+    }
     await this.loadData()
+    this.maybeAutoRemindRiskTodos()
   },
 
   watch: {
@@ -1761,6 +1826,8 @@ export default {
       this.logViewMode = 'flat'
       this.logOperator = 'all'
       this.logRole = 'all'
+      this.reportBatchMode = false
+      this.selectedReportTodoIds = []
     },
   },
 
@@ -1810,9 +1877,95 @@ export default {
       this.todoOnlyOverdue = Boolean(e?.detail?.value)
     },
 
+    onTodoAutoRemindSwitchChange(e) {
+      this.todoAutoRemindEnabled = Boolean(e?.detail?.value)
+      this.saveTodoPreferences()
+      uni.showToast({ title: this.todoAutoRemindEnabled ? '已开启自动提醒' : '已关闭自动提醒', icon: 'none' })
+    },
+
     onPickTodoSla(hours) {
       const next = Number(hours) || 24
       this.todoSlaHours = next
+      this.saveTodoPreferences()
+    },
+
+    toggleReportBatchMode() {
+      this.reportBatchMode = !this.reportBatchMode
+      if (!this.reportBatchMode) {
+        this.selectedReportTodoIds = []
+      }
+    },
+
+    isReportSelected(reportId) {
+      return this.selectedReportTodoIds.includes(reportId)
+    },
+
+    toggleReportSelection(reportId) {
+      if (!reportId) return
+      if (this.isReportSelected(reportId)) {
+        this.selectedReportTodoIds = this.selectedReportTodoIds.filter((id) => id !== reportId)
+        return
+      }
+      this.selectedReportTodoIds = [...this.selectedReportTodoIds, reportId]
+    },
+
+    selectAllVisibleReportTodos() {
+      const ids = this.displayPendingReportTodoList.map((item) => item._id)
+      this.selectedReportTodoIds = [...new Set(ids)]
+    },
+
+    clearSelectedReportTodos() {
+      this.selectedReportTodoIds = []
+    },
+
+    async batchHandleReports(action) {
+      if (this.reportBatchProcessing) return
+      const selectedIdSet = new Set(this.selectedReportTodoIds)
+      const selectedRows = this.displayPendingReportTodoList.filter((item) => selectedIdSet.has(item._id))
+      if (selectedRows.length === 0) {
+        uni.showToast({ title: '请先选择举报记录', icon: 'none' })
+        return
+      }
+
+      const reason = await this.pickReasonTemplate(action)
+      if (!reason) return
+      const actionText = action === 'resolve_report_hide' ? '批量下架并处理' : '批量忽略并处理'
+      uni.showModal({
+        title: `确认${actionText}？`,
+        content: `将处理 ${selectedRows.length} 条举报，原因：${reason}`,
+        success: async (res) => {
+          if (!res.confirm) return
+          this.reportBatchProcessing = true
+          let successCount = 0
+          let failCount = 0
+          try {
+            for (const item of selectedRows) {
+              try {
+                const result = await callCloud('adminAction', {
+                  action,
+                  reportId: item._id,
+                  targetId: item.targetId,
+                  targetType: 'report',
+                  reason,
+                })
+                if (result?.success) successCount += 1
+                else failCount += 1
+              } catch (e) {
+                failCount += 1
+              }
+            }
+            await this.loadData()
+            this.selectedReportTodoIds = []
+            uni.showModal({
+              title: '批量处理完成',
+              content: `成功 ${successCount} 条，失败 ${failCount} 条`,
+              showCancel: false,
+            })
+          } finally {
+            this.reportBatchProcessing = false
+          }
+        },
+      })
     },
 
     goPriorityQueueDetail(item) {
@@ -1927,6 +2080,57 @@ export default {
       })
     },
 
+    initTodoPreferences() {
+      try {
+        const pref = uni.getStorageSync('dali_admin_todo_pref_v1')
+        if (!pref || typeof pref !== 'object') return
+        if ([12, 24, 48].includes(Number(pref.todoSlaHours))) {
+          this.todoSlaHours = Number(pref.todoSlaHours)
+        }
+        if (typeof pref.todoAutoRemindEnabled === 'boolean') {
+          this.todoAutoRemindEnabled = pref.todoAutoRemindEnabled
+        }
+        if (pref.todoLastRemindDate && /^\d{4}-\d{2}-\d{2}$/.test(pref.todoLastRemindDate)) {
+          this.todoLastRemindDate = pref.todoLastRemindDate
+        }
+      } catch (e) {
+        console.warn('读取待办偏好失败', e)
+      }
+    },
+
+    saveTodoPreferences() {
+      try {
+        uni.setStorageSync('dali_admin_todo_pref_v1', {
+          todoSlaHours: this.todoSlaHours,
+          todoAutoRemindEnabled: this.todoAutoRemindEnabled,
+          todoLastRemindDate: this.todoLastRemindDate,
+        })
+      } catch (e) {
+        console.warn('保存待办偏好失败', e)
+      }
+    },
+
+    maybeAutoRemindRiskTodos() {
+      if (!this.hasAccess || !this.todoAutoRemindEnabled) return
+      const totalRisk = this.overdueTodoCount
+      if (totalRisk <= 0) return
+      const today = this.getTodayDateToken()
+      if (this.todoLastRemindDate === today) return
+      this.todoLastRemindDate = today
+      this.saveTodoPreferences()
+      uni.showModal({
+        title: '风险待办提醒',
+        content: `当前有 ${this.overdueReportTodoCount} 条超时举报、${this.overdueVerifyTodoCount} 条超时认证、${this.urgentActivityTodoCount} 条紧急活动，请优先处理。`,
+        confirmText: '去处理',
+        cancelText: '稍后',
+        success: (res) => {
+          if (!res.confirm) return
+          this.activeTab = 'todo'
+          this.todoOnlyOverdue = true
+        },
+      })
+    },
+
     async loadData() {
       this.loading = true
       try {
@@ -1948,6 +2152,12 @@ export default {
         this.reportList = res.reportList || []
         this.activityList = res.activityList || []
         this.actionLogList = res.actionLogList || []
+        const pendingReportIdSet = new Set(
+          this.reportList
+            .filter((item) => (item.reportStatus || 'PENDING') === 'PENDING')
+            .map((item) => item._id)
+        )
+        this.selectedReportTodoIds = this.selectedReportTodoIds.filter((id) => pendingReportIdSet.has(id))
       } catch(e) {
         console.error('加载管理数据失败', e)
         uni.showToast({ title: '加载失败', icon: 'none' })
@@ -3412,6 +3622,23 @@ export default {
   justify-content: space-between;
   gap: 10rpx;
 }
+.todo-batch-toolbar {
+  margin: 6rpx 0 10rpx;
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  flex-wrap: wrap;
+}
+.todo-batch-actions {
+  display: flex;
+  gap: 8rpx;
+  flex-wrap: wrap;
+}
+.todo-title-actions {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+}
 .export-toolbar {
   display: flex;
   flex-direction: column;
@@ -3646,6 +3873,12 @@ export default {
 .mini-btn--ghost {
   background: #eef4fb;
   color: #1A3C5E;
+}
+.mini-btn--pick {
+  height: 46rpx;
+  line-height: 46rpx;
+  font-size: 18rpx;
+  padding: 0 14rpx;
 }
 .export-chip-wrap {
   flex-wrap: wrap;
