@@ -2,16 +2,27 @@ const cloud = require('wx-server-sdk')
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 const db = cloud.database()
 
-const CITY_CONFIG = {
+const DEFAULT_CITY_CONFIG = {
   cityId: 'dali',
+  version: 'v1-default',
   geo: {
     defaultFenceRadius: 5000,
+    minFenceRadius: 2000,
     coordinateSystem: 'GCJ02',
   },
   groupFormation: {
     defaultWindow: 30,
     allowedWindows: [15, 30, 60],
     absoluteMinParticipants: 2,
+    maxWindowExtensions: 3,
+    organizerDecisionTimeoutHours: 24,
+  },
+  operations: {
+    supplyAlertThreshold: {
+      minDailyActivities: 5,
+      minFormationRate: 0.4,
+      minD1RetentionRate: 0.25,
+    },
   }
 }
 
@@ -40,6 +51,80 @@ function buildTrustProfileForPublish(user) {
   }
 }
 
+function normalizeNumber(value, fallback) {
+  const n = Number(value)
+  return Number.isFinite(n) ? n : fallback
+}
+
+function mergeCityConfig(raw = {}, cityId = '') {
+  const defaultConfig = DEFAULT_CITY_CONFIG
+  const finalCityId = cityId || raw.cityId || defaultConfig.cityId
+  return {
+    cityId: finalCityId,
+    version: raw.version || defaultConfig.version,
+    geo: {
+      defaultFenceRadius: normalizeNumber(raw.geo?.defaultFenceRadius, defaultConfig.geo.defaultFenceRadius),
+      minFenceRadius: normalizeNumber(raw.geo?.minFenceRadius, defaultConfig.geo.minFenceRadius),
+      coordinateSystem: raw.geo?.coordinateSystem || defaultConfig.geo.coordinateSystem,
+    },
+    groupFormation: {
+      defaultWindow: normalizeNumber(raw.groupFormation?.defaultWindow, defaultConfig.groupFormation.defaultWindow),
+      allowedWindows: Array.isArray(raw.groupFormation?.allowedWindows) && raw.groupFormation.allowedWindows.length
+        ? raw.groupFormation.allowedWindows.map((v) => Number(v)).filter((v) => Number.isFinite(v) && v > 0)
+        : [...defaultConfig.groupFormation.allowedWindows],
+      absoluteMinParticipants: normalizeNumber(
+        raw.groupFormation?.absoluteMinParticipants,
+        defaultConfig.groupFormation.absoluteMinParticipants
+      ),
+      maxWindowExtensions: normalizeNumber(
+        raw.groupFormation?.maxWindowExtensions,
+        defaultConfig.groupFormation.maxWindowExtensions
+      ),
+      organizerDecisionTimeoutHours: normalizeNumber(
+        raw.groupFormation?.organizerDecisionTimeoutHours,
+        defaultConfig.groupFormation.organizerDecisionTimeoutHours
+      ),
+    },
+    operations: {
+      supplyAlertThreshold: {
+        minDailyActivities: normalizeNumber(
+          raw.operations?.supplyAlertThreshold?.minDailyActivities,
+          defaultConfig.operations.supplyAlertThreshold.minDailyActivities
+        ),
+        minFormationRate: normalizeNumber(
+          raw.operations?.supplyAlertThreshold?.minFormationRate,
+          defaultConfig.operations.supplyAlertThreshold.minFormationRate
+        ),
+        minD1RetentionRate: normalizeNumber(
+          raw.operations?.supplyAlertThreshold?.minD1RetentionRate,
+          defaultConfig.operations.supplyAlertThreshold.minD1RetentionRate
+        ),
+      },
+    },
+  }
+}
+
+async function loadCityConfig(cityId = 'dali') {
+  const finalCityId = cityId || DEFAULT_CITY_CONFIG.cityId
+  try {
+    const { data } = await db.collection('cityConfigs')
+      .where({ cityId: finalCityId })
+      .limit(1)
+      .get()
+    if (data && data[0]) return mergeCityConfig(data[0], finalCityId)
+  } catch (e) {}
+
+  try {
+    const { data } = await db.collection('cityConfig')
+      .where({ cityId: finalCityId })
+      .limit(1)
+      .get()
+    if (data && data[0]) return mergeCityConfig(data[0], finalCityId)
+  } catch (e) {}
+
+  return mergeCityConfig({}, finalCityId)
+}
+
 exports.main = async (event, context) => {
   const { OPENID } = cloud.getWXContext()
 
@@ -66,9 +151,12 @@ exports.main = async (event, context) => {
     maxParticipants = 999,
     isGroupFormation = false,
     minParticipants = 0,
-    formationWindow = CITY_CONFIG.groupFormation.defaultWindow,
-    cityId = CITY_CONFIG.cityId,
+    formationWindow,
+    cityId,
   } = event
+
+  const cityConfig = await loadCityConfig(cityId || DEFAULT_CITY_CONFIG.cityId)
+  const finalCityId = cityConfig.cityId
 
   // 2. 参数校验
   if (!title || title.trim().length === 0) {
@@ -100,16 +188,16 @@ exports.main = async (event, context) => {
   if (isGroupFormation && minParticipants < 2) {
     return { success: false, error: 'INVALID_MIN', message: '成团最低人数至少2人' }
   }
-  if (isGroupFormation && !CITY_CONFIG.groupFormation.allowedWindows.includes(Number(formationWindow))) {
+  const requestedWindow = Number(formationWindow)
+  const finalFormationWindow = isGroupFormation
+    ? (Number.isFinite(requestedWindow) ? requestedWindow : cityConfig.groupFormation.defaultWindow)
+    : cityConfig.groupFormation.defaultWindow
+  if (isGroupFormation && !cityConfig.groupFormation.allowedWindows.includes(Number(finalFormationWindow))) {
     return { success: false, error: 'INVALID_WINDOW', message: '成团时间窗口不合法' }
   }
-  if (isGroupFormation && minParticipants < CITY_CONFIG.groupFormation.absoluteMinParticipants) {
+  if (isGroupFormation && minParticipants < cityConfig.groupFormation.absoluteMinParticipants) {
     return { success: false, error: 'INVALID_MIN', message: '成团最低人数至少2人' }
   }
-
-  const finalFormationWindow = isGroupFormation
-    ? Number(formationWindow)
-    : CITY_CONFIG.groupFormation.defaultWindow
 
   // 3. 成团截止时间（发布后N分钟）
   const formationDeadline = isGroupFormation
@@ -125,13 +213,13 @@ exports.main = async (event, context) => {
       categoryId,
       categoryLabel: categoryLabel || CATEGORY_MAP[categoryId] || '其他',
       coverImage: '',
-      cityId,
+      cityId: finalCityId,
       location: {
         lat,
         lng,
         address,
-        coordinateSystem: CITY_CONFIG.geo.coordinateSystem,
-        radius: CITY_CONFIG.geo.defaultFenceRadius,
+        coordinateSystem: cityConfig.geo.coordinateSystem,
+        radius: cityConfig.geo.defaultFenceRadius,
         accuracy: null,
         pathPoints: null,
         pathRadius: null,
@@ -146,6 +234,12 @@ exports.main = async (event, context) => {
       formationWindow: isGroupFormation ? finalFormationWindow : null,
       formationDeadline,
       formationStatus: isGroupFormation ? 'FORMING' : null,
+      formationWindowOptions: isGroupFormation ? cityConfig.groupFormation.allowedWindows : [],
+      maxWindowExtensions: isGroupFormation ? cityConfig.groupFormation.maxWindowExtensions : 0,
+      extendWindowCount: 0,
+      organizerDecisionDeadline: null,
+      organizerDecisionTimeoutHours: isGroupFormation ? cityConfig.groupFormation.organizerDecisionTimeoutHours : 0,
+      cityConfigVersion: cityConfig.version,
       intentPhase: {
         enabled: false,
         intentCount: 0,
@@ -157,7 +251,7 @@ exports.main = async (event, context) => {
       contactInfo: {
         type: 'wechat',
         value: '',
-        cityId,
+        cityId: finalCityId,
       },
       trustProfile: buildTrustProfileForPublish(user),
       modificationRiskScore: 0,
@@ -179,5 +273,11 @@ exports.main = async (event, context) => {
     }
   }).catch(() => {})
 
-  return { success: true, activityId: result._id }
+  return {
+    success: true,
+    activityId: result._id,
+    cityId: finalCityId,
+    cityConfigVersion: cityConfig.version,
+    serverTimestamp: Date.now(),
+  }
 }

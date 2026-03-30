@@ -84,8 +84,22 @@ export default {
     },
 
     formationText() {
-      const { formationStatus, currentParticipants, minParticipants, formationDeadline } = this.activity
+      const {
+        formationStatus,
+        currentParticipants,
+        minParticipants,
+        formationDeadline,
+        organizerDecisionDeadline,
+      } = this.activity
       if (formationStatus === 'CONFIRMED') return '✅ 已成团！'
+      if (formationStatus === 'PENDING_ORGANIZER') {
+        const shortage = Math.max(0, (minParticipants || 0) - (currentParticipants || 0))
+        const decisionLeft = organizerDecisionDeadline
+          ? formationTimeLeft(organizerDecisionDeadline, new Date(this.serverTime))
+          : '等待发布者决策'
+        if (shortage <= 0) return `等待发布者确认 · ${decisionLeft}`
+        return `待发布者决策（还差${shortage}人）· ${decisionLeft}`
+      }
       if (formationStatus === 'FAILED')    return '招募已结束'
       const shortage = (minParticipants || 0) - (currentParticipants || 0)
       const timeLeft = formationDeadline ? formationTimeLeft(formationDeadline, new Date(this.serverTime)) : ''

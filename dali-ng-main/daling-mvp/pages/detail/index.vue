@@ -112,6 +112,14 @@
           <view class="formation-fill" :style="{ width: formationProgress + '%' }" />
         </view>
         <text class="formation-desc">{{ formationDesc }}</text>
+        <view v-if="canExtendFormationWindow" class="formation-actions">
+          <button
+            class="formation-extend-btn"
+            :loading="extendingWindow"
+            @tap="promptExtendFormationWindow"
+          >延长成团窗口</button>
+          <text class="formation-extend-tip">剩余可延长 {{ remainWindowExtensions }} 次</text>
+        </view>
       </view>
 
       <!-- 发布者可见：参与者列表 -->
@@ -312,6 +320,7 @@ export default {
       hasJoined: false,
       joining: false,
       quitting: false,
+      extendingWindow: false,
       serverTime: Date.now(),
       currentOpenid: '',
       isAdminView: false,
@@ -387,7 +396,10 @@ export default {
     },
 
     joinBtnText() {
-      if (this.activity?.isGroupFormation && this.activity?.formationStatus === 'FORMING') {
+      if (
+        this.activity?.isGroupFormation &&
+        ['FORMING', 'PENDING_ORGANIZER'].includes(this.activity?.formationStatus)
+      ) {
         const shortage = (this.activity.minParticipants || 0) - (this.activity.currentParticipants || 0)
         if (shortage > 0) return `参与成团（还差${shortage}人）`
       }
@@ -410,21 +422,65 @@ export default {
     formationStatusText() {
       const s = this.activity?.formationStatus
       if (s === 'CONFIRMED') return '✅ 已成团'
+      if (s === 'PENDING_ORGANIZER') return '待发布者决策'
       if (s === 'FAILED')    return '招募已结束'
       return '成团中'
     },
 
     formationDesc() {
       if (!this.activity?.isGroupFormation) return ''
-      const { currentParticipants, minParticipants, formationDeadline, formationStatus } = this.activity
+      const {
+        currentParticipants,
+        minParticipants,
+        formationDeadline,
+        formationStatus,
+        organizerDecisionDeadline,
+      } = this.activity
       if (formationStatus === 'CONFIRMED') return `共 ${currentParticipants} 人，已成团！`
       if (formationStatus === 'FAILED')    return '未达到成团人数'
+
+      if (formationStatus === 'PENDING_ORGANIZER') {
+        const shortage = Math.max(0, (minParticipants || 0) - (currentParticipants || 0))
+        const decisionTimeText = organizerDecisionDeadline
+          ? this.formatTime(organizerDecisionDeadline)
+          : '24小时内'
+        if (shortage <= 0) return `已达到成团人数，等待发布者确认（最晚 ${decisionTimeText}）`
+        return `未达成团（还差 ${shortage} 人）· 请发布者在 ${decisionTimeText} 前决定是否延长窗口`
+      }
+
       const shortage = (minParticipants || 0) - (currentParticipants || 0)
       const timeLeft = formationDeadline
         ? formationTimeLeft(new Date(formationDeadline), new Date(this.serverTime))
         : ''
       if (shortage <= 0) return `已达成团人数！${timeLeft}`
       return `还差 ${shortage} 人 · ${timeLeft}`
+    },
+
+    formationWindowOptions() {
+      const fromActivity = Array.isArray(this.activity?.formationWindowOptions)
+        ? this.activity.formationWindowOptions
+          .map((v) => Number(v))
+          .filter((v) => Number.isFinite(v) && v > 0)
+        : []
+      const fallback = [15, 30, 60]
+      const merged = [...new Set([...fromActivity, ...fallback])]
+      return merged.sort((a, b) => a - b)
+    },
+
+    remainWindowExtensions() {
+      const rawMaxCount = Number(this.activity?.maxWindowExtensions)
+      const maxCount = Number.isFinite(rawMaxCount) && rawMaxCount > 0 ? rawMaxCount : 3
+      const usedCount = Number(this.activity?.extendWindowCount || 0)
+      const remain = maxCount - usedCount
+      return remain > 0 ? remain : 0
+    },
+
+    canExtendFormationWindow() {
+      if (!this.isPublisher || !this.activity?.isGroupFormation) return false
+      if (this.activity?.formationStatus !== 'PENDING_ORGANIZER') return false
+      if (this.remainWindowExtensions <= 0) return false
+      if (['ENDED', 'CANCELLED'].includes(this.activity?.status)) return false
+      return true
     },
 
     trustProfile() {
@@ -645,6 +701,53 @@ export default {
 
         reject(new Error('CLIPBOARD_API_UNSUPPORTED'))
       })
+    },
+
+    promptExtendFormationWindow() {
+      if (!this.canExtendFormationWindow || this.extendingWindow) return
+      const options = this.formationWindowOptions
+      if (!options.length) {
+        uni.showToast({ title: '当前暂无可选窗口', icon: 'none' })
+        return
+      }
+
+      uni.showActionSheet({
+        itemList: options.map((m) => `延长 ${m} 分钟`),
+        success: async (res) => {
+          const selected = options[res.tapIndex]
+          if (!Number.isFinite(selected)) return
+          await this.extendFormationWindow(selected)
+        },
+      })
+    },
+
+    async extendFormationWindow(minutes) {
+      if (!this.canExtendFormationWindow) return
+      this.extendingWindow = true
+      try {
+        const res = await callCloud('extendFormationWindow', {
+          activityId: this.activityId,
+          extensionMinutes: minutes,
+        })
+        if (res?.success) {
+          await this.loadDetail()
+          uni.showToast({ title: `已延长 ${minutes} 分钟`, icon: 'success' })
+          return
+        }
+
+        const msgMap = {
+          INVALID_STATUS: '当前状态不可延长',
+          WINDOW_EXTENSION_LIMIT: '延长次数已用完',
+          INVALID_WINDOW: '所选窗口不可用',
+          NOT_GROUP_FORMATION: '仅成团活动可延长',
+          UNAUTHORIZED: '仅发布者可操作',
+        }
+        uni.showToast({ title: msgMap[res?.error] || res?.message || '操作失败', icon: 'none' })
+      } catch (e) {
+        uni.showToast({ title: '延长失败，请稍后重试', icon: 'none' })
+      } finally {
+        this.extendingWindow = false
+      }
     },
 
     chooseReplyTarget(commentItem) {
@@ -1155,6 +1258,31 @@ export default {
   height: 100%; background: #2E75B6; border-radius: 6rpx;
 }
 .formation-desc { font-size: 24rpx; color: #555; }
+.formation-actions {
+  margin-top: 14rpx;
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  flex-wrap: wrap;
+}
+.formation-extend-btn {
+  margin: 0;
+  height: 62rpx;
+  line-height: 62rpx;
+  border-radius: 32rpx;
+  padding: 0 24rpx;
+  font-size: 24rpx;
+  color: #1E7145;
+  background: #EEF7EE;
+  border: none;
+}
+.formation-extend-btn::after {
+  border: none;
+}
+.formation-extend-tip {
+  font-size: 22rpx;
+  color: #667085;
+}
 
 .participants-block {
   margin-top: 24rpx;

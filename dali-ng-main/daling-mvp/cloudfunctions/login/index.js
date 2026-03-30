@@ -1,9 +1,22 @@
 const cloud = require('wx-server-sdk')
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 const db = cloud.database()
+const _ = db.command
+
+function toChinaDateKey(input = Date.now()) {
+  const ms = new Date(input).getTime()
+  const chinaMs = ms + 8 * 60 * 60 * 1000
+  const d = new Date(chinaMs)
+  const y = d.getUTCFullYear()
+  const m = `${d.getUTCMonth() + 1}`.padStart(2, '0')
+  const day = `${d.getUTCDate()}`.padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
 
 exports.main = async (event, context) => {
   const { OPENID } = cloud.getWXContext()
+  const cityId = event?.cityId || 'dali'
+  const todayKey = toChinaDateKey()
 
   const { data: users } = await db.collection('users')
     .where({ _openid: OPENID })
@@ -23,6 +36,11 @@ exports.main = async (event, context) => {
         subscribeNearbyActivity: false,
         publishCount: 0,
         joinCount: 0,
+        cityId,
+        registeredDateKey: todayKey,
+        loginDateKeyLatest: todayKey,
+        loginDateKeys: [todayKey],
+        lastLoginAt: db.serverDate(),
         createdAt: db.serverDate(),
         updatedAt: db.serverDate(),
       }
@@ -44,6 +62,20 @@ exports.main = async (event, context) => {
       data: {
         nickname: event.nickname || users[0].nickname,
         avatarUrl: event.avatarUrl || users[0].avatarUrl,
+        cityId: users[0].cityId || cityId,
+        loginDateKeyLatest: todayKey,
+        loginDateKeys: _.addToSet(todayKey),
+        lastLoginAt: db.serverDate(),
+        updatedAt: db.serverDate(),
+      }
+    })
+  } else {
+    await db.collection('users').where({ _openid: OPENID }).update({
+      data: {
+        cityId: users[0].cityId || cityId,
+        loginDateKeyLatest: todayKey,
+        loginDateKeys: _.addToSet(todayKey),
+        lastLoginAt: db.serverDate(),
         updatedAt: db.serverDate(),
       }
     })

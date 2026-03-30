@@ -3,10 +3,12 @@ cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 const db = cloud.database()
 const _ = db.command
 
-const CITY_CONFIG = {
+const DEFAULT_CITY_CONFIG = {
   cityId: 'dali',
+  version: 'v1-default',
   geo: {
     defaultFenceRadius: 5000,
+    minFenceRadius: 2000,
   },
   timeConfig: {
     imminentMinutes: 5,
@@ -26,6 +28,50 @@ const CATEGORY_MAP = {
   other: '其他',
 }
 
+function normalizeNumber(value, fallback) {
+  const n = Number(value)
+  return Number.isFinite(n) ? n : fallback
+}
+
+function mergeCityConfig(raw = {}, cityId = '') {
+  const finalCityId = cityId || raw.cityId || DEFAULT_CITY_CONFIG.cityId
+  return {
+    cityId: finalCityId,
+    version: raw.version || DEFAULT_CITY_CONFIG.version,
+    geo: {
+      defaultFenceRadius: normalizeNumber(raw.geo?.defaultFenceRadius, DEFAULT_CITY_CONFIG.geo.defaultFenceRadius),
+      minFenceRadius: normalizeNumber(raw.geo?.minFenceRadius, DEFAULT_CITY_CONFIG.geo.minFenceRadius),
+    },
+    timeConfig: {
+      imminentMinutes: normalizeNumber(raw.timeConfig?.imminentMinutes, DEFAULT_CITY_CONFIG.timeConfig.imminentMinutes),
+      startingSoonMinutes: normalizeNumber(raw.timeConfig?.startingSoonMinutes, DEFAULT_CITY_CONFIG.timeConfig.startingSoonMinutes),
+      upcomingSoonHours: normalizeNumber(raw.timeConfig?.upcomingSoonHours, DEFAULT_CITY_CONFIG.timeConfig.upcomingSoonHours),
+      endingSoonMinutes: normalizeNumber(raw.timeConfig?.endingSoonMinutes, DEFAULT_CITY_CONFIG.timeConfig.endingSoonMinutes),
+    },
+  }
+}
+
+async function loadCityConfig(cityId = 'dali') {
+  const finalCityId = cityId || DEFAULT_CITY_CONFIG.cityId
+  try {
+    const { data } = await db.collection('cityConfigs')
+      .where({ cityId: finalCityId })
+      .limit(1)
+      .get()
+    if (data && data[0]) return mergeCityConfig(data[0], finalCityId)
+  } catch (e) {}
+
+  try {
+    const { data } = await db.collection('cityConfig')
+      .where({ cityId: finalCityId })
+      .limit(1)
+      .get()
+    if (data && data[0]) return mergeCityConfig(data[0], finalCityId)
+  } catch (e) {}
+
+  return mergeCityConfig({}, finalCityId)
+}
+
 function normalizeKeyword(val) {
   return String(val || '').trim().toLowerCase()
 }
@@ -40,19 +86,20 @@ function getDistance(lat1, lng1, lat2, lng2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
 }
 
-function getTimeStatus(startMs, endMs, nowMs) {
+function getTimeStatus(startMs, endMs, nowMs, cityConfig) {
+  const timeCfg = cityConfig?.timeConfig || DEFAULT_CITY_CONFIG.timeConfig
   if (nowMs >= endMs) return 'ENDED'
   if (nowMs >= startMs) {
-    if (endMs - nowMs <= CITY_CONFIG.timeConfig.endingSoonMinutes * 60 * 1000) {
+    if (endMs - nowMs <= timeCfg.endingSoonMinutes * 60 * 1000) {
       return 'ENDING_SOON'
     }
     return 'ONGOING'
   }
 
   const toStart = startMs - nowMs
-  if (toStart <= CITY_CONFIG.timeConfig.imminentMinutes * 60 * 1000) return 'IMMINENT'
-  if (toStart <= CITY_CONFIG.timeConfig.startingSoonMinutes * 60 * 1000) return 'STARTING_SOON'
-  if (toStart <= CITY_CONFIG.timeConfig.upcomingSoonHours * 60 * 60 * 1000) return 'UPCOMING_SOON'
+  if (toStart <= timeCfg.imminentMinutes * 60 * 1000) return 'IMMINENT'
+  if (toStart <= timeCfg.startingSoonMinutes * 60 * 1000) return 'STARTING_SOON'
+  if (toStart <= timeCfg.upcomingSoonHours * 60 * 60 * 1000) return 'UPCOMING_SOON'
   return 'UPCOMING_FAR'
 }
 
@@ -122,28 +169,40 @@ function buildTrustProfile(activity, user, nowMs) {
 }
 
 exports.main = async (event, context) => {
+  const inputLat = Number(event?.lat)
+  const inputLng = Number(event?.lng)
+  if (!Number.isFinite(inputLat) || !Number.isFinite(inputLng)) {
+    return { success: false, error: 'INVALID_LOCATION', message: '缺少有效定位坐标' }
+  }
+
+  const targetCityId = String(event?.cityId || DEFAULT_CITY_CONFIG.cityId)
+  const cityConfig = await loadCityConfig(targetCityId)
   const {
-    lat,
-    lng,
-    radius = CITY_CONFIG.geo.defaultFenceRadius,
-    cityId = CITY_CONFIG.cityId,
+    radius,
     keyword = '',
     categoryId = 'all',
   } = event || {}
-  const safeRadius = Number(radius) || CITY_CONFIG.geo.defaultFenceRadius
+  const inputRadius = Number(radius)
+  const defaultRadius = cityConfig.geo.defaultFenceRadius
+  const minRadius = cityConfig.geo.minFenceRadius
+  const safeRadius = Math.max(
+    minRadius,
+    Number.isFinite(inputRadius) && inputRadius > 0 ? inputRadius : defaultRadius
+  )
   const normalizedKeyword = normalizeKeyword(keyword)
   const normalizedCategoryId = String(categoryId || 'all')
   const now = new Date()
 
   const latDelta = safeRadius / 111000
-  const lngDelta = safeRadius / (111000 * Math.cos(lat * Math.PI / 180))
+  const lngDelta = safeRadius / (111000 * Math.cos(inputLat * Math.PI / 180))
 
   // 先只用位置和状态过滤，不过滤时间（兼容字符串时间格式）
   const { data } = await db.collection('activities')
     .where({
+      cityId: targetCityId,
       status: _.in(['OPEN', 'FULL']),
-      'location.lat': _.gt(lat - latDelta).and(_.lt(lat + latDelta)),
-      'location.lng': _.gt(lng - lngDelta).and(_.lt(lng + lngDelta)),
+      'location.lat': _.gt(inputLat - latDelta).and(_.lt(inputLat + latDelta)),
+      'location.lng': _.gt(inputLng - lngDelta).and(_.lt(inputLng + lngDelta)),
     })
     .orderBy('startTime', 'asc')
     .limit(50)
@@ -155,10 +214,10 @@ exports.main = async (event, context) => {
   const mappedList = data
     .map(a => ({
       ...a,
-      _distance: getDistance(lat, lng, a.location.lat, a.location.lng),
+      _distance: getDistance(inputLat, inputLng, a.location.lat, a.location.lng),
       _endMs: new Date(a.endTime).getTime(),   // 统一转成毫秒
       _startMs: new Date(a.startTime).getTime(),
-      _statusByTime: getTimeStatus(new Date(a.startTime).getTime(), new Date(a.endTime).getTime(), nowMs),
+      _statusByTime: getTimeStatus(new Date(a.startTime).getTime(), new Date(a.endTime).getTime(), nowMs, cityConfig),
     }))
     .filter(a => {
       // 过滤：未结束 + 在用户选择半径内
@@ -226,12 +285,18 @@ exports.main = async (event, context) => {
 
   return {
     success: true,
-    cityId,
+    cityId: targetCityId,
     activities,
     query: {
       radius: safeRadius,
       categoryId: normalizedCategoryId,
       keyword: normalizedKeyword,
+    },
+    config: {
+      cityId: targetCityId,
+      cityConfigVersion: cityConfig.version,
+      defaultFenceRadius: cityConfig.geo.defaultFenceRadius,
+      minFenceRadius: cityConfig.geo.minFenceRadius,
     },
     serverTime: nowMs,
     serverTimestamp: nowMs,

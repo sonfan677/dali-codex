@@ -52,14 +52,29 @@ exports.main = async (event, context) => {
 
     const newCount = activity.currentParticipants + 1
     const isFull = newCount >= activity.maxParticipants
+    let nextFormationStatus = activity.formationStatus || null
 
     // 更新人数
-    await transaction.collection('activities').doc(activityId).update({
-      data: {
-        currentParticipants: newCount,
-        status: isFull ? 'FULL' : 'OPEN',
-        updatedAt: db.serverDate(),
+    const updateActivityData = {
+      currentParticipants: newCount,
+      status: isFull ? 'FULL' : 'OPEN',
+      updatedAt: db.serverDate(),
+    }
+    if (activity.isGroupFormation) {
+      const minParticipants = Number(activity.minParticipants) || 0
+      if (
+        ['FORMING', 'PENDING_ORGANIZER'].includes(activity.formationStatus) &&
+        newCount >= minParticipants
+      ) {
+        nextFormationStatus = 'CONFIRMED'
+        updateActivityData.formationStatus = 'CONFIRMED'
+        updateActivityData.organizerDecisionDeadline = null
+        updateActivityData.formationConfirmedAt = db.serverDate()
       }
+    }
+
+    await transaction.collection('activities').doc(activityId).update({
+      data: updateActivityData
     })
 
     // 写入/恢复报名记录（允许“取消后再次报名”）
@@ -80,6 +95,7 @@ exports.main = async (event, context) => {
           status: 'joined',
           userNickname: user.nickname || existedRecord.userNickname || '',
           userAvatar: user.avatarUrl || existedRecord.userAvatar || '',
+          cityId: activity.cityId || existedRecord.cityId || 'dali',
           joinedAt: db.serverDate(),
           cancelledAt: null,
           updatedAt: db.serverDate(),
@@ -93,6 +109,7 @@ exports.main = async (event, context) => {
           userId: OPENID,
           userNickname: user.nickname || '',
           userAvatar: user.avatarUrl || '',
+          cityId: activity.cityId || 'dali',
           status: 'joined',
           joinedAt: db.serverDate(),
           cancelledAt: null,
@@ -131,7 +148,12 @@ exports.main = async (event, context) => {
       }
     }).catch(e => console.error('发送报名通知失败', e))
     
-    return { success: true, currentParticipants: newCount, isFull }
+    return {
+      success: true,
+      currentParticipants: newCount,
+      isFull,
+      formationStatus: nextFormationStatus,
+    }
 
   } catch(e) {
     console.error('报名事务失败', e)
