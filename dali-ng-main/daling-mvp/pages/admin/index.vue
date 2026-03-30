@@ -19,21 +19,10 @@
     </view>
 
     <view v-if="hasAccess && !loading" class="summary-grid">
-      <view class="summary-card">
-        <text class="summary-value">{{ pendingVerifyList.length }}</text>
-        <text class="summary-label">待审认证</text>
-      </view>
-      <view class="summary-card">
-        <text class="summary-value">{{ pendingReportCount }}</text>
-        <text class="summary-label">待处理举报</text>
-      </view>
-      <view class="summary-card">
-        <text class="summary-value">{{ activeActivityCount }}</text>
-        <text class="summary-label">活跃活动</text>
-      </view>
-      <view class="summary-card">
-        <text class="summary-value">{{ actionLogList.length }}</text>
-        <text class="summary-label">操作记录</text>
+      <view v-for="item in adminSummaryCards" :key="item.key" class="summary-card">
+        <text class="summary-value">{{ item.value }}</text>
+        <text class="summary-label">{{ item.label }}</text>
+        <text class="summary-sub">{{ item.sub }}</text>
       </view>
     </view>
 
@@ -310,6 +299,18 @@
             @change="onTodoAutoRemindSwitchChange"
           />
         </view>
+        <view class="todo-filter-row">
+          <view class="todo-filter-copy">
+            <text class="todo-filter-title">处理后通知（可选）</text>
+            <text class="todo-filter-sub">{{ todoNotifyAfterActionEnabled ? '开启：处理后会尝试触发取消通知（失败不影响处理）' : '关闭：仅更新状态与记录操作日志' }}</text>
+          </view>
+          <switch
+            class="todo-filter-switch"
+            :checked="todoNotifyAfterActionEnabled"
+            color="#1A3C5E"
+            @change="onTodoNotifySwitchChange"
+          />
+        </view>
         <view class="todo-sla-row">
           <text class="todo-filter-sub">SLA 阈值</text>
           <view class="chip-row">
@@ -363,23 +364,23 @@
                 class="action-btn action-btn--approve"
                 :disabled="isHandlingReport(item.raw._id)"
                 @tap="handleReportQuick(item.raw)"
-              >下架</button>
+              >一键下架</button>
               <button
                 v-if="item.type === 'report'"
                 class="action-btn action-btn--reject"
                 :disabled="isHandlingReport(item.raw._id)"
                 @tap="ignoreReportQuick(item.raw)"
-              >忽略</button>
+              >一键忽略</button>
               <button
                 v-if="item.type === 'verify'"
                 class="action-btn action-btn--approve"
                 @tap="verifyUserQuick(item.raw._openid, 'verify')"
-              >通过</button>
+              >一键通过</button>
               <button
                 v-if="item.type === 'verify'"
                 class="action-btn action-btn--reject"
                 @tap="verifyUserQuick(item.raw._openid, 'reject_verify')"
-              >拒绝</button>
+              >一键驳回</button>
               <button
                 v-if="item.type === 'activity' && !item.raw.isRecommended"
                 class="action-btn action-btn--recommend"
@@ -427,7 +428,15 @@
             :class="{ 'todo-item--overdue': item.isOverSla }"
           >
             <view class="title-row">
-              <text class="card-sub">{{ item.reason || '举报待处理' }}</text>
+              <view class="todo-report-head">
+                <text class="card-sub">{{ item.reason || '举报待处理' }}</text>
+                <view class="inline-badges">
+                  <text class="mini-pill" :class="reportSeverityPillClass(item.severityLevel)">
+                    {{ item.severityLabel }}
+                  </text>
+                  <text v-if="item.isStartSoon" class="mini-pill mini-pill--risk">即将开始</text>
+                </view>
+              </view>
               <view class="todo-title-actions">
                 <text class="card-openid">已等待 {{ item.waitHoursText }}</text>
                 <button
@@ -438,11 +447,11 @@
                 >{{ isReportSelected(item._id) ? '已选' : '选择' }}</button>
               </view>
             </view>
-            <text class="card-openid">活动：{{ item.targetActivity?.title || item.targetId }}</text>
+            <text class="card-openid">活动：{{ item.targetActivity?.title || item.targetId }}{{ item.startInText ? ` · 距开始 ${item.startInText}` : '' }}</text>
             <view class="card-actions">
               <button class="action-btn action-btn--detail" @tap="goActivityDetail(item.targetId)">查看</button>
-              <button class="action-btn action-btn--approve" :disabled="isHandlingReport(item._id)" @tap="handleReportQuick(item)">下架(快捷)</button>
-              <button class="action-btn action-btn--reject" :disabled="isHandlingReport(item._id)" @tap="ignoreReportQuick(item)">忽略(快捷)</button>
+              <button class="action-btn action-btn--approve" :disabled="isHandlingReport(item._id)" @tap="handleReportQuick(item)">一键下架</button>
+              <button class="action-btn action-btn--reject" :disabled="isHandlingReport(item._id)" @tap="ignoreReportQuick(item)">一键忽略</button>
             </view>
           </view>
         </view>
@@ -493,8 +502,8 @@
             </view>
             <text class="card-openid">{{ item._openid ? item._openid.slice(0, 20) + '...' : '--' }}</text>
             <view class="card-actions">
-              <button class="action-btn action-btn--approve" @tap="verifyUserQuick(item._openid, 'verify')">通过(快捷)</button>
-              <button class="action-btn action-btn--reject" @tap="verifyUserQuick(item._openid, 'reject_verify')">拒绝(快捷)</button>
+              <button class="action-btn action-btn--approve" @tap="verifyUserQuick(item._openid, 'verify')">一键通过</button>
+              <button class="action-btn action-btn--reject" @tap="verifyUserQuick(item._openid, 'reject_verify')">一键驳回</button>
             </view>
           </view>
         </view>
@@ -1044,6 +1053,7 @@
               <text class="card-openid">
                 来源：{{ actionSourceText(item.actionSource) }}{{ item.manualOverride ? ' · 人工干预' : '' }}{{ item.canAutoExecute ? ' · 允许自动' : '' }}
               </text>
+              <text v-if="item.notifyAfterAction" class="card-openid">通知：{{ notifySummaryText(item.notifySummary) }}</text>
               <text class="card-openid">对象ID: {{ item.targetId ? item.targetId.slice(0,12) + '...' : '--' }}</text>
               <text v-if="item.linkedActivityId" class="card-openid">
                 关联活动ID: {{ item.linkedActivityId.slice(0,12) + '...' }}
@@ -1144,6 +1154,7 @@ export default {
       todoSlaHours: 24,
       todoOnlyOverdue: false,
       todoAutoRemindEnabled: true,
+      todoNotifyAfterActionEnabled: false,
       todoLastRemindDate: '',
       dailyReportAutoEnabled: true,
       dailyReportHistory: [],
@@ -1205,6 +1216,51 @@ export default {
       return this.adminUiMode !== 'pro'
     },
 
+    todayHandledActionCount() {
+      const now = new Date()
+      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).getTime()
+      const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).getTime()
+      return this.actionLogList.filter((item) => {
+        const ts = this.toTimestamp(item.createdAt)
+        return Number.isFinite(ts) && ts >= start && ts <= end
+      }).length
+    },
+
+    criticalTodoCount() {
+      const reportCritical = this.pendingReportTodoList.filter((item) => item.isOverSla && item.severityScore >= 3).length
+      const verifyCritical = this.pendingVerifyTodoList.filter((item) => item.waitHours >= this.todoSlaHours * 2).length
+      return reportCritical + verifyCritical
+    },
+
+    adminSummaryCards() {
+      return [
+        {
+          key: 'todo',
+          label: '今日待办',
+          value: this.todoTotalCount,
+          sub: `当前视图 ${this.todoViewTotalCount}`,
+        },
+        {
+          key: 'risk',
+          label: '超时风险',
+          value: this.overdueTodoCount,
+          sub: `严重异常 ${this.criticalTodoCount}`,
+        },
+        {
+          key: 'handled',
+          label: '今日已处理',
+          value: this.todayHandledActionCount,
+          sub: `闭环率 ${this.closureStats.withinSlaRate}`,
+        },
+        {
+          key: 'notify',
+          label: '通知联动',
+          value: this.todoNotifyAfterActionEnabled ? 'ON' : 'OFF',
+          sub: this.todoNotifyAfterActionEnabled ? '已启用可选通知' : '默认不触发通知',
+        },
+      ]
+    },
+
     pendingReportCount() {
       return this.reportList.filter((item) => item.reportStatus === 'PENDING').length
     },
@@ -1240,18 +1296,34 @@ export default {
         .map((item) => {
           const createdTs = this.toTimestamp(item.createdAt)
           const waitHours = Number.isFinite(createdTs) ? Math.max(0, (nowTs - createdTs) / 3600000) : 0
+          const startTs = this.toTimestamp(item.targetActivity?.startTime)
+          const startInHours = Number.isFinite(startTs) ? (startTs - nowTs) / 3600000 : NaN
+          const isStartSoon = Number.isFinite(startInHours) && startInHours >= 0 && startInHours <= 6
+          const severity = this.getReportSeverity(item.reason)
           const title = item.targetActivity?.title || ''
+          const priorityScore = (waitHours >= this.todoSlaHours ? 1000 : 500)
+            + severity.score * 120
+            + (isStartSoon ? Math.round(80 + (6 - startInHours) * 10) : 0)
+            + Math.round(Math.min(waitHours, 120))
           return {
             ...item,
             waitHours,
             waitHoursText: this.formatHoursText(waitHours),
             isOverSla: waitHours >= this.todoSlaHours,
+            startTs,
+            startInHours,
+            startInText: Number.isFinite(startInHours) && startInHours >= 0 ? this.formatHoursText(startInHours) : '',
+            isStartSoon,
+            severityScore: severity.score,
+            severityLevel: severity.level,
+            severityLabel: severity.label,
+            priorityScore,
             _searchText: [item.reason, title, item.targetId, item.reporterNickname, item.reporterOpenid].join(' '),
           }
         })
         .filter((item) => !keyword || String(item._searchText || '').toLowerCase().includes(keyword))
         .sort((a, b) => {
-          if (a.isOverSla !== b.isOverSla) return a.isOverSla ? -1 : 1
+          if (b.priorityScore !== a.priorityScore) return b.priorityScore - a.priorityScore
           return b.waitHours - a.waitHours
         })
 
@@ -1367,8 +1439,8 @@ export default {
         type: 'report',
         typeLabel: '举报待办',
         isRisk: item.isOverSla,
-        urgencyText: `已等待 ${item.waitHoursText}`,
-        priorityScore: (item.isOverSla ? 300 : 180) + Math.round(Number(item.waitHours || 0)),
+        urgencyText: `${item.severityLabel} · 已等待 ${item.waitHoursText}${item.startInText ? ` · 距开始${item.startInText}` : ''}`,
+        priorityScore: Number(item.priorityScore || 0),
         title: item.targetActivity?.title || item.targetId || '举报活动',
         subTitle: `原因：${item.reason || '待补充'}${item.reporterNickname ? ` · 举报人：${item.reporterNickname}` : ''}`,
         raw: item,
@@ -2146,6 +2218,12 @@ export default {
       uni.showToast({ title: this.todoAutoRemindEnabled ? '已开启自动提醒' : '已关闭自动提醒', icon: 'none' })
     },
 
+    onTodoNotifySwitchChange(e) {
+      this.todoNotifyAfterActionEnabled = Boolean(e?.detail?.value)
+      this.saveTodoPreferences()
+      uni.showToast({ title: this.todoNotifyAfterActionEnabled ? '处理后将尝试通知' : '已关闭处理后通知', icon: 'none' })
+    },
+
     onDailyReportAutoSwitchChange(e) {
       this.dailyReportAutoEnabled = Boolean(e?.detail?.value)
       this.saveTodoPreferences()
@@ -2257,10 +2335,14 @@ export default {
 
       for (const row of rows) {
         const payload = payloadBuilder(row)
+        const finalPayload = { ...payload }
+        if (typeof finalPayload.notifyAfterAction !== 'boolean') {
+          finalPayload.notifyAfterAction = this.todoNotifyAfterActionEnabled
+        }
         let success = false
         let message = ''
         try {
-          const result = await callCloud('adminAction', payload)
+          const result = await callCloud('adminAction', finalPayload)
           success = !!result?.success
           message = result?.message || (success ? '操作成功' : (result?.error || '操作失败'))
         } catch (e) {
@@ -2525,6 +2607,26 @@ export default {
         }))
     },
 
+    getReportSeverity(reason = '') {
+      const text = String(reason || '').toLowerCase()
+      const highKeywords = ['骚扰', '诈骗', '欺诈', '危险', '暴力', '未成年人', '人身', '威胁', '违法', '涉黄']
+      const mediumKeywords = ['辱骂', '广告', '引流', '虚假', '不实', '违规', '收费纠纷', '临时改地点']
+      const hitHigh = highKeywords.some((item) => text.includes(item.toLowerCase()))
+      const hitMedium = !hitHigh && mediumKeywords.some((item) => text.includes(item.toLowerCase()))
+      if (hitHigh) return { score: 3, level: 'high', label: '高严重' }
+      if (hitMedium) return { score: 2, level: 'medium', label: '中严重' }
+      return { score: 1, level: 'low', label: '低严重' }
+    },
+
+    reportSeverityPillClass(level = 'low') {
+      const map = {
+        high: 'mini-pill--risk',
+        medium: 'mini-pill--pending',
+        low: 'mini-pill--log',
+      }
+      return map[level] || 'mini-pill--log'
+    },
+
     formatHoursText(hours) {
       const safe = Number(hours)
       if (!Number.isFinite(safe) || safe <= 0) return '<1h'
@@ -2558,6 +2660,11 @@ export default {
       })
     },
 
+    getDefaultReasonTemplate(scene) {
+      const options = this.getReasonTemplateOptions(scene)
+      return options[0] || '按平台规则处理'
+    },
+
     initTodoPreferences() {
       try {
         const pref = uni.getStorageSync('dali_admin_todo_pref_v1')
@@ -2570,6 +2677,9 @@ export default {
         }
         if (typeof pref.todoAutoRemindEnabled === 'boolean') {
           this.todoAutoRemindEnabled = pref.todoAutoRemindEnabled
+        }
+        if (typeof pref.todoNotifyAfterActionEnabled === 'boolean') {
+          this.todoNotifyAfterActionEnabled = pref.todoNotifyAfterActionEnabled
         }
         if (typeof pref.dailyReportAutoEnabled === 'boolean') {
           this.dailyReportAutoEnabled = pref.dailyReportAutoEnabled
@@ -2588,6 +2698,7 @@ export default {
           adminUiMode: this.adminUiMode,
           todoSlaHours: this.todoSlaHours,
           todoAutoRemindEnabled: this.todoAutoRemindEnabled,
+          todoNotifyAfterActionEnabled: this.todoNotifyAfterActionEnabled,
           dailyReportAutoEnabled: this.dailyReportAutoEnabled,
           todoLastRemindDate: this.todoLastRemindDate,
         })
@@ -2761,6 +2872,7 @@ export default {
             targetId: openid,
             targetType: 'user',
             reason: reasonText,
+            notifyAfterAction: this.todoNotifyAfterActionEnabled,
           })
           if (result.success) {
             uni.showToast({ title: result.message, icon: 'success' })
@@ -2801,7 +2913,7 @@ export default {
     },
 
     async verifyUserQuick(openid, action) {
-      const reason = await this.pickReasonTemplate(action)
+      const reason = this.getDefaultReasonTemplate(action)
       if (!reason) return
       await this.verifyUser(openid, action, reason)
     },
@@ -2818,6 +2930,7 @@ export default {
             targetId: reportItem.targetId,
             targetType: 'report',
             reason: reasonText,
+            notifyAfterAction: this.todoNotifyAfterActionEnabled,
           })
           if (result.success) {
             if (this.activeFilter === 'PENDING') this.activeFilter = 'all'
@@ -2863,7 +2976,7 @@ export default {
     },
 
     async handleReportQuick(reportItem) {
-      const reason = await this.pickReasonTemplate('resolve_report_hide')
+      const reason = this.getDefaultReasonTemplate('resolve_report_hide')
       if (!reason) return
       await this.handleReport(reportItem, reason)
     },
@@ -2880,6 +2993,7 @@ export default {
             targetId: reportItem.targetId,
             targetType: 'report',
             reason: reasonText,
+            notifyAfterAction: this.todoNotifyAfterActionEnabled,
           })
           if (result.success) {
             if (this.activeFilter === 'PENDING') this.activeFilter = 'all'
@@ -2925,7 +3039,7 @@ export default {
     },
 
     async ignoreReportQuick(reportItem) {
-      const reason = await this.pickReasonTemplate('resolve_report_ignore')
+      const reason = this.getDefaultReasonTemplate('resolve_report_ignore')
       if (!reason) return
       await this.ignoreReport(reportItem, reason)
     },
@@ -2949,6 +3063,7 @@ export default {
               targetId: activityId,
               targetType: 'activity',
               reason: res.content,
+              notifyAfterAction: this.todoNotifyAfterActionEnabled,
             })
             if (result.success) {
               uni.showToast({ title: result.message, icon: 'success' })
@@ -2979,6 +3094,7 @@ export default {
               targetId: activityId,
               targetType: 'activity',
               reason: res.content,
+              notifyAfterAction: this.todoNotifyAfterActionEnabled,
             })
             if (result.success) {
               uni.showToast({ title: '活动已下架', icon: 'success' })
@@ -3080,6 +3196,16 @@ export default {
     actionSourceText(source) {
       if (source === 'ai') return 'AI'
       return '人工'
+    },
+
+    notifySummaryText(summary) {
+      if (!summary || typeof summary !== 'object') return '未返回通知结果'
+      if (summary.skipped) {
+        return summary.reason === 'NO_TARGET' ? '无可通知对象' : '未触发'
+      }
+      const attempted = Number(summary.attempted || 0)
+      const success = Number(summary.success || 0)
+      return `发送 ${success}/${attempted}`
     },
 
     targetTypeText(type) {
@@ -4104,6 +4230,12 @@ export default {
   font-size: 24rpx;
   color: #888;
 }
+.summary-sub {
+  display: block;
+  margin-top: 6rpx;
+  font-size: 20rpx;
+  color: #98a2b3;
+}
 
 .tabs {
   display: flex; background: white;
@@ -4250,6 +4382,12 @@ export default {
   display: flex;
   align-items: center;
   gap: 10rpx;
+}
+.todo-report-head {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  flex-wrap: wrap;
 }
 .sla-board {
   margin: 6rpx 0 12rpx;

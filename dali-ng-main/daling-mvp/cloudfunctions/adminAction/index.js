@@ -66,6 +66,96 @@ async function getReportSnapshot(reportId) {
   }
 }
 
+async function fetchJoinedParticipantOpenids(activityId) {
+  if (!activityId) return []
+  try {
+    const { data } = await db.collection('participations')
+      .where({
+        activityId,
+        status: 'joined',
+      })
+      .limit(100)
+      .field({
+        _openid: true,
+        userId: true,
+      })
+      .get()
+    return (data || [])
+      .map((item) => item.userId || item._openid || '')
+      .filter(Boolean)
+  } catch (e) {
+    return []
+  }
+}
+
+function formatActivityTime(value) {
+  const ms = new Date(value).getTime()
+  if (!Number.isFinite(ms)) return ''
+  const date = new Date(ms)
+  const mo = date.getMonth() + 1
+  const day = date.getDate()
+  const h = String(date.getHours()).padStart(2, '0')
+  const m = String(date.getMinutes()).padStart(2, '0')
+  return `${mo}月${day}日 ${h}:${m}`
+}
+
+async function notifyActivityCancelled({
+  activity = null,
+  reason = '',
+}) {
+  if (!activity || !activity._id) {
+    return { attempted: 0, success: 0, failed: 0, skipped: true, reason: 'NO_ACTIVITY' }
+  }
+
+  const baseOpenids = [
+    activity.publisherOpenid,
+    activity.publisherId,
+    activity._openid,
+  ].filter(Boolean)
+  const joinedOpenids = await fetchJoinedParticipantOpenids(activity._id)
+  const notifyOpenids = [...new Set([...baseOpenids, ...joinedOpenids])]
+    .filter(Boolean)
+    .slice(0, 80)
+
+  if (!notifyOpenids.length) {
+    return { attempted: 0, success: 0, failed: 0, skipped: true, reason: 'NO_TARGET' }
+  }
+
+  const payload = {
+    type: 'activity_cancelled',
+    data: {
+      title: activity.title || '活动',
+      reason: reason || '活动已取消',
+      tips: '可前往首页查看其他活动',
+      time: formatActivityTime(activity.startTime),
+      location: activity.location && activity.location.address ? activity.location.address : '',
+    },
+  }
+
+  const settled = await Promise.allSettled(
+    notifyOpenids.map((openid) => cloud.callFunction({
+      name: 'sendNotification',
+      data: {
+        ...payload,
+        openid,
+      },
+    }))
+  )
+
+  let success = 0
+  settled.forEach((item) => {
+    if (item.status === 'fulfilled' && item.value && item.value.result && item.value.result.success) {
+      success += 1
+    }
+  })
+  return {
+    attempted: notifyOpenids.length,
+    success,
+    failed: notifyOpenids.length - success,
+    skipped: false,
+  }
+}
+
 exports.main = async (event) => {
   const { OPENID } = cloud.getWXContext()
   const { isAdmin, adminRole, adminCityId } = parseAdminMeta(OPENID)
@@ -79,6 +169,7 @@ exports.main = async (event) => {
   const canAutoExecute = typeof event.canAutoExecute === 'boolean' ? event.canAutoExecute : false
   const manualOverride = !!event.manualOverride
   const dryRun = !!event.dryRun
+  const notifyAfterAction = !!event.notifyAfterAction
   const agentTraceId = event.agentTraceId ? String(event.agentTraceId).slice(0, 120) : ''
   if (!reason || reason.trim().length < 2) {
     return { success: false, error: 'REASON_REQUIRED', message: '请填写操作原因（至少2个字）' }
@@ -108,6 +199,14 @@ exports.main = async (event) => {
   let finalTargetType = targetType || ''
   let linkedActivityId = ''
   let linkedReportId = ''
+  let activityForNotify = null
+  let notifySummary = {
+    attempted: 0,
+    success: 0,
+    failed: 0,
+    skipped: true,
+    reason: 'DISABLED',
+  }
 
   switch (action) {
     case 'recommend':
@@ -131,6 +230,9 @@ exports.main = async (event) => {
 
       await db.collection('activities').doc(targetId).update({ data: nextPatch })
       afterState = await getActivitySnapshot(targetId)
+      if (action === 'hide') {
+        activityForNotify = afterState || beforeState || null
+      }
       result = {
         message: action === 'recommend'
           ? '已设为官方推荐'
@@ -222,6 +324,7 @@ exports.main = async (event) => {
         const reportAfter = await getReportSnapshot(reportId)
         beforeState = { report: reportBefore, activity: activityBefore }
         afterState = { report: reportAfter, activity: activityAfter }
+        activityForNotify = activityAfter || activityBefore || null
         result = { message: '举报已处理，活动已下架' }
       } else {
         await db.collection('adminActions').doc(reportId).update({ data: reportPatch })
@@ -235,6 +338,26 @@ exports.main = async (event) => {
 
     default:
       return { success: false, error: 'UNKNOWN_ACTION', message: '未知操作类型' }
+  }
+
+  if (notifyAfterAction && (action === 'hide' || action === 'resolve_report_hide')) {
+    try {
+      notifySummary = await notifyActivityCancelled({
+        activity: activityForNotify,
+        reason: normalizedReason,
+      })
+      if (notifySummary.attempted > 0) {
+        result.message = `${result.message}（通知 ${notifySummary.success}/${notifySummary.attempted}）`
+      }
+    } catch (e) {
+      notifySummary = {
+        attempted: 0,
+        success: 0,
+        failed: 0,
+        skipped: true,
+        reason: e.message || 'NOTIFY_FAILED',
+      }
+    }
   }
 
   const finalCityId = cityId || beforeState?.cityId || afterState?.cityId || adminCityId || 'dali'
@@ -253,6 +376,8 @@ exports.main = async (event) => {
       afterState: afterState || null,
       linkedActivityId: linkedActivityId || '',
       linkedReportId: linkedReportId || '',
+      notifyAfterAction,
+      notifySummary,
       actionSource,
       canAutoExecute,
       manualOverride,
@@ -266,5 +391,5 @@ exports.main = async (event) => {
     }
   })
 
-  return { success: true, ...result }
+  return { success: true, ...result, notification: notifySummary }
 }

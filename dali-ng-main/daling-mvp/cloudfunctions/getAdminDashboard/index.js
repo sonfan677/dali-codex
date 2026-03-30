@@ -198,6 +198,8 @@ exports.main = async () => {
         agentTraceId: true,
         linkedActivityId: true,
         linkedReportId: true,
+        notifyAfterAction: true,
+        notifySummary: true,
         beforeState: true,
         afterState: true,
         reason: true,
