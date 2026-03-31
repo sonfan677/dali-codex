@@ -1,7 +1,7 @@
 # 运营自动巡检 3.2 交付说明
 
 > 目标：不改用户主流程，只增强后台自动化巡检与风险提醒。  
-> 相关云函数：`runOpsPatrol`、`getAdminDashboard`。
+> 相关云函数：`runOpsPatrol`、`seedOpsPatrolTestData`、`getAdminDashboard`。
 
 ## 一、能力概览
 
@@ -65,14 +65,50 @@
    - 能看到 `运营自动巡检执行`（`ops_patrol_run`）
    - 触发风险时能看到 `运营巡检风险告警`（`ops_patrol_alert`）
 
-## 四、数据库核查（可选）
+## 四、一键造测试数据（推荐）
+
+先部署云函数：`seedOpsPatrolTestData`。  
+然后在云函数控制台测试 `seedOpsPatrolTestData`，使用以下 JSON：
+
+1. 造“中风险”样本（仅超时认证，便于验证 medium）
+
+```json
+{
+  "mode": "seed",
+  "scenario": "medium",
+  "cityId": "dali"
+}
+```
+
+2. 造“高风险”样本（超时举报 + 实名失败波动，便于验证 high）
+
+```json
+{
+  "mode": "seed",
+  "scenario": "high",
+  "cityId": "dali"
+}
+```
+
+3. 一键清理测试数据（强烈建议每次验收后执行）
+
+```json
+{
+  "mode": "cleanup",
+  "cleanupAll": true
+}
+```
+
+> 造数成功后，回到真机管理后台点击“立即巡检”即可看到对应风险等级变化。
+
+## 五、数据库核查（可选）
 
 在集合 `adminActions` 中按 `action` 过滤：
 
 1. `ops_patrol_run`：每次巡检都会写入一条。
 2. `ops_patrol_alert`：有风险且不在冷却期才写入。
 
-## 五、上线建议
+## 六、上线建议
 
 1. 先手动巡检 1 次，确认数据正常。
 2. 再配置定时任务（例如每 30 分钟）。

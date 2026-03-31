@@ -29,6 +29,7 @@
    - `retryOfficialVerify`
    - `officialVerifyCallback`
    - `runOpsPatrol`
+   - `seedOpsPatrolTestData`（可选，压测巡检用）
 4. 云函数环境变量确认：
    - `ADMIN_OPENIDS`
    - `TMPL_START`
