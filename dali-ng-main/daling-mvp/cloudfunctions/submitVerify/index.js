@@ -9,7 +9,8 @@ function encrypt(str) {
 
 exports.main = async (event, context) => {
   const { OPENID } = cloud.getWXContext()
-  const { realName, phone } = event
+  const { realName, phone, verifyProvider = 'manual' } = event
+  const provider = String(verifyProvider || 'manual')
 
   // 基础校验
   if (!realName || realName.trim().length < 2) {
@@ -39,6 +40,8 @@ exports.main = async (event, context) => {
       realName: encrypt(realName.trim()),
       phone: encrypt(phone),
       verifyStatus: 'pending',
+      verifyProvider: provider === 'wechat_official' ? 'wechat_official' : 'manual',
+      officialVerifyStatus: provider === 'wechat_official' ? 'pending_callback' : (users[0].officialVerifyStatus || 'not_started'),
       updatedAt: db.serverDate(),
     }
   })
@@ -56,7 +59,9 @@ exports.main = async (event, context) => {
         targetType: 'user',
         action: 'verify_request',
         actionType: 'verify_request',
-        reason: `用户申请实名认证：${realName.trim().slice(0,1)}**`,
+        reason: provider === 'wechat_official'
+          ? '用户申请实名认证（微信官方通道）'
+          : `用户申请实名认证：${realName.trim().slice(0,1)}**`,
         cityId,
         expiresAt: null,
         rollbackAt: null,
@@ -72,5 +77,5 @@ exports.main = async (event, context) => {
     console.error('写入adminActions失败', e)
   }
 
-  return { success: true }
+  return { success: true, verifyProvider: provider === 'wechat_official' ? 'wechat_official' : 'manual' }
 }

@@ -18,6 +18,10 @@ export default {
         getApp().globalData.openid       = res.openid || ''
         getApp().globalData.isVerified   = res.isVerified || false
         getApp().globalData.verifyStatus = res.verifyStatus || 'none'
+        getApp().globalData.verifyProvider = res.verifyProvider || 'manual'
+        getApp().globalData.officialVerifyStatus = res.officialVerifyStatus || 'not_started'
+        getApp().globalData.officialVerifyTicket = res.officialVerifyTicket || null
+        getApp().globalData.officialVerifiedAt = res.officialVerifiedAt || null
         getApp().globalData.isLoggedIn   = true
         getApp().globalData.nickname     = res.nickname || ''
         getApp().globalData.avatarUrl    = res.avatarUrl || ''

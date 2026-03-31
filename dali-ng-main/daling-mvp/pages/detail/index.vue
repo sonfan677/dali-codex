@@ -163,6 +163,26 @@
           <view class="participant-info">
             <text class="participant-name">{{ item.nickname || '匿名用户' }}</text>
             <text class="participant-time">报名时间：{{ formatJoinedAt(item.joinedAt) }}</text>
+            <text class="participant-attendance" :class="attendanceStatusClass(item.attendanceStatus)">
+              出勤：{{ attendanceStatusText(item.attendanceStatus) }}
+            </text>
+            <text v-if="item.attendanceMarkedAt" class="participant-time">
+              标记时间：{{ formatJoinedAt(item.attendanceMarkedAt) }}
+            </text>
+          </view>
+          <view v-if="canMarkAttendance" class="participant-actions">
+            <button
+              class="participant-mark-btn participant-mark-btn--ok"
+              size="mini"
+              :loading="isAttendanceUpdating(item.openid, 'attended')"
+              @tap="markParticipantAttendance(item, 'attended')"
+            >到场</button>
+            <button
+              class="participant-mark-btn participant-mark-btn--no"
+              size="mini"
+              :loading="isAttendanceUpdating(item.openid, 'no_show')"
+              @tap="markParticipantAttendance(item, 'no_show')"
+            >爽约</button>
           </view>
         </view>
       </view>
@@ -328,6 +348,7 @@ export default {
       participantList: [],
       participantKeyword: '',
       participantSort: 'newest',
+      attendanceUpdatingMap: {},
       commentList: [],
       commentsLoading: false,
       commentInput: '',
@@ -483,6 +504,14 @@ export default {
       return true
     },
 
+    canMarkAttendance() {
+      if (!this.isPublisher || !this.activity) return false
+      if (['CANCELLED'].includes(this.activity.status)) return false
+      const endMs = new Date(this.activity.endTime).getTime()
+      if (!Number.isFinite(endMs)) return false
+      return endMs <= Number(this.serverTime || Date.now())
+    },
+
     trustProfile() {
       return this.activity?.trustProfile || {}
     },
@@ -621,6 +650,61 @@ export default {
 
     toggleParticipantSort() {
       this.participantSort = this.participantSort === 'newest' ? 'oldest' : 'newest'
+    },
+
+    attendanceStatusText(status) {
+      const map = {
+        attended: '已到场',
+        no_show: '爽约',
+      }
+      return map[String(status || '')] || '未标记'
+    },
+
+    attendanceStatusClass(status) {
+      const map = {
+        attended: 'participant-attendance--ok',
+        no_show: 'participant-attendance--no',
+      }
+      return map[String(status || '')] || 'participant-attendance--none'
+    },
+
+    isAttendanceUpdating(openid, status) {
+      const key = `${openid || ''}_${status || ''}`
+      return !!this.attendanceUpdatingMap[key]
+    },
+
+    async markParticipantAttendance(item, status) {
+      if (!this.canMarkAttendance || !item?.openid) return
+      const key = `${item.openid}_${status}`
+      if (this.attendanceUpdatingMap[key]) return
+
+      this.attendanceUpdatingMap = {
+        ...this.attendanceUpdatingMap,
+        [key]: true,
+      }
+      try {
+        const res = await callCloud('markAttendance', {
+          activityId: this.activityId,
+          participantOpenid: item.openid,
+          attendanceStatus: status,
+          note: `发布者手动标记：${status === 'attended' ? '到场' : '爽约'}`,
+        })
+        if (!res?.success) {
+          uni.showToast({ title: res?.message || '标记失败', icon: 'none' })
+          return
+        }
+        item.attendanceStatus = status
+        item.attendanceMarkedAt = Date.now()
+        item.attendanceMarkedBy = this.currentOpenid
+        uni.showToast({ title: status === 'attended' ? '已标记到场' : '已标记爽约', icon: 'success' })
+      } catch (e) {
+        uni.showToast({ title: '标记失败，请稍后重试', icon: 'none' })
+      } finally {
+        this.attendanceUpdatingMap = {
+          ...this.attendanceUpdatingMap,
+          [key]: false,
+        }
+      }
     },
 
     exportParticipantNicknames() {
@@ -1380,6 +1464,7 @@ export default {
   flex-shrink: 0;
 }
 .participant-info {
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 4rpx;
@@ -1391,6 +1476,42 @@ export default {
 .participant-time {
   font-size: 22rpx;
   color: #999;
+}
+.participant-attendance {
+  font-size: 22rpx;
+}
+.participant-attendance--ok {
+  color: #1E7145;
+}
+.participant-attendance--no {
+  color: #B54708;
+}
+.participant-attendance--none {
+  color: #98A2B3;
+}
+.participant-actions {
+  display: flex;
+  gap: 8rpx;
+}
+.participant-mark-btn {
+  min-width: 92rpx;
+  height: 52rpx;
+  line-height: 52rpx;
+  margin: 0;
+  font-size: 22rpx;
+  border-radius: 26rpx;
+  border: none;
+}
+.participant-mark-btn::after {
+  border: none;
+}
+.participant-mark-btn--ok {
+  background: #EEF7EE;
+  color: #1E7145;
+}
+.participant-mark-btn--no {
+  background: #FFF4E8;
+  color: #B54708;
 }
 
 .comment-block {

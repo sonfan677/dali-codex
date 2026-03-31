@@ -46,6 +46,10 @@ function buildReservedUserPatch(user = {}, cityId, todayKey) {
   if (typeof user.historicalCompletionRate === 'undefined') patch.historicalCompletionRate = null
   if (typeof user.inactivityPenaltyAt === 'undefined') patch.inactivityPenaltyAt = null
   if (typeof user.currentDecayRate === 'undefined') patch.currentDecayRate = null
+  if (!user.verifyProvider) patch.verifyProvider = 'manual'
+  if (!user.officialVerifyStatus) patch.officialVerifyStatus = 'not_started'
+  if (typeof user.officialVerifyTicket === 'undefined') patch.officialVerifyTicket = null
+  if (typeof user.officialVerifiedAt === 'undefined') patch.officialVerifiedAt = null
   if (typeof user.subscribeNearbyActivity !== 'boolean') patch.subscribeNearbyActivity = false
   if (!user.subscriptions || typeof user.subscriptions !== 'object') {
     patch.subscriptions = normalizeSubscriptions({})
@@ -83,6 +87,10 @@ exports.main = async (event, context) => {
         avatarUrl,
         isVerified: false,
         verifyStatus: 'none',
+        verifyProvider: 'manual',
+        officialVerifyStatus: 'not_started',
+        officialVerifyTicket: null,
+        officialVerifiedAt: null,
         subscribeNearbyActivity: false,
         publishCount: 0,
         joinCount: 0,
@@ -117,6 +125,10 @@ exports.main = async (event, context) => {
       isNewUser: true,
       isVerified: false,
       verifyStatus: 'none',
+      verifyProvider: 'manual',
+      officialVerifyStatus: 'not_started',
+      officialVerifyTicket: null,
+      officialVerifiedAt: null,
       openid: OPENID,
       nickname,
       avatarUrl,
@@ -166,6 +178,10 @@ exports.main = async (event, context) => {
     isNewUser: false,
     isVerified: users[0].isVerified,
     verifyStatus: users[0].verifyStatus,
+    verifyProvider: mergedUser.verifyProvider || 'manual',
+    officialVerifyStatus: mergedUser.officialVerifyStatus || 'not_started',
+    officialVerifyTicket: mergedUser.officialVerifyTicket || null,
+    officialVerifiedAt: mergedUser.officialVerifiedAt || null,
     openid: OPENID,
     nickname,
     avatarUrl,

@@ -15,6 +15,11 @@
       </view>
     </view>
 
+    <view class="calendar-entry" @tap="goCalendar">
+      <text class="calendar-entry-title">官方活动日历</text>
+      <text class="calendar-entry-sub">查看未来 14 天官方推荐活动 →</text>
+    </view>
+
     <!-- 搜索与筛选 -->
     <view class="filter-panel">
       <view class="search-row">
@@ -419,6 +424,10 @@ export default {
 
 
   methods: {
+    goCalendar() {
+      uni.navigateTo({ url: '/pages/calendar/index' })
+    },
+
     async touchSubscriptionState(action) {
       try {
         const res = await callCloud('updateSubscriptionState', {
@@ -770,6 +779,25 @@ export default {
 .data-badge--real-default .data-badge-title,
 .data-badge--real-default .data-badge-desc {
   color: #295fa6;
+}
+
+.calendar-entry {
+  margin: 10rpx 16rpx 8rpx;
+  padding: 16rpx 18rpx;
+  border-radius: 14rpx;
+  background: linear-gradient(135deg, #1A3C5E, #335E84);
+  color: #fff;
+}
+.calendar-entry-title {
+  font-size: 28rpx;
+  font-weight: 700;
+  display: block;
+}
+.calendar-entry-sub {
+  margin-top: 6rpx;
+  display: block;
+  font-size: 22rpx;
+  opacity: 0.9;
 }
 
 .filter-panel {

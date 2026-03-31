@@ -130,6 +130,9 @@ exports.main = async () => {
         _openid: true,
         nickname: true,
         avatarUrl: true,
+        verifyProvider: true,
+        officialVerifyStatus: true,
+        officialVerifyTicket: true,
         verifySubmittedAt: true,
         createdAt: true,
         updatedAt: true,
@@ -185,9 +188,11 @@ exports.main = async () => {
           'hide',
           'verify',
           'reject_verify',
+          'mark_attendance',
           'ban',
           'resolve_report_hide',
           'resolve_report_ignore',
+          'official_verify_callback',
         ]),
       })
       .orderBy('createdAt', 'desc')

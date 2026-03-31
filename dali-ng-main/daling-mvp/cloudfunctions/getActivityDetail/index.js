@@ -153,6 +153,10 @@ exports.main = async (event) => {
         userNickname: true,
         userAvatar: true,
         joinedAt: true,
+        attendanceStatus: true,
+        attendanceMarkedAt: true,
+        attendanceMarkedBy: true,
+        attendanceNote: true,
       })
       .get()
 
@@ -162,6 +166,10 @@ exports.main = async (event) => {
       nickname: item.userNickname || '匿名用户',
       avatar: item.userAvatar || '',
       joinedAt: item.joinedAt || null,
+      attendanceStatus: item.attendanceStatus || '',
+      attendanceMarkedAt: item.attendanceMarkedAt || null,
+      attendanceMarkedBy: item.attendanceMarkedBy || '',
+      attendanceNote: item.attendanceNote || '',
     }))
   }
 

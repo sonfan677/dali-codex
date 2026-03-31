@@ -9,6 +9,8 @@ export const useUserStore = defineStore('user', {
     avatarUrl: '',
     isVerified: false,
     verifyStatus: 'none',
+    verifyProvider: 'manual',
+    officialVerifyStatus: 'not_started',
     isLoggedIn: false,
   }),
 
@@ -23,6 +25,8 @@ export const useUserStore = defineStore('user', {
         this.openid = res.openid || ''
         this.isVerified = res.isVerified || false
         this.verifyStatus = res.verifyStatus || 'none'
+        this.verifyProvider = res.verifyProvider || 'manual'
+        this.officialVerifyStatus = res.officialVerifyStatus || 'not_started'
         this.nickname = userInfo.nickname || ''
         this.avatarUrl = userInfo.avatarUrl || ''
         this.isLoggedIn = true
@@ -38,6 +42,9 @@ export const useUserStore = defineStore('user', {
       this.nickname = ''
       this.avatarUrl = ''
       this.isVerified = false
+      this.verifyStatus = 'none'
+      this.verifyProvider = 'manual'
+      this.officialVerifyStatus = 'not_started'
       this.isLoggedIn = false
     }
   }

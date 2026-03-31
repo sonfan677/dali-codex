@@ -32,7 +32,7 @@
           <view class="badges">
             <text v-if="userInfo.isVerified" class="badge badge--verified">✅ 已实名</text>
             <text v-else class="badge badge--pending" @tap="goVerify">
-              {{ userInfo.verifyStatus === 'pending' ? '⏳ 审核中' : '去认证 →' }}
+              {{ verifyBadgeText }}
             </text>
           </view>
         </view>
@@ -49,6 +49,21 @@
 		  <view v-if="isAdmin" class="admin-entry" @tap="goAdmin">
 		    <text class="admin-text">⚙️ 管理后台</text>
 		  </view>
+        </view>
+
+        <view class="credit-row">
+          <view class="credit-item">
+            <text class="credit-label">信用分</text>
+            <text class="credit-value">{{ creditScoreText }}</text>
+          </view>
+          <view class="credit-item">
+            <text class="credit-label">到场率</text>
+            <text class="credit-value">{{ completionRateText }}</text>
+          </view>
+          <view class="credit-item">
+            <text class="credit-label">爽约次数</text>
+            <text class="credit-value">{{ userInfo.noShowCount || 0 }}</text>
+          </view>
         </view>
       </view>
 
@@ -157,6 +172,11 @@ export default {
         avatarUrl: '',
         isVerified: false,
         verifyStatus: 'none',
+        verifyProvider: 'manual',
+        reliabilityScore: null,
+        historicalCompletionRate: null,
+        noShowCount: 0,
+        attendCount: 0,
       },
       publishCount: 0,
       joinCount: 0,
@@ -167,6 +187,22 @@ export default {
   computed: {
     isLoggedIn() {
       return !!getApp().globalData?.isLoggedIn
+    },
+    verifyBadgeText() {
+      if (this.userInfo.verifyStatus === 'pending') {
+        return this.userInfo.verifyProvider === 'wechat_official' ? '⏳ 官方核验中' : '⏳ 审核中'
+      }
+      return '去认证 →'
+    },
+    creditScoreText() {
+      const score = Number(this.userInfo.reliabilityScore)
+      if (!Number.isFinite(score)) return '--'
+      return `${Math.max(0, Math.min(100, Math.round(score)))}`
+    },
+    completionRateText() {
+      const ratio = Number(this.userInfo.historicalCompletionRate)
+      if (!Number.isFinite(ratio)) return '--'
+      return `${Math.round(ratio * 100)}%`
     }
   },
 
@@ -206,6 +242,11 @@ export default {
             avatarUrl:    user.avatarUrl || '',
             isVerified:   user.isVerified || false,
             verifyStatus: user.verifyStatus || 'none',
+            verifyProvider: user.verifyProvider || 'manual',
+            reliabilityScore: user.reliabilityScore ?? null,
+            historicalCompletionRate: user.historicalCompletionRate ?? null,
+            noShowCount: Number(user.noShowCount || 0),
+            attendCount: Number(user.attendCount || 0),
           }
           this.publishCount = user.publishCount || 0
           this.joinCount    = user.joinCount    || 0
@@ -213,6 +254,7 @@ export default {
           // 同步 globalData
           getApp().globalData.isVerified   = user.isVerified || false
           getApp().globalData.verifyStatus = user.verifyStatus || 'none'
+          getApp().globalData.verifyProvider = user.verifyProvider || 'manual'
         }
         // #endif
       } catch(e) {
@@ -353,6 +395,7 @@ export default {
   background: #1A3C5E;
   padding: 48rpx 32rpx 40rpx;
   display: flex; align-items: center; gap: 24rpx;
+  flex-wrap: wrap;
 }
 .avatar {
   width: 120rpx; height: 120rpx;
@@ -459,4 +502,30 @@ export default {
   display: inline-block;
 }
 .admin-text { font-size: 26rpx; color: rgba(255,255,255,0.9); }
+
+.credit-row {
+  width: 100%;
+  display: flex;
+  gap: 16rpx;
+  margin-top: 10rpx;
+}
+.credit-item {
+  flex: 1;
+  background: rgba(255,255,255,0.12);
+  border-radius: 12rpx;
+  padding: 14rpx 12rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.credit-label {
+  font-size: 20rpx;
+  color: rgba(255,255,255,0.75);
+}
+.credit-value {
+  margin-top: 6rpx;
+  font-size: 30rpx;
+  font-weight: 600;
+  color: #fff;
+}
 </style>

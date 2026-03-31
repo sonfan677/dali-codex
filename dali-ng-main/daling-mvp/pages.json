@@ -4,6 +4,10 @@
       "path": "pages/index/index",
       "style": { "navigationBarTitleText": "搭里" }
     },
+    {
+      "path": "pages/calendar/index",
+      "style": { "navigationBarTitleText": "官方活动日历" }
+    },
 	{
 	  "path": "pages/detail/index",
 	  "style": {
