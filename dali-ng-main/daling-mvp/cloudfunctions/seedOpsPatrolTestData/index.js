@@ -3,6 +3,11 @@ const cloud = require('wx-server-sdk')
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 const db = cloud.database()
 
+function isTruthy(value) {
+  const text = String(value || '').trim().toLowerCase()
+  return ['1', 'true', 'yes', 'on', 'y'].includes(text)
+}
+
 function splitCsv(value) {
   return String(value || '')
     .split(',')
@@ -36,6 +41,15 @@ function normalizeScenario(value = '') {
   const safe = String(value || '').trim().toLowerCase()
   if (safe === 'medium' || safe === 'high') return safe
   return 'high'
+}
+
+function getCurrentEnvName(context = {}) {
+  return String(
+    context.ENV
+      || process.env.TCB_ENV
+      || process.env.WX_CLOUD_ENV
+      || ''
+  ).trim()
 }
 
 function buildSeedTag(customTag = '') {
@@ -207,8 +221,10 @@ async function cleanupSeedData({ seedTag = '', cleanupAll = false }) {
 }
 
 exports.main = async (event = {}) => {
-  const { OPENID } = cloud.getWXContext()
+  const wxContext = cloud.getWXContext()
+  const { OPENID } = wxContext
   const adminMeta = parseAdminMeta(OPENID)
+  const currentEnv = getCurrentEnvName(wxContext)
 
   const runToken = String(event.runToken || '')
   const envRunToken = String(process.env.OPS_PATROL_SEED_TOKEN || '')
@@ -223,6 +239,36 @@ exports.main = async (event = {}) => {
   const cityId = String(event.cityId || adminMeta.cityId || 'dali')
   const scenario = normalizeScenario(event.scenario)
   const cleanupAll = !!event.cleanupAll
+  const seedEnabled = isTruthy(process.env.OPS_PATROL_SEED_ENABLED)
+  const allowedEnvs = splitCsv(process.env.OPS_PATROL_SEED_ALLOWED_ENVS)
+  const requireDualAuth = isTruthy(process.env.OPS_PATROL_SEED_REQUIRE_DUAL_AUTH)
+
+  if (mode !== 'cleanup' && !seedEnabled) {
+    return {
+      success: false,
+      error: 'SEED_DISABLED',
+      message: '测试造数已关闭（OPS_PATROL_SEED_ENABLED=false）',
+    }
+  }
+
+  if (mode !== 'cleanup' && allowedEnvs.length > 0) {
+    const envMatched = currentEnv && allowedEnvs.includes(currentEnv)
+    if (!envMatched) {
+      return {
+        success: false,
+        error: 'ENV_DENIED',
+        message: `当前环境 ${currentEnv || 'unknown'} 不在允许列表`,
+      }
+    }
+  }
+
+  if (mode !== 'cleanup' && requireDualAuth && !(adminMeta.isAdmin && tokenPassed)) {
+    return {
+      success: false,
+      error: 'DUAL_AUTH_REQUIRED',
+      message: '造数要求双重鉴权（管理员身份 + runToken）',
+    }
+  }
 
   if (mode === 'cleanup') {
     const cleanupResult = await cleanupSeedData({
@@ -244,6 +290,7 @@ exports.main = async (event = {}) => {
       mode,
       seedTag,
       cleanupAll,
+      currentEnv,
       cleanupResult,
     }
   }
@@ -296,6 +343,7 @@ exports.main = async (event = {}) => {
     mode,
     scenario,
     cityId,
+    currentEnv,
     seedTag,
     inserted: {
       reports: reportIds.length,

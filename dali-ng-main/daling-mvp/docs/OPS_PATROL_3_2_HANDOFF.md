@@ -68,6 +68,17 @@
 ## 四、一键造测试数据（推荐）
 
 先部署云函数：`seedOpsPatrolTestData`。  
+先给 `seedOpsPatrolTestData` 配置环境变量（生产安全收口）：
+
+1. `OPS_PATROL_SEED_ENABLED`
+   - 建议：测试环境 `true`，生产环境 `false`
+2. `OPS_PATROL_SEED_TOKEN`
+   - 建议：设置为你自定义的一段长字符串
+3. `OPS_PATROL_SEED_ALLOWED_ENVS`（可选）
+   - 含义：允许造数的环境 ID，多个用英文逗号
+4. `OPS_PATROL_SEED_REQUIRE_DUAL_AUTH`（可选）
+   - 建议：生产环境 `true`（必须管理员身份 + runToken）
+
 然后在云函数控制台测试 `seedOpsPatrolTestData`，使用以下 JSON：
 
 1. 造“中风险”样本（仅超时认证，便于验证 medium）
@@ -76,7 +87,8 @@
 {
   "mode": "seed",
   "scenario": "medium",
-  "cityId": "dali"
+  "cityId": "dali",
+  "runToken": "这里填 OPS_PATROL_SEED_TOKEN"
 }
 ```
 
@@ -86,7 +98,8 @@
 {
   "mode": "seed",
   "scenario": "high",
-  "cityId": "dali"
+  "cityId": "dali",
+  "runToken": "这里填 OPS_PATROL_SEED_TOKEN"
 }
 ```
 
@@ -95,7 +108,8 @@
 ```json
 {
   "mode": "cleanup",
-  "cleanupAll": true
+  "cleanupAll": true,
+  "runToken": "这里填 OPS_PATROL_SEED_TOKEN"
 }
 ```
 
@@ -115,3 +129,7 @@
 3. 若告警过多，可先调大：
    - `OPS_PATROL_ALERT_COOLDOWN_MINUTES`
    - `OPS_PATROL_OFFICIAL_FAIL_THRESHOLD`
+4. 生产环境建议：
+   - `OPS_PATROL_SEED_ENABLED=false`
+   - `OPS_PATROL_SEED_REQUIRE_DUAL_AUTH=true`
+   - `OPS_PATROL_SEED_ALLOWED_ENVS` 仅填写测试环境
