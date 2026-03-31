@@ -239,6 +239,52 @@
 
         <view class="card">
           <view class="title-row">
+            <text class="card-title">运营自动巡检（3.2）</text>
+            <text class="status-pill" :class="opsPatrolLevelPillClass(opsPatrolSummary.level)">{{ opsPatrolLevelText(opsPatrolSummary.level) }}</text>
+          </view>
+          <view class="card-actions card-actions--single">
+            <button
+              class="action-btn action-btn--detail"
+              :disabled="opsPatrolRunning"
+              @tap="runOpsPatrolNow"
+            >{{ opsPatrolRunning ? '巡检中...' : '立即巡检' }}</button>
+          </view>
+          <text class="card-openid">
+            最近巡检：{{ opsPatrolSummary.checkedAt ? formatTime(opsPatrolSummary.checkedAt) : '--' }} · 城市 {{ opsPatrolSummary.cityId || cityId }}
+          </text>
+          <view class="logs-overview">
+            <view class="logs-overview-card">
+              <text class="logs-overview-value">{{ opsPatrolSummary.score || 0 }}</text>
+              <text class="logs-overview-label">健康风险分</text>
+            </view>
+            <view class="logs-overview-card">
+              <text class="logs-overview-value">{{ opsPatrolSummary.triggeredCount || 0 }}</text>
+              <text class="logs-overview-label">触发项</text>
+            </view>
+            <view class="logs-overview-card">
+              <text class="logs-overview-value">{{ opsPatrolSummary.alertCount24h || 0 }}</text>
+              <text class="logs-overview-label">24h巡检告警</text>
+            </view>
+            <view class="logs-overview-card">
+              <text class="logs-overview-value">{{ opsPatrolSummary.supplyAlertLevel || 'normal' }}</text>
+              <text class="logs-overview-label">供给预警等级</text>
+            </view>
+          </view>
+          <text class="card-openid">
+            超时举报：{{ opsPatrolSummary.reportOverdueCount || 0 }} · 超时认证：{{ opsPatrolSummary.verifyOverdueCount || 0 }} · 实名失败(24h)：{{ opsPatrolSummary.officialVerifyFailedCount || 0 }}
+          </text>
+          <view v-if="opsPatrolAlertList.length" class="todo-item">
+            <text class="card-sub">最近巡检告警</text>
+            <text
+              v-for="alert in opsPatrolAlertList"
+              :key="`ops-alert-${alert._id}`"
+              class="card-openid"
+            >{{ formatTime(alert.createdAt) }} · {{ alert.reason || alert.result || '巡检发现风险' }}</text>
+          </view>
+        </view>
+
+        <view class="card">
+          <view class="title-row">
             <text class="card-title">官方实名审计看板</text>
             <text class="status-pill status-pill--log">待回调 {{ officialVerifyAuditSummary.pendingOfficialCount }}</text>
           </view>
@@ -1320,6 +1366,27 @@ export default {
         alerts: [],
       },
       officialRetryingOpenids: [],
+      opsPatrolRunning: false,
+      opsPatrol: {
+        summary: {
+          level: 'normal',
+          score: 0,
+          triggeredCount: 0,
+          cityId: '',
+          checkedAt: null,
+          reportOverdueCount: 0,
+          verifyOverdueCount: 0,
+          officialVerifyFailedCount: 0,
+          supplyAlertLevel: 'normal',
+          supplyAlertFlags: [],
+          source: '',
+          alertCount24h: 0,
+          hasRecentRun: false,
+        },
+        latestChecks: [],
+        alerts: [],
+        runs: [],
+      },
       reportList: [],
       activityList: [],
       actionLogList: [],
@@ -1437,6 +1504,30 @@ export default {
     officialVerifyAlertList() {
       return Array.isArray(this.officialVerifyAudit?.alerts)
         ? this.officialVerifyAudit.alerts.slice(0, 3)
+        : []
+    },
+
+    opsPatrolSummary() {
+      return this.opsPatrol?.summary || {
+        level: 'normal',
+        score: 0,
+        triggeredCount: 0,
+        cityId: '',
+        checkedAt: null,
+        reportOverdueCount: 0,
+        verifyOverdueCount: 0,
+        officialVerifyFailedCount: 0,
+        supplyAlertLevel: 'normal',
+        supplyAlertFlags: [],
+        source: '',
+        alertCount24h: 0,
+        hasRecentRun: false,
+      }
+    },
+
+    opsPatrolAlertList() {
+      return Array.isArray(this.opsPatrol?.alerts)
+        ? this.opsPatrol.alerts.slice(0, 3)
         : []
     },
 
@@ -1865,6 +1956,8 @@ export default {
           { label: '拒绝认证', value: 'reject_verify' },
           { label: '举报下架', value: 'resolve_report_hide' },
           { label: '举报忽略', value: 'resolve_report_ignore' },
+          { label: '巡检执行', value: 'ops_patrol_run' },
+          { label: '巡检告警', value: 'ops_patrol_alert' },
         ]
       }
       return []
@@ -1937,7 +2030,7 @@ export default {
 
     logOverview() {
       const list = this.filteredActionLogList
-      const highRiskActions = ['hide', 'ban', 'resolve_report_hide', 'reject_verify', 'official_verify_alert', 'official_verify_alert_immediate']
+      const highRiskActions = ['hide', 'ban', 'resolve_report_hide', 'reject_verify', 'official_verify_alert', 'official_verify_alert_immediate', 'ops_patrol_alert']
       const reportRelatedActions = ['resolve_report_hide', 'resolve_report_ignore']
       return {
         total: list.length,
@@ -2078,7 +2171,7 @@ export default {
         return acc
       }, {})
       const groups = {}
-      const highRiskActions = ['hide', 'ban', 'resolve_report_hide', 'reject_verify', 'official_verify_alert', 'official_verify_alert_immediate']
+      const highRiskActions = ['hide', 'ban', 'resolve_report_hide', 'reject_verify', 'official_verify_alert', 'official_verify_alert_immediate', 'ops_patrol_alert']
 
       const toTs = (value) => {
         const ms = new Date(value).getTime()
@@ -3029,6 +3122,26 @@ export default {
           recent: [],
           alerts: [],
         }
+        this.opsPatrol = res.opsPatrol || {
+          summary: {
+            level: 'normal',
+            score: 0,
+            triggeredCount: 0,
+            cityId: this.cityId || 'dali',
+            checkedAt: null,
+            reportOverdueCount: 0,
+            verifyOverdueCount: 0,
+            officialVerifyFailedCount: 0,
+            supplyAlertLevel: 'normal',
+            supplyAlertFlags: [],
+            source: '',
+            alertCount24h: 0,
+            hasRecentRun: false,
+          },
+          latestChecks: [],
+          alerts: [],
+          runs: [],
+        }
         this.reportList = res.reportList || []
         this.activityList = res.activityList || []
         this.actionLogList = res.actionLogList || []
@@ -3046,6 +3159,43 @@ export default {
         uni.showToast({ title: '加载失败', icon: 'none' })
       } finally {
         this.loading = false
+      }
+    },
+
+    opsPatrolLevelText(level = '') {
+      const map = {
+        high: '高风险',
+        medium: '中风险',
+        normal: '正常',
+      }
+      return map[String(level || '').toLowerCase()] || '正常'
+    },
+
+    opsPatrolLevelPillClass(level = '') {
+      const safe = String(level || '').toLowerCase()
+      if (safe === 'high') return 'status-pill--result-risk'
+      if (safe === 'medium') return 'status-pill--pending'
+      return 'status-pill--handled'
+    },
+
+    async runOpsPatrolNow() {
+      if (!this.hasAccess || this.opsPatrolRunning) return
+      this.opsPatrolRunning = true
+      try {
+        const ret = await callCloud('runOpsPatrol', {
+          source: 'admin_manual',
+        })
+        if (ret?.success) {
+          uni.showToast({ title: `巡检完成：${this.opsPatrolLevelText(ret.level)}`, icon: 'success' })
+          await this.loadData()
+        } else {
+          uni.showToast({ title: ret?.message || '巡检失败', icon: 'none' })
+        }
+      } catch (e) {
+        console.error('手动巡检失败', e)
+        uni.showToast({ title: '巡检失败，请稍后重试', icon: 'none' })
+      } finally {
+        this.opsPatrolRunning = false
       }
     },
 
@@ -3434,6 +3584,8 @@ export default {
         official_verify_callback: '官方回调处理',
         official_verify_alert: '官方认证异常告警',
         official_verify_alert_immediate: '官方认证高危即时告警',
+        ops_patrol_run: '运营自动巡检执行',
+        ops_patrol_alert: '运营巡检风险告警',
         mark_attendance: '到场/爽约标记',
         ban: '封禁用户',
         resolve_report_hide: '举报处理并下架',
@@ -3474,12 +3626,14 @@ export default {
         unrecommend: 'status-pill--result-neutral',
         resolve_report_ignore: 'status-pill--result-neutral',
         official_verify_retry: 'status-pill--result-neutral',
+        ops_patrol_run: 'status-pill--result-neutral',
         hide: 'status-pill--result-risk',
         ban: 'status-pill--result-risk',
         reject_verify: 'status-pill--result-risk',
         resolve_report_hide: 'status-pill--result-risk',
         official_verify_alert: 'status-pill--result-risk',
         official_verify_alert_immediate: 'status-pill--result-risk',
+        ops_patrol_alert: 'status-pill--result-risk',
       }
       return map[action] || 'status-pill--result-default'
     },
@@ -3675,7 +3829,7 @@ export default {
     },
 
     buildTrendRows(periods = []) {
-      const highRiskActionSet = new Set(['hide', 'ban', 'resolve_report_hide', 'reject_verify', 'official_verify_alert', 'official_verify_alert_immediate'])
+      const highRiskActionSet = new Set(['hide', 'ban', 'resolve_report_hide', 'reject_verify', 'official_verify_alert', 'official_verify_alert_immediate', 'ops_patrol_alert'])
       const reportHandledStatusSet = new Set(['HANDLED', 'IGNORED'])
       const reportHandleActionSet = new Set(['resolve_report_hide', 'resolve_report_ignore'])
 
@@ -4108,7 +4262,7 @@ export default {
       const append = (values = []) => lines.push(this.buildCsvLine(values))
       const now = new Date()
       const { exportLogList, exportRangeText, selectedFieldText } = this.getCurrentLogExportContext()
-      const highRiskActionSet = new Set(['hide', 'ban', 'resolve_report_hide', 'reject_verify', 'official_verify_alert', 'official_verify_alert_immediate'])
+      const highRiskActionSet = new Set(['hide', 'ban', 'resolve_report_hide', 'reject_verify', 'official_verify_alert', 'official_verify_alert_immediate', 'ops_patrol_alert'])
       const reportHandleActionSet = new Set(['resolve_report_hide', 'resolve_report_ignore'])
       const activityMap = this.activityList.reduce((acc, item) => {
         if (item && item._id) acc[item._id] = item

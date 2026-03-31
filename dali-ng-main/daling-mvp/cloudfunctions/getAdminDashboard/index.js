@@ -198,6 +198,8 @@ exports.main = async () => {
           'official_verify_alert',
           'official_verify_alert_immediate',
           'official_verify_callback',
+          'ops_patrol_run',
+          'ops_patrol_alert',
         ]),
       })
       .orderBy('createdAt', 'desc')
@@ -218,6 +220,12 @@ exports.main = async () => {
         notifySummary: true,
         beforeState: true,
         afterState: true,
+        patrolLevel: true,
+        patrolScore: true,
+        patrolTriggeredCount: true,
+        patrolSignature: true,
+        patrolSummary: true,
+        patrolChecks: true,
         reason: true,
         result: true,
         cityId: true,
@@ -377,6 +385,19 @@ exports.main = async () => {
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
     .slice(0, 12)
 
+  const opsPatrolRunList = rawActionLogs
+    .filter((item) => item.action === 'ops_patrol_run')
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+  const latestOpsPatrol = opsPatrolRunList[0] || null
+  const opsPatrolAlertList = rawActionLogs
+    .filter((item) => item.action === 'ops_patrol_alert')
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .slice(0, 12)
+  const opsPatrolAlertCount24h = opsPatrolAlertList.filter((item) => {
+    const ts = new Date(item.createdAt).getTime()
+    return Number.isFinite(ts) && ts >= last24hMs
+  }).length
+
   const missingLogActivityIds = rawActionLogs
     .map((item) => resolveActionLinkedActivityId(item))
     .filter((id) => id && !activityMap[id])
@@ -445,6 +466,42 @@ exports.main = async () => {
       alerts: officialVerifyAlertList,
       immediateAlerts: officialVerifyImmediateAlertList.slice(0, 10),
       thresholdAlerts: officialVerifyThresholdAlertList,
+    },
+    opsPatrol: {
+      summary: latestOpsPatrol
+        ? {
+            level: latestOpsPatrol.patrolLevel || latestOpsPatrol.patrolSummary?.level || 'normal',
+            score: Number(latestOpsPatrol.patrolScore || latestOpsPatrol.patrolSummary?.score || 0),
+            triggeredCount: Number(latestOpsPatrol.patrolTriggeredCount || latestOpsPatrol.patrolSummary?.triggeredCount || 0),
+            cityId: latestOpsPatrol.patrolSummary?.cityId || latestOpsPatrol.cityId || meta.cityId,
+            checkedAt: latestOpsPatrol.patrolSummary?.checkedAt || latestOpsPatrol.createdAt || null,
+            reportOverdueCount: Number(latestOpsPatrol.patrolSummary?.reportOverdueCount || 0),
+            verifyOverdueCount: Number(latestOpsPatrol.patrolSummary?.verifyOverdueCount || 0),
+            officialVerifyFailedCount: Number(latestOpsPatrol.patrolSummary?.officialVerifyFailedCount || 0),
+            supplyAlertLevel: latestOpsPatrol.patrolSummary?.supplyAlertLevel || 'normal',
+            supplyAlertFlags: latestOpsPatrol.patrolSummary?.supplyAlertFlags || [],
+            source: latestOpsPatrol.patrolSummary?.source || latestOpsPatrol.actionSource || '',
+            alertCount24h: opsPatrolAlertCount24h,
+            hasRecentRun: true,
+          }
+        : {
+            level: 'normal',
+            score: 0,
+            triggeredCount: 0,
+            cityId: meta.cityId,
+            checkedAt: null,
+            reportOverdueCount: 0,
+            verifyOverdueCount: 0,
+            officialVerifyFailedCount: 0,
+            supplyAlertLevel: 'normal',
+            supplyAlertFlags: [],
+            source: '',
+            alertCount24h: opsPatrolAlertCount24h,
+            hasRecentRun: false,
+          },
+      latestChecks: latestOpsPatrol?.patrolChecks || [],
+      alerts: opsPatrolAlertList,
+      runs: opsPatrolRunList.slice(0, 8),
     },
     reportList,
     activityList: enrichedActivityList,

@@ -28,6 +28,7 @@
    - `startOfficialVerify`
    - `retryOfficialVerify`
    - `officialVerifyCallback`
+   - `runOpsPatrol`
 4. 云函数环境变量确认：
    - `ADMIN_OPENIDS`
    - `TMPL_START`
@@ -108,6 +109,11 @@
    - 构造错误签名时返回 `SIGNATURE_MISMATCH`
    - 同 nonce 的疑似重放请求会被拦截（`FAILED_REPLAY_ATTACK`）
    - 管理后台“官方实名审计看板”可看到即时告警/阈值告警/重放拦截指标
+18. 运营自动巡检 3.2（低风险收口）
+   - 管理后台可点击“立即巡检”
+   - 巡检完成后看到健康等级、风险分、触发项、24h巡检告警
+   - 日志页可看到 `ops_patrol_run` 和 `ops_patrol_alert`
+   - 巡检告警写入 `adminActions`，并可在看板中展示最近告警
 
 ## 三、合规检查（快速版）
 
@@ -128,6 +134,6 @@
 
 ## 五、通过标准
 
-1. “核心冒烟” 17 项全部通过
+1. “核心冒烟” 18 项全部通过
 2. “合规检查” 5 项全部通过
 3. 无阻断性报错（白屏、无法进入核心页、云函数主链路失败）
