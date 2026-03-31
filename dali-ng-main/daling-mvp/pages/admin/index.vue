@@ -281,9 +281,14 @@
               <text class="logs-overview-label">重试转化率</text>
             </view>
             <view class="logs-overview-card">
-              <text class="logs-overview-value">{{ officialVerifyAuditSummary.alertCount24h || 0 }}</text>
-              <text class="logs-overview-label">24h告警</text>
+              <text class="logs-overview-value">{{ officialVerifyAuditSummary.immediateAlertCount24h || 0 }}</text>
+              <text class="logs-overview-label">24h即时告警</text>
             </view>
+          </view>
+          <view class="todo-item">
+            <text class="card-openid">
+              阈值告警（24h）：{{ officialVerifyAuditSummary.thresholdAlertCount24h || 0 }} · 重放拦截：{{ officialVerifyAuditSummary.replayBlocked || 0 }} · 签名失败：{{ officialVerifyAuditSummary.signatureFailed || 0 }}
+            </text>
           </view>
           <view v-if="officialVerifyAuditSummary.topFailReasons && officialVerifyAuditSummary.topFailReasons.length" class="todo-item">
             <text class="card-sub">失败原因 Top</text>
@@ -299,7 +304,7 @@
               v-for="alert in officialVerifyAlertList"
               :key="`alert-${alert._id}`"
               class="card-openid"
-            >{{ formatTime(alert.createdAt) }} · {{ alert.reason || alert.result || '官方实名异常告警' }}</text>
+            >{{ formatTime(alert.createdAt) }} · {{ alert.action === 'official_verify_alert_immediate' ? '[即时]' : '[阈值]' }} {{ alert.reason || alert.result || '官方实名异常告警' }}</text>
           </view>
           <view v-if="officialVerifyRecentList.length === 0" class="empty empty--inline">
             <text class="empty-text">暂无官方实名回调记录</text>
@@ -1304,6 +1309,12 @@ export default {
           retryConversionRate: null,
           topFailReasons: [],
           alertCount24h: 0,
+          immediateAlertCount24h: 0,
+          thresholdAlertCount24h: 0,
+          replayBlocked: 0,
+          signatureFailed: 0,
+          unauthorizedFailed: 0,
+          ipDenied: 0,
         },
         recent: [],
         alerts: [],
@@ -1408,6 +1419,12 @@ export default {
         retryConversionRate: null,
         topFailReasons: [],
         alertCount24h: 0,
+        immediateAlertCount24h: 0,
+        thresholdAlertCount24h: 0,
+        replayBlocked: 0,
+        signatureFailed: 0,
+        unauthorizedFailed: 0,
+        ipDenied: 0,
       }
     },
 
@@ -1920,7 +1937,7 @@ export default {
 
     logOverview() {
       const list = this.filteredActionLogList
-      const highRiskActions = ['hide', 'ban', 'resolve_report_hide', 'reject_verify', 'official_verify_alert']
+      const highRiskActions = ['hide', 'ban', 'resolve_report_hide', 'reject_verify', 'official_verify_alert', 'official_verify_alert_immediate']
       const reportRelatedActions = ['resolve_report_hide', 'resolve_report_ignore']
       return {
         total: list.length,
@@ -2061,7 +2078,7 @@ export default {
         return acc
       }, {})
       const groups = {}
-      const highRiskActions = ['hide', 'ban', 'resolve_report_hide', 'reject_verify', 'official_verify_alert']
+      const highRiskActions = ['hide', 'ban', 'resolve_report_hide', 'reject_verify', 'official_verify_alert', 'official_verify_alert_immediate']
 
       const toTs = (value) => {
         const ms = new Date(value).getTime()
@@ -3002,6 +3019,12 @@ export default {
             retryConversionRate: null,
             topFailReasons: [],
             alertCount24h: 0,
+            immediateAlertCount24h: 0,
+            thresholdAlertCount24h: 0,
+            replayBlocked: 0,
+            signatureFailed: 0,
+            unauthorizedFailed: 0,
+            ipDenied: 0,
           },
           recent: [],
           alerts: [],
@@ -3037,6 +3060,7 @@ export default {
         FAILED_SIGNATURE_EXPIRED: '失败:签名过期',
         FAILED_INVALID_SIGNATURE_PARAMS: '失败:签名参数错误',
         FAILED_SIGN_CONFIG: '失败:签名配置缺失',
+        FAILED_REPLAY_ATTACK: '失败:疑似重放攻击',
         FAILED_USER_NOT_FOUND: '失败:用户不存在',
         FAILED_INVALID_PARAMS: '失败:参数错误',
         FAILED_INVALID_RESULT: '失败:结果错误',
@@ -3409,6 +3433,7 @@ export default {
         official_verify_retry: '重试官方认证',
         official_verify_callback: '官方回调处理',
         official_verify_alert: '官方认证异常告警',
+        official_verify_alert_immediate: '官方认证高危即时告警',
         mark_attendance: '到场/爽约标记',
         ban: '封禁用户',
         resolve_report_hide: '举报处理并下架',
@@ -3454,6 +3479,7 @@ export default {
         reject_verify: 'status-pill--result-risk',
         resolve_report_hide: 'status-pill--result-risk',
         official_verify_alert: 'status-pill--result-risk',
+        official_verify_alert_immediate: 'status-pill--result-risk',
       }
       return map[action] || 'status-pill--result-default'
     },
@@ -3649,7 +3675,7 @@ export default {
     },
 
     buildTrendRows(periods = []) {
-      const highRiskActionSet = new Set(['hide', 'ban', 'resolve_report_hide', 'reject_verify', 'official_verify_alert'])
+      const highRiskActionSet = new Set(['hide', 'ban', 'resolve_report_hide', 'reject_verify', 'official_verify_alert', 'official_verify_alert_immediate'])
       const reportHandledStatusSet = new Set(['HANDLED', 'IGNORED'])
       const reportHandleActionSet = new Set(['resolve_report_hide', 'resolve_report_ignore'])
 
@@ -4082,7 +4108,7 @@ export default {
       const append = (values = []) => lines.push(this.buildCsvLine(values))
       const now = new Date()
       const { exportLogList, exportRangeText, selectedFieldText } = this.getCurrentLogExportContext()
-      const highRiskActionSet = new Set(['hide', 'ban', 'resolve_report_hide', 'reject_verify', 'official_verify_alert'])
+      const highRiskActionSet = new Set(['hide', 'ban', 'resolve_report_hide', 'reject_verify', 'official_verify_alert', 'official_verify_alert_immediate'])
       const reportHandleActionSet = new Set(['resolve_report_hide', 'resolve_report_ignore'])
       const activityMap = this.activityList.reduce((acc, item) => {
         if (item && item._id) acc[item._id] = item
@@ -4270,7 +4296,7 @@ export default {
       const recent = this.officialVerifyRecentList
       const alerts = this.officialVerifyAlertList
 
-      append(['搭里官方实名认证审计报表（3.0）'])
+      append(['搭里官方实名认证审计报表（3.1）'])
       append(['导出时间', this.formatExportTime(now)])
       append(['导出角色', this.adminRoleLabel])
       append(['城市范围', this.cityIdLabel])
@@ -4289,6 +4315,12 @@ export default {
       append(['重试转化通过', summary.retryConvertedCount || 0])
       append(['重试转化率', summary.retryConversionRate == null ? '-' : `${Math.round(summary.retryConversionRate * 100)}%`])
       append(['24h告警数', summary.alertCount24h || 0])
+      append(['24h即时告警数', summary.immediateAlertCount24h || 0])
+      append(['24h阈值告警数', summary.thresholdAlertCount24h || 0])
+      append(['重放拦截数', summary.replayBlocked || 0])
+      append(['签名失败数', summary.signatureFailed || 0])
+      append(['Token失败数', summary.unauthorizedFailed || 0])
+      append(['IP白名单失败数', summary.ipDenied || 0])
       append([])
 
       append(['二、失败原因 Top'])
@@ -4322,13 +4354,14 @@ export default {
       append([])
 
       append(['四、最近告警（Top3）'])
-      append(['时间', '原因', '结果'])
+      append(['时间', '告警类型', '原因', '结果'])
       if (alerts.length === 0) {
-        append(['-', '-', '-'])
+        append(['-', '-', '-', '-'])
       } else {
         alerts.forEach((item) => {
           append([
             this.formatTime(item.createdAt),
+            item.action === 'official_verify_alert_immediate' ? '即时告警' : '阈值告警',
             item.reason || '',
             item.result || '',
           ])

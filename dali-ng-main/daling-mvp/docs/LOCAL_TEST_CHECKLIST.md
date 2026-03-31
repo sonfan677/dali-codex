@@ -25,6 +25,9 @@
    - `autoUpdateStatus`
    - `checkAdmin`
    - `getAdminDashboard`
+   - `startOfficialVerify`
+   - `retryOfficialVerify`
+   - `officialVerifyCallback`
 4. 云函数环境变量确认：
    - `ADMIN_OPENIDS`
    - `TMPL_START`
@@ -99,6 +102,12 @@
    - “导出报表二期 CSV（双表）”可生成 Summary + Detail 两份文件
    - “导出周/月趋势 CSV”可成功导出
    - 趋势 CSV 中可看到周维度、月维度、环比字段
+17. 官方实名 3.1（生产收口）
+   - 回调签名正确时返回 `success: true`
+   - 重复回调不重复落库，返回幂等成功
+   - 构造错误签名时返回 `SIGNATURE_MISMATCH`
+   - 同 nonce 的疑似重放请求会被拦截（`FAILED_REPLAY_ATTACK`）
+   - 管理后台“官方实名审计看板”可看到即时告警/阈值告警/重放拦截指标
 
 ## 三、合规检查（快速版）
 
@@ -119,6 +128,6 @@
 
 ## 五、通过标准
 
-1. “核心冒烟” 15 项全部通过
+1. “核心冒烟” 17 项全部通过
 2. “合规检查” 5 项全部通过
 3. 无阻断性报错（白屏、无法进入核心页、云函数主链路失败）

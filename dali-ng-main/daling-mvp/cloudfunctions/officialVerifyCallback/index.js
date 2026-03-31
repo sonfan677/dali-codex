@@ -26,6 +26,10 @@ function splitCsv(value) {
     .filter(Boolean)
 }
 
+function parseUpperSet(value) {
+  return new Set(splitCsv(value).map((item) => item.toUpperCase()))
+}
+
 function normalizeIp(raw) {
   const text = safeText(raw, 200)
   if (!text) return ''
@@ -103,6 +107,11 @@ function buildSignaturePayload({
 
 function calcHmacSha256(payload = '', secret = '') {
   return crypto.createHmac('sha256', secret).update(payload).digest('hex')
+}
+
+function toAlertKeyText(value, fallback = 'global') {
+  const text = safeText(value, 120).replace(/[^a-zA-Z0-9_-]/g, '_')
+  return text || fallback
 }
 
 function buildIdempotencyKey(event = {}, ticket = '', openid = '', result = '') {
@@ -238,6 +247,131 @@ async function maybeTriggerFailAlert({ failureStatus = '', failureMessage = '' }
   }
 }
 
+async function maybeTriggerImmediateAlert({
+  failureStatus = '',
+  failureCode = '',
+  failureMessage = '',
+  idempotencyKey = '',
+  traceId = '',
+  callbackId = '',
+  openid = '',
+  ticket = '',
+  clientIp = '',
+} = {}) {
+  const statusText = String(failureStatus || '').toUpperCase()
+  if (!statusText.startsWith('FAILED')) return null
+
+  const enabledRaw = process.env.OFFICIAL_VERIFY_IMMEDIATE_ALERT_ENABLED
+  const enabled = enabledRaw === undefined || enabledRaw === '' ? true : isTruthy(enabledRaw)
+  if (!enabled) return null
+
+  const configuredStatusSet = parseUpperSet(process.env.OFFICIAL_VERIFY_IMMEDIATE_ALERT_STATUSES)
+  const defaultStatusSet = new Set([
+    'FAILED_UNAUTHORIZED',
+    'FAILED_IP_DENIED',
+    'FAILED_SIGNATURE_MISMATCH',
+    'FAILED_SIGNATURE_EXPIRED',
+    'FAILED_REPLAY_ATTACK',
+  ])
+  const statusSet = configuredStatusSet.size ? configuredStatusSet : defaultStatusSet
+  if (!statusSet.has(statusText)) return null
+
+  const windowMinutes = parsePositiveNumber(process.env.OFFICIAL_VERIFY_IMMEDIATE_ALERT_WINDOW_MINUTES, 15)
+  const windowMs = windowMinutes * 60 * 1000
+  const bucket = Math.floor(Date.now() / windowMs)
+  const targetKey = toAlertKeyText(openid || ticket || traceId || callbackId || idempotencyKey, 'global')
+  const alertKey = `official_verify_alert_immediate_${statusText}_${bucket}_${targetKey}`
+
+  const { data: exists } = await db.collection('adminActions')
+    .where({
+      action: 'official_verify_alert_immediate',
+      alertKey,
+    })
+    .limit(1)
+    .get()
+    .catch(() => ({ data: [] }))
+
+  if (exists && exists.length > 0) {
+    return {
+      triggered: false,
+      alreadyExists: true,
+      status: statusText,
+      windowMinutes,
+    }
+  }
+
+  await db.collection('adminActions').add({
+    data: {
+      actionId: `official_verify_alert_immediate_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      adminId: 'system',
+      adminOpenid: 'system',
+      adminRole: 'system',
+      targetId: openid || '',
+      targetType: 'user',
+      action: 'official_verify_alert_immediate',
+      actionType: 'official_verify_alert_immediate',
+      reason: `官方实名高危异常：${statusText}`,
+      result: [failureCode, failureMessage].filter(Boolean).join(' | ') || statusText,
+      cityId: 'dali',
+      severity: 'high',
+      failureStatus: statusText,
+      failureCode,
+      traceId,
+      callbackId,
+      verifyTicket: ticket || '',
+      callbackKey: idempotencyKey,
+      clientIp,
+      alertKey,
+      createdAt: db.serverDate(),
+      updatedAt: db.serverDate(),
+    },
+  }).catch(() => {})
+
+  return {
+    triggered: true,
+    status: statusText,
+    windowMinutes,
+    alertKey,
+  }
+}
+
+async function detectReplayAttack({
+  nonce = '',
+  idempotencyKey = '',
+  windowSeconds = 600,
+} = {}) {
+  if (!nonce || !idempotencyKey) return { replayed: false }
+  const since = new Date(Date.now() - Math.max(60, Number(windowSeconds) || 600) * 1000)
+  const { data: recent } = await db.collection('officialVerifyAudits')
+    .where({
+      signatureNonce: nonce,
+      updatedAt: _.gte(since),
+    })
+    .orderBy('updatedAt', 'desc')
+    .limit(20)
+    .field({
+      _id: true,
+      idempotencyKey: true,
+      status: true,
+      updatedAt: true,
+    })
+    .get()
+    .catch(() => ({ data: [] }))
+
+  const conflict = (recent || []).find((item) => {
+    const key = String(item.idempotencyKey || '')
+    if (!key || key === idempotencyKey) return false
+    return String(item.status || '') !== 'PROCESSING'
+  })
+
+  if (!conflict) return { replayed: false }
+  return {
+    replayed: true,
+    conflictIdempotencyKey: conflict.idempotencyKey || '',
+    conflictStatus: conflict.status || '',
+  }
+}
+
 exports.main = async (event = {}, context = {}) => {
   const callbackToken = safeText(event?.token, 120)
   const configuredToken = safeText(process.env.OFFICIAL_VERIFY_CALLBACK_TOKEN, 120)
@@ -250,19 +384,21 @@ exports.main = async (event = {}, context = {}) => {
   const traceId = safeText(event?.traceId, 120)
   const callbackId = safeText(event?.callbackId, 120)
   const idempotencyKey = buildIdempotencyKey(event, ticket, openid, result)
+  const timestampRaw = event?.timestamp
+  const nonce = safeText(event?.nonce, 120)
+  const signature = safeText(event?.signature, 200).toLowerCase()
+  const timestampSec = toSecondsTimestamp(timestampRaw)
+  const signSecret = safeText(process.env.OFFICIAL_VERIFY_SIGN_SECRET, 512)
+  const signatureRequired = isTruthy(process.env.OFFICIAL_VERIFY_SIGNATURE_REQUIRED)
+  const signatureModeEnabled = signatureRequired || !!signSecret
+  const ttlSeconds = parsePositiveNumber(process.env.OFFICIAL_VERIFY_SIGN_TTL_SECONDS, 300)
+  const replayEnabledRaw = process.env.OFFICIAL_VERIFY_REPLAY_GUARD_ENABLED
+  const replayGuardEnabled = replayEnabledRaw === undefined || replayEnabledRaw === '' ? true : isTruthy(replayEnabledRaw)
+  const replayWindowSeconds = parsePositiveNumber(process.env.OFFICIAL_VERIFY_REPLAY_GUARD_WINDOW_SECONDS, Math.max(300, ttlSeconds * 2))
+  let signatureVerified = !signatureModeEnabled
+  let replayGuardPassed = !signatureModeEnabled || !replayGuardEnabled
 
   const existingAudit = await findAuditByKey(idempotencyKey)
-  if (existingAudit?.status === 'SUCCESS') {
-    return {
-      success: true,
-      idempotent: true,
-      openid: existingAudit.userOpenid || openid || '',
-      result: existingAudit.result || result,
-      verifyStatus: existingAudit.verifyStatus || '',
-      officialVerifyStatus: existingAudit.officialVerifyStatus || '',
-      message: '重复回调已幂等处理',
-    }
-  }
 
   const auditId = await ensureAuditRecord({
     idempotencyKey,
@@ -274,6 +410,11 @@ exports.main = async (event = {}, context = {}) => {
     openid,
     result,
     detail,
+    signatureModeEnabled,
+    signatureRequired,
+    signatureNonce: nonce || '',
+    signatureTimestampSec: Number.isFinite(timestampSec) ? timestampSec : null,
+    replayGuardEnabled,
     status: 'PROCESSING',
     retriable: false,
   }, existingAudit)
@@ -284,7 +425,20 @@ exports.main = async (event = {}, context = {}) => {
       retriable,
       error,
       message,
+      signatureVerified,
+      replayGuardPassed,
       ...extra,
+    })
+    const immediateAlert = await maybeTriggerImmediateAlert({
+      failureStatus: status,
+      failureCode: error,
+      failureMessage: message,
+      idempotencyKey,
+      traceId,
+      callbackId,
+      openid,
+      ticket,
+      clientIp,
     })
     const alert = await maybeTriggerFailAlert({
       failureStatus: status,
@@ -295,6 +449,7 @@ exports.main = async (event = {}, context = {}) => {
       error,
       message,
       alertTriggered: !!alert?.triggered,
+      immediateAlertTriggered: !!immediateAlert?.triggered,
     }
   }
 
@@ -310,18 +465,10 @@ exports.main = async (event = {}, context = {}) => {
     })
   }
 
-  const signSecret = safeText(process.env.OFFICIAL_VERIFY_SIGN_SECRET, 200)
-  const signatureRequired = isTruthy(process.env.OFFICIAL_VERIFY_SIGNATURE_REQUIRED)
-  const timestampRaw = event?.timestamp
-  const nonce = safeText(event?.nonce, 120)
-  const signature = safeText(event?.signature, 200).toLowerCase()
-  const ttlSeconds = parsePositiveNumber(process.env.OFFICIAL_VERIFY_SIGN_TTL_SECONDS, 300)
-
-  if (signatureRequired || signSecret) {
+  if (signatureModeEnabled) {
     if (!signSecret) {
       return fail('FAILED_SIGN_CONFIG', 'SIGN_CONFIG_MISSING', '签名校验已开启但缺少签名密钥配置', false)
     }
-    const timestampSec = toSecondsTimestamp(timestampRaw)
     if (!Number.isFinite(timestampSec) || !nonce || !signature) {
       return fail('FAILED_INVALID_SIGNATURE_PARAMS', 'INVALID_SIGNATURE_PARAMS', '缺少签名参数（timestamp/nonce/signature）', false)
     }
@@ -347,6 +494,22 @@ exports.main = async (event = {}, context = {}) => {
         signaturePayload: payload,
       })
     }
+
+    signatureVerified = true
+    if (replayGuardEnabled) {
+      const replayCheck = await detectReplayAttack({
+        nonce,
+        idempotencyKey,
+        windowSeconds: replayWindowSeconds,
+      })
+      if (replayCheck?.replayed) {
+        return fail('FAILED_REPLAY_ATTACK', 'REPLAY_ATTACK', '疑似重放攻击：nonce 在短时间窗口重复', true, {
+          replayConflictKey: replayCheck.conflictIdempotencyKey || '',
+          replayConflictStatus: replayCheck.conflictStatus || '',
+        })
+      }
+      replayGuardPassed = true
+    }
   }
 
   if (!ticket && !openid) {
@@ -354,6 +517,28 @@ exports.main = async (event = {}, context = {}) => {
   }
   if (!['approved', 'rejected'].includes(result)) {
     return fail('FAILED_INVALID_RESULT', 'INVALID_RESULT', 'result 仅支持 approved/rejected', false)
+  }
+
+  if (existingAudit?.status === 'SUCCESS') {
+    await finishAudit(auditId, {
+      status: 'SUCCESS',
+      retriable: false,
+      signatureVerified,
+      replayGuardPassed,
+      message: '重复回调已幂等处理',
+      result: existingAudit.result || result,
+      verifyStatus: existingAudit.verifyStatus || '',
+      officialVerifyStatus: existingAudit.officialVerifyStatus || '',
+    })
+    return {
+      success: true,
+      idempotent: true,
+      openid: existingAudit.userOpenid || openid || '',
+      result: existingAudit.result || result,
+      verifyStatus: existingAudit.verifyStatus || '',
+      officialVerifyStatus: existingAudit.officialVerifyStatus || '',
+      message: '重复回调已幂等处理',
+    }
   }
 
   let user = null
@@ -459,6 +644,8 @@ exports.main = async (event = {}, context = {}) => {
   await finishAudit(auditId, {
     status: 'SUCCESS',
     retriable: false,
+    signatureVerified,
+    replayGuardPassed,
     userOpenid: user._openid,
     verifyStatus,
     officialVerifyStatus,

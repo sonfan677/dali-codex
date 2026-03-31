@@ -196,6 +196,7 @@ exports.main = async () => {
           'resolve_report_hide',
           'resolve_report_ignore',
           'official_verify_alert',
+          'official_verify_alert_immediate',
           'official_verify_callback',
         ]),
       })
@@ -304,6 +305,15 @@ exports.main = async () => {
     else if (status.startsWith('FAILED')) acc.failed += 1
     else acc.processing += 1
     if (item.retriable) acc.retriable += 1
+    if (status === 'FAILED_REPLAY_ATTACK') acc.replayBlocked += 1
+    if (
+      status === 'FAILED_SIGNATURE_MISMATCH'
+      || status === 'FAILED_SIGNATURE_EXPIRED'
+      || status === 'FAILED_INVALID_SIGNATURE_PARAMS'
+      || status === 'FAILED_SIGN_CONFIG'
+    ) acc.signatureFailed += 1
+    if (status === 'FAILED_UNAUTHORIZED') acc.unauthorizedFailed += 1
+    if (status === 'FAILED_IP_DENIED') acc.ipDenied += 1
     return acc
   }, {
     total: 0,
@@ -311,6 +321,10 @@ exports.main = async () => {
     failed: 0,
     processing: 0,
     retriable: 0,
+    replayBlocked: 0,
+    signatureFailed: 0,
+    unauthorizedFailed: 0,
+    ipDenied: 0,
   })
 
   const pendingOfficialCount = (pendingUsersRes.data || [])
@@ -345,13 +359,23 @@ exports.main = async () => {
     : null
 
   const last24hMs = Date.now() - 24 * 60 * 60 * 1000
-  const officialVerifyAlertList = rawActionLogs
+  const officialVerifyThresholdAlertList = rawActionLogs
     .filter((item) => item.action === 'official_verify_alert')
     .slice(0, 10)
-  const officialVerifyAlertCount24h = officialVerifyAlertList.filter((item) => {
+  const officialVerifyImmediateAlertList = rawActionLogs
+    .filter((item) => item.action === 'official_verify_alert_immediate')
+    .slice(0, 20)
+  const thresholdAlertCount24h = officialVerifyThresholdAlertList.filter((item) => {
     const ts = new Date(item.createdAt).getTime()
     return Number.isFinite(ts) && ts >= last24hMs
   }).length
+  const immediateAlertCount24h = officialVerifyImmediateAlertList.filter((item) => {
+    const ts = new Date(item.createdAt).getTime()
+    return Number.isFinite(ts) && ts >= last24hMs
+  }).length
+  const officialVerifyAlertList = [...officialVerifyImmediateAlertList, ...officialVerifyThresholdAlertList]
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .slice(0, 12)
 
   const missingLogActivityIds = rawActionLogs
     .map((item) => resolveActionLinkedActivityId(item))
@@ -413,10 +437,14 @@ exports.main = async () => {
         retryConvertedCount,
         retryConversionRate,
         topFailReasons,
-        alertCount24h: officialVerifyAlertCount24h,
+        alertCount24h: immediateAlertCount24h + thresholdAlertCount24h,
+        immediateAlertCount24h,
+        thresholdAlertCount24h,
       },
       recent: officialVerifyAuditList,
       alerts: officialVerifyAlertList,
+      immediateAlerts: officialVerifyImmediateAlertList.slice(0, 10),
+      thresholdAlerts: officialVerifyThresholdAlertList,
     },
     reportList,
     activityList: enrichedActivityList,
