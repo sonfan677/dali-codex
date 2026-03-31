@@ -242,6 +242,13 @@
             <text class="card-title">官方实名审计看板</text>
             <text class="status-pill status-pill--log">待回调 {{ officialVerifyAuditSummary.pendingOfficialCount }}</text>
           </view>
+          <view class="card-actions card-actions--single">
+            <button
+              class="action-btn action-btn--detail"
+              :disabled="officialCsvExporting"
+              @tap="exportOfficialVerifyCsv"
+            >导出实名报表CSV</button>
+          </view>
           <view class="logs-overview">
             <view class="logs-overview-card">
               <text class="logs-overview-value">{{ officialVerifyAuditSummary.total }}</text>
@@ -259,6 +266,40 @@
               <text class="logs-overview-value">{{ officialVerifyAuditSummary.retriable }}</text>
               <text class="logs-overview-label">可重试</text>
             </view>
+          </view>
+          <view class="logs-overview">
+            <view class="logs-overview-card">
+              <text class="logs-overview-value">{{ officialVerifyAuditSummary.passRate == null ? '--' : Math.round(officialVerifyAuditSummary.passRate * 100) + '%' }}</text>
+              <text class="logs-overview-label">通过率</text>
+            </view>
+            <view class="logs-overview-card">
+              <text class="logs-overview-value">{{ officialVerifyAuditSummary.retryUserCount || 0 }}</text>
+              <text class="logs-overview-label">重试用户</text>
+            </view>
+            <view class="logs-overview-card">
+              <text class="logs-overview-value">{{ officialVerifyAuditSummary.retryConversionRate == null ? '--' : Math.round(officialVerifyAuditSummary.retryConversionRate * 100) + '%' }}</text>
+              <text class="logs-overview-label">重试转化率</text>
+            </view>
+            <view class="logs-overview-card">
+              <text class="logs-overview-value">{{ officialVerifyAuditSummary.alertCount24h || 0 }}</text>
+              <text class="logs-overview-label">24h告警</text>
+            </view>
+          </view>
+          <view v-if="officialVerifyAuditSummary.topFailReasons && officialVerifyAuditSummary.topFailReasons.length" class="todo-item">
+            <text class="card-sub">失败原因 Top</text>
+            <text
+              v-for="item in officialVerifyAuditSummary.topFailReasons"
+              :key="`fail-top-${item.reason}`"
+              class="card-openid"
+            >{{ item.reason }} · {{ item.count }}次</text>
+          </view>
+          <view v-if="officialVerifyAlertList.length" class="todo-item">
+            <text class="card-sub">最近告警</text>
+            <text
+              v-for="alert in officialVerifyAlertList"
+              :key="`alert-${alert._id}`"
+              class="card-openid"
+            >{{ formatTime(alert.createdAt) }} · {{ alert.reason || alert.result || '官方实名异常告警' }}</text>
           </view>
           <view v-if="officialVerifyRecentList.length === 0" class="empty empty--inline">
             <text class="empty-text">暂无官方实名回调记录</text>
@@ -1237,6 +1278,7 @@ export default {
       lastHandledReportStatus: '',
       reportHighlightTimer: null,
       csvExporting: false,
+      officialCsvExporting: false,
       csvExportingV2: false,
       trendCsvExporting: false,
       trendWeekWindow: 12,
@@ -1256,8 +1298,15 @@ export default {
           processing: 0,
           retriable: 0,
           pendingOfficialCount: 0,
+          passRate: null,
+          retryUserCount: 0,
+          retryConvertedCount: 0,
+          retryConversionRate: null,
+          topFailReasons: [],
+          alertCount24h: 0,
         },
         recent: [],
+        alerts: [],
       },
       officialRetryingOpenids: [],
       reportList: [],
@@ -1353,12 +1402,24 @@ export default {
         processing: 0,
         retriable: 0,
         pendingOfficialCount: 0,
+        passRate: null,
+        retryUserCount: 0,
+        retryConvertedCount: 0,
+        retryConversionRate: null,
+        topFailReasons: [],
+        alertCount24h: 0,
       }
     },
 
     officialVerifyRecentList() {
       return Array.isArray(this.officialVerifyAudit?.recent)
         ? this.officialVerifyAudit.recent.slice(0, 8)
+        : []
+    },
+
+    officialVerifyAlertList() {
+      return Array.isArray(this.officialVerifyAudit?.alerts)
+        ? this.officialVerifyAudit.alerts.slice(0, 3)
         : []
     },
 
@@ -1859,7 +1920,7 @@ export default {
 
     logOverview() {
       const list = this.filteredActionLogList
-      const highRiskActions = ['hide', 'ban', 'resolve_report_hide', 'reject_verify']
+      const highRiskActions = ['hide', 'ban', 'resolve_report_hide', 'reject_verify', 'official_verify_alert']
       const reportRelatedActions = ['resolve_report_hide', 'resolve_report_ignore']
       return {
         total: list.length,
@@ -2000,7 +2061,7 @@ export default {
         return acc
       }, {})
       const groups = {}
-      const highRiskActions = ['hide', 'ban', 'resolve_report_hide', 'reject_verify']
+      const highRiskActions = ['hide', 'ban', 'resolve_report_hide', 'reject_verify', 'official_verify_alert']
 
       const toTs = (value) => {
         const ms = new Date(value).getTime()
@@ -2935,8 +2996,15 @@ export default {
             processing: 0,
             retriable: 0,
             pendingOfficialCount: 0,
+            passRate: null,
+            retryUserCount: 0,
+            retryConvertedCount: 0,
+            retryConversionRate: null,
+            topFailReasons: [],
+            alertCount24h: 0,
           },
           recent: [],
+          alerts: [],
         }
         this.reportList = res.reportList || []
         this.activityList = res.activityList || []
@@ -2964,6 +3032,11 @@ export default {
         SUCCESS: '成功',
         PROCESSING: '处理中',
         FAILED_UNAUTHORIZED: '失败:Token无效',
+        FAILED_IP_DENIED: '失败:IP不在白名单',
+        FAILED_SIGNATURE_MISMATCH: '失败:签名不匹配',
+        FAILED_SIGNATURE_EXPIRED: '失败:签名过期',
+        FAILED_INVALID_SIGNATURE_PARAMS: '失败:签名参数错误',
+        FAILED_SIGN_CONFIG: '失败:签名配置缺失',
         FAILED_USER_NOT_FOUND: '失败:用户不存在',
         FAILED_INVALID_PARAMS: '失败:参数错误',
         FAILED_INVALID_RESULT: '失败:结果错误',
@@ -3333,6 +3406,10 @@ export default {
         hide: '手动下架活动',
         verify: '通过实名认证',
         reject_verify: '拒绝实名认证',
+        official_verify_retry: '重试官方认证',
+        official_verify_callback: '官方回调处理',
+        official_verify_alert: '官方认证异常告警',
+        mark_attendance: '到场/爽约标记',
         ban: '封禁用户',
         resolve_report_hide: '举报处理并下架',
         resolve_report_ignore: '举报处理并忽略',
@@ -3368,12 +3445,15 @@ export default {
       const map = {
         recommend: 'status-pill--result-positive',
         verify: 'status-pill--result-positive',
+        official_verify_callback: 'status-pill--result-positive',
         unrecommend: 'status-pill--result-neutral',
         resolve_report_ignore: 'status-pill--result-neutral',
+        official_verify_retry: 'status-pill--result-neutral',
         hide: 'status-pill--result-risk',
         ban: 'status-pill--result-risk',
         reject_verify: 'status-pill--result-risk',
         resolve_report_hide: 'status-pill--result-risk',
+        official_verify_alert: 'status-pill--result-risk',
       }
       return map[action] || 'status-pill--result-default'
     },
@@ -3569,7 +3649,7 @@ export default {
     },
 
     buildTrendRows(periods = []) {
-      const highRiskActionSet = new Set(['hide', 'ban', 'resolve_report_hide', 'reject_verify'])
+      const highRiskActionSet = new Set(['hide', 'ban', 'resolve_report_hide', 'reject_verify', 'official_verify_alert'])
       const reportHandledStatusSet = new Set(['HANDLED', 'IGNORED'])
       const reportHandleActionSet = new Set(['resolve_report_hide', 'resolve_report_ignore'])
 
@@ -4002,7 +4082,7 @@ export default {
       const append = (values = []) => lines.push(this.buildCsvLine(values))
       const now = new Date()
       const { exportLogList, exportRangeText, selectedFieldText } = this.getCurrentLogExportContext()
-      const highRiskActionSet = new Set(['hide', 'ban', 'resolve_report_hide', 'reject_verify'])
+      const highRiskActionSet = new Set(['hide', 'ban', 'resolve_report_hide', 'reject_verify', 'official_verify_alert'])
       const reportHandleActionSet = new Set(['resolve_report_hide', 'resolve_report_ignore'])
       const activityMap = this.activityList.reduce((acc, item) => {
         if (item && item._id) acc[item._id] = item
@@ -4182,6 +4262,82 @@ export default {
       return lines.join('\n')
     },
 
+    buildOfficialVerifyCsv() {
+      const lines = []
+      const append = (values = []) => lines.push(this.buildCsvLine(values))
+      const now = new Date()
+      const summary = this.officialVerifyAuditSummary
+      const recent = this.officialVerifyRecentList
+      const alerts = this.officialVerifyAlertList
+
+      append(['搭里官方实名认证审计报表（3.0）'])
+      append(['导出时间', this.formatExportTime(now)])
+      append(['导出角色', this.adminRoleLabel])
+      append(['城市范围', this.cityIdLabel])
+      append([])
+
+      append(['一、核心指标'])
+      append(['指标', '数值'])
+      append(['回调总数', summary.total || 0])
+      append(['成功数', summary.success || 0])
+      append(['失败数', summary.failed || 0])
+      append(['处理中', summary.processing || 0])
+      append(['可重试', summary.retriable || 0])
+      append(['待回调用户', summary.pendingOfficialCount || 0])
+      append(['通过率', summary.passRate == null ? '-' : `${Math.round(summary.passRate * 100)}%`])
+      append(['重试用户', summary.retryUserCount || 0])
+      append(['重试转化通过', summary.retryConvertedCount || 0])
+      append(['重试转化率', summary.retryConversionRate == null ? '-' : `${Math.round(summary.retryConversionRate * 100)}%`])
+      append(['24h告警数', summary.alertCount24h || 0])
+      append([])
+
+      append(['二、失败原因 Top'])
+      append(['失败原因', '次数'])
+      const topReasons = Array.isArray(summary.topFailReasons) ? summary.topFailReasons : []
+      if (topReasons.length === 0) {
+        append(['-', 0])
+      } else {
+        topReasons.forEach((item) => append([item.reason || '-', item.count || 0]))
+      }
+      append([])
+
+      append(['三、最近回调明细（Top8）'])
+      append(['时间', '状态', '结果', '用户', '重试次数', '错误码', '消息', '幂等键'])
+      if (recent.length === 0) {
+        append(['-', '-', '-', '-', 0, '-', '-', '-'])
+      } else {
+        recent.forEach((item) => {
+          append([
+            this.formatTime(item.updatedAt || item.createdAt),
+            item.status || '',
+            item.result || '',
+            this.shortOpenid(item.userOpenid || item.openid),
+            Number(item.retryCount || 0),
+            item.error || '',
+            item.message || '',
+            (item.idempotencyKey || '').slice(0, 60),
+          ])
+        })
+      }
+      append([])
+
+      append(['四、最近告警（Top3）'])
+      append(['时间', '原因', '结果'])
+      if (alerts.length === 0) {
+        append(['-', '-', '-'])
+      } else {
+        alerts.forEach((item) => {
+          append([
+            this.formatTime(item.createdAt),
+            item.reason || '',
+            item.result || '',
+          ])
+        })
+      }
+
+      return lines.join('\n')
+    },
+
     async saveCsvToClipboard(csvText) {
       return new Promise((resolve, reject) => {
         uni.setClipboardData({
@@ -4253,6 +4409,36 @@ export default {
         uni.showToast({ title: '导出失败，请重试', icon: 'none' })
       } finally {
         this.csvExporting = false
+      }
+    },
+
+    async exportOfficialVerifyCsv() {
+      if (this.officialCsvExporting || this.csvExporting || this.csvExportingV2 || this.trendCsvExporting) return
+      this.officialCsvExporting = true
+      try {
+        const csvText = this.buildOfficialVerifyCsv()
+        const fileName = `dali_official_verify_audit_${this.formatDateToken(new Date())}.csv`
+
+        try {
+          const filePath = await this.saveCsvToFile(csvText, fileName)
+          await this.openCsvFile(filePath)
+          uni.showToast({ title: '实名审计CSV已生成', icon: 'success' })
+          return
+        } catch (fileErr) {
+          console.warn('保存实名审计CSV失败，回退剪贴板', fileErr)
+        }
+
+        await this.saveCsvToClipboard(csvText)
+        uni.showModal({
+          title: '已复制实名审计CSV',
+          content: '当前环境不支持直接打开文件，已复制到剪贴板，可粘贴到表格工具分析。',
+          showCancel: false,
+        })
+      } catch (e) {
+        console.error('导出实名审计CSV失败', e)
+        uni.showToast({ title: '导出失败，请重试', icon: 'none' })
+      } finally {
+        this.officialCsvExporting = false
       }
     },
 

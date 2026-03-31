@@ -122,7 +122,7 @@ exports.main = async () => {
     return { success: false, error: 'UNAUTHORIZED', message: '无管理员权限' }
   }
 
-  const [pendingUsersRes, reportsRes, activitiesRes, actionLogsRes, officialVerifyAuditRes] = await Promise.all([
+  const [pendingUsersRes, reportsRes, activitiesRes, actionLogsRes, officialVerifyAuditRes, retryUsersRes] = await Promise.all([
     db.collection('users')
       .where({ verifyStatus: 'pending' })
       .field({
@@ -195,6 +195,7 @@ exports.main = async () => {
           'ban',
           'resolve_report_hide',
           'resolve_report_ignore',
+          'official_verify_alert',
           'official_verify_callback',
         ]),
       })
@@ -246,6 +247,21 @@ exports.main = async () => {
         processedAt: true,
         createdAt: true,
         updatedAt: true,
+      })
+      .get()
+      .catch(() => ({ data: [] })),
+    db.collection('users')
+      .where({
+        officialVerifyRetryCount: _.gt(0),
+      })
+      .limit(300)
+      .field({
+        _id: true,
+        _openid: true,
+        cityId: true,
+        isVerified: true,
+        verifyStatus: true,
+        officialVerifyRetryCount: true,
       })
       .get()
       .catch(() => ({ data: [] }))
@@ -300,6 +316,42 @@ exports.main = async () => {
   const pendingOfficialCount = (pendingUsersRes.data || [])
     .filter((item) => item.verifyProvider === 'wechat_official' || item.officialVerifyStatus === 'pending_callback')
     .length
+
+  const totalEffective = officialVerifyAuditSummary.success + officialVerifyAuditSummary.failed
+  const passRate = totalEffective > 0
+    ? Number((officialVerifyAuditSummary.success / totalEffective).toFixed(4))
+    : null
+
+  const failReasonCounter = {}
+  officialVerifyAuditList.forEach((item) => {
+    const status = String(item.status || '')
+    if (!status.startsWith('FAILED')) return
+    const key = item.error || item.message || status
+    failReasonCounter[key] = Number(failReasonCounter[key] || 0) + 1
+  })
+  const topFailReasons = Object.keys(failReasonCounter)
+    .map((reason) => ({ reason, count: failReasonCounter[reason] }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 5)
+
+  const rawRetryUsers = retryUsersRes.data || []
+  const retryUsers = shouldFilterCity
+    ? rawRetryUsers.filter((item) => !item.cityId || item.cityId === meta.cityId)
+    : rawRetryUsers
+  const retryUserCount = retryUsers.length
+  const retryConvertedCount = retryUsers.filter((item) => item.isVerified || item.verifyStatus === 'approved').length
+  const retryConversionRate = retryUserCount > 0
+    ? Number((retryConvertedCount / retryUserCount).toFixed(4))
+    : null
+
+  const last24hMs = Date.now() - 24 * 60 * 60 * 1000
+  const officialVerifyAlertList = rawActionLogs
+    .filter((item) => item.action === 'official_verify_alert')
+    .slice(0, 10)
+  const officialVerifyAlertCount24h = officialVerifyAlertList.filter((item) => {
+    const ts = new Date(item.createdAt).getTime()
+    return Number.isFinite(ts) && ts >= last24hMs
+  }).length
 
   const missingLogActivityIds = rawActionLogs
     .map((item) => resolveActionLinkedActivityId(item))
@@ -356,8 +408,15 @@ exports.main = async () => {
       summary: {
         ...officialVerifyAuditSummary,
         pendingOfficialCount,
+        passRate,
+        retryUserCount,
+        retryConvertedCount,
+        retryConversionRate,
+        topFailReasons,
+        alertCount24h: officialVerifyAlertCount24h,
       },
       recent: officialVerifyAuditList,
+      alerts: officialVerifyAlertList,
     },
     reportList,
     activityList: enrichedActivityList,
