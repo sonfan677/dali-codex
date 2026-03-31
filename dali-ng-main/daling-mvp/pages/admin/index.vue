@@ -237,6 +237,52 @@
           </view>
         </view>
 
+        <view class="card">
+          <view class="title-row">
+            <text class="card-title">官方实名审计看板</text>
+            <text class="status-pill status-pill--log">待回调 {{ officialVerifyAuditSummary.pendingOfficialCount }}</text>
+          </view>
+          <view class="logs-overview">
+            <view class="logs-overview-card">
+              <text class="logs-overview-value">{{ officialVerifyAuditSummary.total }}</text>
+              <text class="logs-overview-label">回调总数</text>
+            </view>
+            <view class="logs-overview-card">
+              <text class="logs-overview-value">{{ officialVerifyAuditSummary.success }}</text>
+              <text class="logs-overview-label">成功</text>
+            </view>
+            <view class="logs-overview-card">
+              <text class="logs-overview-value">{{ officialVerifyAuditSummary.failed }}</text>
+              <text class="logs-overview-label">失败</text>
+            </view>
+            <view class="logs-overview-card">
+              <text class="logs-overview-value">{{ officialVerifyAuditSummary.retriable }}</text>
+              <text class="logs-overview-label">可重试</text>
+            </view>
+          </view>
+          <view v-if="officialVerifyRecentList.length === 0" class="empty empty--inline">
+            <text class="empty-text">暂无官方实名回调记录</text>
+          </view>
+          <view v-for="item in officialVerifyRecentList" :key="`ova-${item._id}`" class="todo-item">
+            <view class="title-row">
+              <text class="card-sub">{{ officialAuditStatusText(item) }}</text>
+              <text class="card-openid">{{ formatTime(item.updatedAt || item.createdAt) }}</text>
+            </view>
+            <text class="card-openid">
+              用户：{{ shortOpenid(item.userOpenid || item.openid) }} · 结果：{{ item.result || '--' }}
+            </text>
+            <text class="card-openid">重试次数：{{ item.retryCount || 0 }} · 键：{{ (item.idempotencyKey || '').slice(0, 24) }}</text>
+            <view class="card-actions card-actions--single">
+              <button
+                v-if="item.retriable"
+                class="action-btn action-btn--detail"
+                :disabled="isOfficialRetrying(item.userOpenid || item.openid)"
+                @tap="retryOfficialVerifyFromAudit(item)"
+              >重试失败项</button>
+            </view>
+          </view>
+        </view>
+
         <view v-if="isLiteMode" class="todo-batch-toolbar">
           <button class="mini-btn mini-btn--ghost" @tap="toggleTodoAdvanced">
             {{ showTodoAdvanced ? '收起高级区' : '展开高级区（日报归档/SLA细分）' }}
@@ -682,12 +728,22 @@
             <view class="card-text">
               <text class="card-title">{{ item.nickname || '未知用户' }}</text>
               <text class="card-sub">申请实名认证</text>
+              <text class="card-openid">
+                通道：{{ item.verifyProvider === 'wechat_official' ? '微信官方' : '人工审核' }}
+                {{ item.officialVerifyStatus ? ` · 状态:${item.officialVerifyStatus}` : '' }}
+              </text>
               <text class="card-openid">{{ item._openid ? item._openid.slice(0,12) + '...' : '' }}</text>
             </view>
           </view>
           <view class="card-actions">
             <button class="action-btn action-btn--approve" @tap="verifyUser(item._openid, 'verify')">通过</button>
             <button class="action-btn action-btn--reject"  @tap="verifyUser(item._openid, 'reject_verify')">拒绝</button>
+            <button
+              v-if="item.verifyProvider === 'wechat_official'"
+              class="action-btn action-btn--detail"
+              :disabled="isOfficialRetrying(item._openid)"
+              @tap="retryOfficialVerifyFromAudit({ userOpenid: item._openid, openid: item._openid, retriable: true })"
+            >重试官方</button>
           </view>
         </view>
       </template>
@@ -1192,6 +1248,18 @@ export default {
       adminRole: '',
       cityId: '',
       pendingVerifyList: [],
+      officialVerifyAudit: {
+        summary: {
+          total: 0,
+          success: 0,
+          failed: 0,
+          processing: 0,
+          retriable: 0,
+          pendingOfficialCount: 0,
+        },
+        recent: [],
+      },
+      officialRetryingOpenids: [],
       reportList: [],
       activityList: [],
       actionLogList: [],
@@ -1275,6 +1343,23 @@ export default {
 
     cityIdLabel() {
       return this.cityId ? `城市：${this.cityId}` : '城市：全部'
+    },
+
+    officialVerifyAuditSummary() {
+      return this.officialVerifyAudit?.summary || {
+        total: 0,
+        success: 0,
+        failed: 0,
+        processing: 0,
+        retriable: 0,
+        pendingOfficialCount: 0,
+      }
+    },
+
+    officialVerifyRecentList() {
+      return Array.isArray(this.officialVerifyAudit?.recent)
+        ? this.officialVerifyAudit.recent.slice(0, 8)
+        : []
     },
 
     searchPlaceholder() {
@@ -2842,6 +2927,17 @@ export default {
         this.adminRole = res.adminRole || 'superAdmin'
         this.cityId = res.cityId || 'dali'
         this.pendingVerifyList = res.pendingVerifyList || []
+        this.officialVerifyAudit = res.officialVerifyAudit || {
+          summary: {
+            total: 0,
+            success: 0,
+            failed: 0,
+            processing: 0,
+            retriable: 0,
+            pendingOfficialCount: 0,
+          },
+          recent: [],
+        }
         this.reportList = res.reportList || []
         this.activityList = res.activityList || []
         this.actionLogList = res.actionLogList || []
@@ -2860,6 +2956,57 @@ export default {
       } finally {
         this.loading = false
       }
+    },
+
+    officialAuditStatusText(item = {}) {
+      const status = String(item.status || '')
+      const map = {
+        SUCCESS: '成功',
+        PROCESSING: '处理中',
+        FAILED_UNAUTHORIZED: '失败:Token无效',
+        FAILED_USER_NOT_FOUND: '失败:用户不存在',
+        FAILED_INVALID_PARAMS: '失败:参数错误',
+        FAILED_INVALID_RESULT: '失败:结果错误',
+      }
+      return map[status] || status || '--'
+    },
+
+    isOfficialRetrying(openid) {
+      return this.officialRetryingOpenids.includes(openid)
+    },
+
+    async retryOfficialVerifyFromAudit(item = {}) {
+      const targetOpenid = item.userOpenid || item.openid || ''
+      if (!targetOpenid) {
+        uni.showToast({ title: '缺少用户标识，无法重试', icon: 'none' })
+        return
+      }
+      if (this.isOfficialRetrying(targetOpenid)) return
+
+      uni.showModal({
+        title: '确认重试官方认证？',
+        content: `将为 ${this.shortOpenid(targetOpenid)} 重新发起官方认证票据`,
+        success: async (res) => {
+          if (!res.confirm) return
+          this.officialRetryingOpenids = [...new Set([...this.officialRetryingOpenids, targetOpenid])]
+          try {
+            const ret = await callCloud('retryOfficialVerify', {
+              targetOpenid,
+              reason: '审计看板重试官方实名认证',
+            })
+            if (ret?.success) {
+              uni.showToast({ title: '重试已发起', icon: 'success' })
+              await this.loadData()
+            } else {
+              uni.showToast({ title: ret?.message || '重试失败', icon: 'none' })
+            }
+          } catch (e) {
+            uni.showToast({ title: '重试失败，请稍后重试', icon: 'none' })
+          } finally {
+            this.officialRetryingOpenids = this.officialRetryingOpenids.filter((id) => id !== targetOpenid)
+          }
+        },
+      })
     },
 
     // 审核认证（支持快捷模板）

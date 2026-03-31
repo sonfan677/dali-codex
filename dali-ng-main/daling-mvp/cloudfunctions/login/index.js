@@ -50,6 +50,11 @@ function buildReservedUserPatch(user = {}, cityId, todayKey) {
   if (!user.officialVerifyStatus) patch.officialVerifyStatus = 'not_started'
   if (typeof user.officialVerifyTicket === 'undefined') patch.officialVerifyTicket = null
   if (typeof user.officialVerifiedAt === 'undefined') patch.officialVerifiedAt = null
+  if (typeof user.officialVerifyRetryCount !== 'number') patch.officialVerifyRetryCount = 0
+  if (typeof user.officialVerifyLastRetryAt === 'undefined') patch.officialVerifyLastRetryAt = null
+  if (typeof user.officialVerifyLastCallbackAt === 'undefined') patch.officialVerifyLastCallbackAt = null
+  if (typeof user.officialVerifyLastEventKey === 'undefined') patch.officialVerifyLastEventKey = null
+  if (typeof user.officialVerifyLastError === 'undefined') patch.officialVerifyLastError = ''
   if (typeof user.subscribeNearbyActivity !== 'boolean') patch.subscribeNearbyActivity = false
   if (!user.subscriptions || typeof user.subscriptions !== 'object') {
     patch.subscriptions = normalizeSubscriptions({})
@@ -91,6 +96,11 @@ exports.main = async (event, context) => {
         officialVerifyStatus: 'not_started',
         officialVerifyTicket: null,
         officialVerifiedAt: null,
+        officialVerifyRetryCount: 0,
+        officialVerifyLastRetryAt: null,
+        officialVerifyLastCallbackAt: null,
+        officialVerifyLastEventKey: null,
+        officialVerifyLastError: '',
         subscribeNearbyActivity: false,
         publishCount: 0,
         joinCount: 0,
@@ -129,6 +139,11 @@ exports.main = async (event, context) => {
       officialVerifyStatus: 'not_started',
       officialVerifyTicket: null,
       officialVerifiedAt: null,
+      officialVerifyRetryCount: 0,
+      officialVerifyLastRetryAt: null,
+      officialVerifyLastCallbackAt: null,
+      officialVerifyLastEventKey: null,
+      officialVerifyLastError: '',
       openid: OPENID,
       nickname,
       avatarUrl,
@@ -182,6 +197,10 @@ exports.main = async (event, context) => {
     officialVerifyStatus: mergedUser.officialVerifyStatus || 'not_started',
     officialVerifyTicket: mergedUser.officialVerifyTicket || null,
     officialVerifiedAt: mergedUser.officialVerifiedAt || null,
+    officialVerifyRetryCount: Number(mergedUser.officialVerifyRetryCount || 0),
+    officialVerifyLastRetryAt: mergedUser.officialVerifyLastRetryAt || null,
+    officialVerifyLastCallbackAt: mergedUser.officialVerifyLastCallbackAt || null,
+    officialVerifyLastError: mergedUser.officialVerifyLastError || '',
     openid: OPENID,
     nickname,
     avatarUrl,

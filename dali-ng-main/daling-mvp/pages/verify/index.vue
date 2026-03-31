@@ -28,6 +28,12 @@
       <view v-else-if="isPending" class="pending-box">
         <text class="pending-icon">⏳</text>
         <text class="pending-text">{{ pendingText }}</text>
+        <button
+          v-if="userStore.verifyProvider === 'wechat_official'"
+          class="retry-btn"
+          :loading="officialSubmitting"
+          @tap="retryOfficialVerifyFlow"
+        >官方认证失败？点此重试</button>
       </view>
 
       <view v-else-if="verifyChannel === 'official'" class="official-box">
@@ -166,6 +172,25 @@ export default {
         this.officialSubmitting = false
       }
     },
+
+    async retryOfficialVerifyFlow() {
+      this.officialSubmitting = true
+      try {
+        const res = await callCloud('startOfficialVerify', { forceRetry: true })
+        if (!res?.success) {
+          uni.showToast({ title: res?.message || '重试失败', icon: 'none' })
+          return
+        }
+        this.userStore.verifyStatus = 'pending'
+        this.userStore.verifyProvider = 'wechat_official'
+        this.userStore.officialVerifyStatus = res.officialVerifyStatus || 'pending_callback'
+        uni.showToast({ title: '已重新发起官方认证', icon: 'success' })
+      } catch (e) {
+        uni.showToast({ title: '重试失败，请稍后再试', icon: 'none' })
+      } finally {
+        this.officialSubmitting = false
+      }
+    },
   },
 }
 </script>
@@ -263,5 +288,20 @@ export default {
   font-weight: bold;
   border: none;
   margin-top: 16rpx;
+}
+
+.retry-btn {
+  margin-top: 8rpx;
+  width: 100%;
+  height: 84rpx;
+  line-height: 84rpx;
+  border-radius: 14rpx;
+  background: #EEF4FB;
+  color: #1A3C5E;
+  font-size: 28rpx;
+  border: none;
+}
+.retry-btn::after {
+  border: none;
 }
 </style>

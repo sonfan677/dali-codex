@@ -122,7 +122,7 @@ exports.main = async () => {
     return { success: false, error: 'UNAUTHORIZED', message: '无管理员权限' }
   }
 
-  const [pendingUsersRes, reportsRes, activitiesRes, actionLogsRes] = await Promise.all([
+  const [pendingUsersRes, reportsRes, activitiesRes, actionLogsRes, officialVerifyAuditRes] = await Promise.all([
     db.collection('users')
       .where({ verifyStatus: 'pending' })
       .field({
@@ -133,6 +133,8 @@ exports.main = async () => {
         verifyProvider: true,
         officialVerifyStatus: true,
         officialVerifyTicket: true,
+        officialVerifyRetryCount: true,
+        officialVerifyLastError: true,
         verifySubmittedAt: true,
         createdAt: true,
         updatedAt: true,
@@ -188,6 +190,7 @@ exports.main = async () => {
           'hide',
           'verify',
           'reject_verify',
+          'official_verify_retry',
           'mark_attendance',
           'ban',
           'resolve_report_hide',
@@ -220,7 +223,32 @@ exports.main = async () => {
         adminRole: true,
         createdAt: true,
       })
+      .get(),
+    db.collection('officialVerifyAudits')
+      .orderBy('updatedAt', 'desc')
+      .limit(120)
+      .field({
+        _id: true,
+        idempotencyKey: true,
+        callbackId: true,
+        traceId: true,
+        ticket: true,
+        openid: true,
+        userOpenid: true,
+        result: true,
+        status: true,
+        retriable: true,
+        error: true,
+        message: true,
+        verifyStatus: true,
+        officialVerifyStatus: true,
+        retryCount: true,
+        processedAt: true,
+        createdAt: true,
+        updatedAt: true,
+      })
       .get()
+      .catch(() => ({ data: [] }))
   ])
 
   const shouldFilterCity = meta.adminRole === 'cityAdmin'
@@ -251,6 +279,27 @@ exports.main = async () => {
   const rawActionLogs = shouldFilterCity
     ? (actionLogsRes.data || []).filter((item) => !item.cityId || item.cityId === meta.cityId)
     : (actionLogsRes.data || [])
+
+  const officialVerifyAuditList = (officialVerifyAuditRes.data || []).slice(0, 60)
+  const officialVerifyAuditSummary = officialVerifyAuditList.reduce((acc, item) => {
+    acc.total += 1
+    const status = String(item.status || '')
+    if (status === 'SUCCESS') acc.success += 1
+    else if (status.startsWith('FAILED')) acc.failed += 1
+    else acc.processing += 1
+    if (item.retriable) acc.retriable += 1
+    return acc
+  }, {
+    total: 0,
+    success: 0,
+    failed: 0,
+    processing: 0,
+    retriable: 0,
+  })
+
+  const pendingOfficialCount = (pendingUsersRes.data || [])
+    .filter((item) => item.verifyProvider === 'wechat_official' || item.officialVerifyStatus === 'pending_callback')
+    .length
 
   const missingLogActivityIds = rawActionLogs
     .map((item) => resolveActionLinkedActivityId(item))
@@ -303,6 +352,13 @@ exports.main = async () => {
     adminRole: meta.adminRole,
     cityId: meta.cityId,
     pendingVerifyList: pendingUsersRes.data || [],
+    officialVerifyAudit: {
+      summary: {
+        ...officialVerifyAuditSummary,
+        pendingOfficialCount,
+      },
+      recent: officialVerifyAuditList,
+    },
     reportList,
     activityList: enrichedActivityList,
     actionLogList,

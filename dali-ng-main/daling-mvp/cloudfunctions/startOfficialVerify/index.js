@@ -1,14 +1,16 @@
 const cloud = require('wx-server-sdk')
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 const db = cloud.database()
+const _ = db.command
 
 function createTicket(openid = '') {
   const rand = Math.random().toString(36).slice(2, 10)
   return `ovf_${Date.now()}_${openid.slice(0, 6)}_${rand}`
 }
 
-exports.main = async () => {
+exports.main = async (event = {}) => {
   const { OPENID } = cloud.getWXContext()
+  const forceRetry = !!event.forceRetry
 
   const { data: users } = await db.collection('users')
     .where({ _openid: OPENID })
@@ -25,7 +27,7 @@ exports.main = async () => {
   }
 
   const existingTicket = String(user.officialVerifyTicket || '')
-  if (user.verifyStatus === 'pending' && user.officialVerifyStatus === 'pending_callback' && existingTicket) {
+  if (!forceRetry && user.verifyStatus === 'pending' && user.officialVerifyStatus === 'pending_callback' && existingTicket) {
     return {
       success: true,
       reused: true,
@@ -46,6 +48,9 @@ exports.main = async () => {
       verifyProvider: 'wechat_official',
       officialVerifyStatus: 'pending_callback',
       officialVerifyTicket: ticket,
+      officialVerifyRetryCount: forceRetry ? _.inc(1) : Number(user.officialVerifyRetryCount || 0),
+      officialVerifyLastRetryAt: forceRetry ? db.serverDate() : (user.officialVerifyLastRetryAt || null),
+      officialVerifyLastError: '',
       verifySubmittedAt: db.serverDate(),
       updatedAt: db.serverDate(),
     },
@@ -64,6 +69,7 @@ exports.main = async () => {
       reason: '用户申请实名认证（微信官方通道）',
       cityId,
       verifyTicket: ticket,
+      callbackKey: forceRetry ? `force_retry_${Date.now()}` : '',
       createdAt: db.serverDate(),
       updatedAt: db.serverDate(),
     },
@@ -75,7 +81,8 @@ exports.main = async () => {
     verifyStatus: 'pending',
     verifyProvider: 'wechat_official',
     officialVerifyStatus: 'pending_callback',
+    officialVerifyRetryCount: forceRetry ? Number(user.officialVerifyRetryCount || 0) + 1 : Number(user.officialVerifyRetryCount || 0),
     officialEntryUrl: process.env.OFFICIAL_VERIFY_ENTRY_URL || '',
-    message: '官方认证请求已发起，等待回调',
+    message: forceRetry ? '已重试发起官方认证，等待回调' : '官方认证请求已发起，等待回调',
   }
 }
