@@ -15,14 +15,6 @@
       </view>
     </view>
 
-    <view v-if="accountGuide.visible" class="account-guide" @tap="goAccountGuide">
-      <view class="account-guide-main">
-        <text class="account-guide-title">{{ accountGuide.title }}</text>
-        <text class="account-guide-desc">{{ accountGuide.desc }}</text>
-      </view>
-      <text class="account-guide-arrow">去完善 ›</text>
-    </view>
-
     <view class="calendar-entry" @tap="goCalendar">
       <text class="calendar-entry-title">官方活动日历</text>
       <text class="calendar-entry-sub">查看未来 14 天官方推荐活动 →</text>
@@ -265,12 +257,6 @@ export default {
       distanceTouched: false,
       nearbySubPrompting: false,
       nearbySubPromptChecked: false,
-      accountGuideState: {
-        isLoggedIn: false,
-        phoneVerified: false,
-        identityCheckRequired: false,
-        identityCheckStatus: 'none',
-      },
     }
   },
 
@@ -316,32 +302,6 @@ export default {
         desc: `默认坐标 ${this.currentDistanceLabel}`,
       }
     },
-    accountGuide() {
-      const isLoggedIn = !!this.accountGuideState.isLoggedIn
-      if (!isLoggedIn) {
-        return { visible: false, title: '', desc: '', type: 'none' }
-      }
-      const identityCheckRequired = !!this.accountGuideState.identityCheckRequired
-      const identityCheckStatus = this.accountGuideState.identityCheckStatus || 'none'
-      if (identityCheckRequired && identityCheckStatus !== 'approved') {
-        return {
-          visible: true,
-          type: 'scheme2',
-          title: '发布前需补充身份核验',
-          desc: '账号已进入方案2，请先完成核验，避免发布受限。',
-        }
-      }
-      if (!this.accountGuideState.phoneVerified) {
-        return {
-          visible: true,
-          type: 'scheme1',
-          title: '建议先绑定手机号',
-          desc: '可提升账号安全和风控可信度，后续操作更顺畅。',
-        }
-      }
-      return { visible: false, title: '', desc: '', type: 'none' }
-    },
-
     topTipText() {
       if (this.activities.length > 0) {
         return '📍 未获取位置，已按默认坐标展示活动'
@@ -426,12 +386,9 @@ export default {
   
     onUnload() {
       uni.$off('showPrivacyPopup')
-    },
+  },
 
   async onShow() {
-    this.syncAccountGuideState()
-    setTimeout(() => this.syncAccountGuideState(), 300)
-    setTimeout(() => this.syncAccountGuideState(), 1200)
     await this.ensureAdminVisibility()
     // #ifdef MP-WEIXIN
     wx.getSetting({
@@ -463,25 +420,8 @@ export default {
 
 
   methods: {
-    syncAccountGuideState() {
-      const gd = getApp().globalData || {}
-      this.accountGuideState = {
-        isLoggedIn: !!gd.isLoggedIn,
-        phoneVerified: !!gd.phoneVerified,
-        identityCheckRequired: !!gd.identityCheckRequired,
-        identityCheckStatus: gd.identityCheckStatus || 'none',
-      }
-    },
     goCalendar() {
       uni.navigateTo({ url: '/pages/calendar/index' })
-    },
-    goAccountGuide() {
-      const type = this.accountGuide?.type || 'none'
-      if (type === 'scheme2') {
-        uni.navigateTo({ url: '/pages/verify/index' })
-        return
-      }
-      uni.switchTab({ url: '/pages/mine/index' })
     },
 
     async touchSubscriptionState(action) {
@@ -731,7 +671,6 @@ export default {
         console.error('加载活动失败', e)
       } finally {
         this.loading = false
-        this.syncAccountGuideState()
       }
 	},
 
@@ -752,7 +691,6 @@ export default {
         uni.showToast({ title: '加载失败，请重试', icon: 'none' })
       } finally {
         this.loading = false
-        this.syncAccountGuideState()
       }
     },
 
@@ -838,39 +776,6 @@ export default {
 .data-badge--real-default .data-badge-desc {
   color: #295fa6;
 }
-.account-guide {
-  margin: 10rpx 16rpx 8rpx;
-  padding: 18rpx 18rpx;
-  border-radius: 14rpx;
-  background: #fff7ed;
-  border: 1rpx solid #fed7aa;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16rpx;
-}
-.account-guide-main {
-  flex: 1;
-}
-.account-guide-title {
-  display: block;
-  font-size: 26rpx;
-  font-weight: 700;
-  color: #9a3412;
-}
-.account-guide-desc {
-  margin-top: 6rpx;
-  display: block;
-  font-size: 22rpx;
-  color: #b45309;
-  line-height: 1.45;
-}
-.account-guide-arrow {
-  font-size: 24rpx;
-  color: #9a3412;
-  font-weight: 700;
-}
-
 .calendar-entry {
   margin: 10rpx 16rpx 8rpx;
   padding: 16rpx 18rpx;

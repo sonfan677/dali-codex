@@ -320,6 +320,19 @@
       </button>
     </view>
 
+    <view v-if="showJoinPhoneBindDialog" class="phone-bind-mask" @tap="closeJoinPhoneBindDialog">
+      <view class="phone-bind-dialog" @tap.stop>
+        <text class="phone-bind-title">报名前先绑定手机号</text>
+        <text class="phone-bind-desc">用于账号安全与活动风控，不会向其他用户公开你的手机号。</text>
+        <button
+          class="phone-bind-confirm"
+          open-type="getPhoneNumber"
+          @getphonenumber="onJoinGetPhoneNumber"
+        >一键绑定并继续报名</button>
+        <text class="phone-bind-cancel" @tap="closeJoinPhoneBindDialog">暂不绑定</text>
+      </view>
+    </view>
+
   </view>
 
   <!-- 加载中 -->
@@ -356,6 +369,8 @@ export default {
       replyTarget: null,
       canCommentAsParticipant: false,
       canReplyAsPublisher: false,
+      showJoinPhoneBindDialog: false,
+      pendingJoinAfterPhoneBind: false,
     }
   },
 
@@ -987,10 +1002,47 @@ export default {
         // #endif
       })
     },
+    closeJoinPhoneBindDialog() {
+      this.showJoinPhoneBindDialog = false
+      this.pendingJoinAfterPhoneBind = false
+    },
+    async onJoinGetPhoneNumber(e) {
+      const code = e?.detail?.code || ''
+      if (!code) {
+        uni.showToast({ title: '你取消了手机号授权', icon: 'none' })
+        return
+      }
+      try {
+        const res = await callCloud('bindPhoneNumber', { code })
+        if (!res?.success) {
+          uni.showToast({ title: res?.message || '绑定失败，请重试', icon: 'none' })
+          return
+        }
+        const gd = getApp().globalData || {}
+        gd.phoneVerified = true
+        gd.mobileBindStatus = 'bound'
+        gd.mobileBoundAt = res.mobileBoundAt || new Date().toISOString()
+        this.showJoinPhoneBindDialog = false
+        uni.showToast({ title: '手机号绑定成功', icon: 'success' })
+        if (this.pendingJoinAfterPhoneBind) {
+          this.pendingJoinAfterPhoneBind = false
+          setTimeout(() => this.join(), 250)
+        }
+      } catch (err) {
+        console.error('报名前绑定手机号失败', err)
+        uni.showToast({ title: '绑定失败，请稍后再试', icon: 'none' })
+      }
+    },
     async join() {
       const isLoggedIn = getApp().globalData?.isLoggedIn
       if (!isLoggedIn) {
         uni.showToast({ title: '请先登录', icon: 'none' })
+        return
+      }
+      const phoneVerified = !!getApp().globalData?.phoneVerified
+      if (!phoneVerified) {
+        this.pendingJoinAfterPhoneBind = true
+        this.showJoinPhoneBindDialog = true
         return
       }
     
@@ -1656,6 +1708,54 @@ export default {
   margin-top: 10rpx;
   font-size: 22rpx;
   color: #999;
+}
+
+.phone-bind-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.phone-bind-dialog {
+  width: 84%;
+  background: #fff;
+  border-radius: 18rpx;
+  padding: 34rpx 30rpx 28rpx;
+}
+.phone-bind-title {
+  display: block;
+  font-size: 30rpx;
+  font-weight: 700;
+  color: #1A1A1A;
+}
+.phone-bind-desc {
+  margin-top: 14rpx;
+  display: block;
+  font-size: 24rpx;
+  color: #667085;
+  line-height: 1.6;
+}
+.phone-bind-confirm {
+  margin-top: 26rpx;
+  width: 100%;
+  height: 84rpx;
+  line-height: 84rpx;
+  border-radius: 12rpx;
+  background: #1A3C5E;
+  color: #fff;
+  font-size: 28rpx;
+  border: none;
+}
+.phone-bind-confirm::after { border: none; }
+.phone-bind-cancel {
+  margin-top: 18rpx;
+  display: block;
+  text-align: center;
+  font-size: 24rpx;
+  color: #98A2B3;
 }
 
 .bottom-bar {

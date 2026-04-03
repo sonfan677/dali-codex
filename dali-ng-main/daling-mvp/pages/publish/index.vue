@@ -154,6 +154,19 @@
       </button>
     </view>
 
+    <view v-if="showPhoneBindDialog" class="phone-bind-mask" @tap="closePhoneBindDialog">
+      <view class="phone-bind-dialog" @tap.stop>
+        <text class="phone-bind-title">发布前先完成手机号绑定</text>
+        <text class="phone-bind-desc">仅用于账号安全与风险防护，不会向其他用户展示你的手机号。</text>
+        <button
+          class="phone-bind-confirm"
+          open-type="getPhoneNumber"
+          @getphonenumber="onPublishGetPhoneNumber"
+        >一键绑定并继续</button>
+        <text class="phone-bind-cancel" @tap="closePhoneBindDialog">暂不绑定</text>
+      </view>
+    </view>
+
   </view>
 </template>
 
@@ -194,6 +207,7 @@ export default {
     const defaultHour = now.getHours() + 1 >= 24 ? 0 : now.getHours() + 1
     return {
       submitting: false,
+      showPhoneBindDialog: false,
 	  scrollTop: 0,
       minParticipantsDisplay: '',
       form: {
@@ -357,8 +371,47 @@ _doChooseLocation() {
       return list.length ? list.join('；') : '当前账号需补充身份核验'
     },
 
+    closePhoneBindDialog() {
+      this.showPhoneBindDialog = false
+    },
+
+    async onPublishGetPhoneNumber(e) {
+      const code = e?.detail?.code || ''
+      if (!code) {
+        uni.showToast({ title: '你取消了手机号授权', icon: 'none' })
+        return
+      }
+      try {
+        const res = await callCloud('bindPhoneNumber', { code })
+        if (!res?.success) {
+          uni.showToast({ title: res?.message || '绑定失败，请重试', icon: 'none' })
+          return
+        }
+        const gd = getApp().globalData || {}
+        gd.phoneVerified = true
+        gd.mobileBindStatus = 'bound'
+        gd.mobileBoundAt = res.mobileBoundAt || new Date().toISOString()
+        this.userStore.phoneVerified = true
+        this.userStore.mobileBindStatus = 'bound'
+        this.userStore.mobileBoundAt = gd.mobileBoundAt
+        this.showPhoneBindDialog = false
+        uni.showToast({ title: '手机号绑定成功', icon: 'success' })
+        setTimeout(() => {
+          this.submit()
+        }, 250)
+      } catch (err) {
+        console.error('发布前绑定手机号失败', err)
+        uni.showToast({ title: '绑定失败，请稍后再试', icon: 'none' })
+      }
+    },
+
     async submit() {
       const gd = getApp().globalData || {}
+      const phoneVerified = !!(gd.phoneVerified || this.userStore.phoneVerified)
+      if (!phoneVerified) {
+        this.showPhoneBindDialog = true
+        return
+      }
       const isVerified = gd.isVerified || this.userStore.isVerified
       if (!isVerified) {
         uni.showModal({
@@ -516,6 +569,54 @@ _doChooseLocation() {
 .picker-value       { font-size: 30rpx; color: #333; flex: 1; }
 .picker-placeholder { font-size: 30rpx; color: #ccc; flex: 1; }
 .arrow { font-size: 36rpx; color: #ccc; }
+
+.phone-bind-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.phone-bind-dialog {
+  width: 84%;
+  background: #fff;
+  border-radius: 18rpx;
+  padding: 34rpx 30rpx 28rpx;
+}
+.phone-bind-title {
+  display: block;
+  font-size: 30rpx;
+  font-weight: 700;
+  color: #1A1A1A;
+}
+.phone-bind-desc {
+  margin-top: 14rpx;
+  display: block;
+  font-size: 24rpx;
+  color: #667085;
+  line-height: 1.6;
+}
+.phone-bind-confirm {
+  margin-top: 26rpx;
+  width: 100%;
+  height: 84rpx;
+  line-height: 84rpx;
+  border-radius: 12rpx;
+  background: #1A3C5E;
+  color: #fff;
+  font-size: 28rpx;
+  border: none;
+}
+.phone-bind-confirm::after { border: none; }
+.phone-bind-cancel {
+  margin-top: 18rpx;
+  display: block;
+  text-align: center;
+  font-size: 24rpx;
+  color: #98A2B3;
+}
 
 .bottom-bar {
   position: fixed;
