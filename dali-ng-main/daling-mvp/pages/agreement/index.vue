@@ -4,7 +4,7 @@
 
       <!-- 页头 -->
       <text class="title">搭里用户协议</text>
-      <text class="date">最后更新：2026年3月</text>
+      <text class="date">最后更新：2026年4月</text>
       <text class="intro">请在使用搭里小程序前仔细阅读本协议。你注册、登录、浏览、发布、报名或继续使用搭里服务，即视为已阅读并同意本协议全部内容。</text>
 
       <!-- 一 -->
@@ -30,11 +30,11 @@
         </view>
         <view class="numbered-item">
           <text class="number">2.</text>
-          <text class="numbered-text">全量用户可在“我的”页完成手机号绑定（方案1），用于账号安全与风险防护。</text>
+          <text class="numbered-text">平台在报名、发布等关键动作中会触发资料完善与手机号绑定流程，用于账号安全与风险防护。</text>
         </view>
         <view class="numbered-item">
           <text class="number">3.</text>
-          <text class="numbered-text">发布活动前需完成身份核验；当账号触发风险策略（如被举报、高频组织）时，需补充身份核验（方案2）后方可继续发布。</text>
+          <text class="numbered-text">发布活动前需完成身份核验；当账号触发风险策略（如被举报、高频组织）时，需补充核验信息（包括真实姓名、身份证号码）后方可继续发布。</text>
         </view>
         <view class="numbered-item">
           <text class="number">4.</text>

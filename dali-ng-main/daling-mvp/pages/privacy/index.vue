@@ -4,7 +4,7 @@
 
       <!-- 页头 -->
       <text class="title">搭里隐私保护指引</text>
-      <text class="date">最后更新：2026年3月</text>
+      <text class="date">最后更新：2026年4月</text>
       <text class="intro">在使用搭里小程序前，请仔细阅读本指引。我们将向你说明会收集哪些信息、如何使用这些信息，以及你可以如何管理相关授权。</text>
 
       <!-- 一 -->
@@ -13,17 +13,20 @@
       <text class="item-title">1. 用户信息（昵称、头像）</text>
       <text class="item-body">用于创建和维护你的账号资料，并在活动发布、报名、留言互动、参与者列表、举报处理和管理员审核等场景中识别用户身份，便于活动交流与平台管理。</text>
 
-      <text class="item-title">2. 位置信息</text>
-      <text class="item-body">用于获取你当前的大致位置，展示附近正在发生的活动，并按距离进行排序和筛选，帮助你更高效地发现同城活动。仅在你主动授权后获取，不用于持续追踪。</text>
+      <text class="item-title">2. 剪贴板</text>
+      <text class="item-body">用于你主动点击“导出昵称”“导出报表”时，将文本复制到系统剪贴板，便于粘贴到表格或文档。我们不会在后台静默读取或上传你的剪贴板内容。</text>
 
-      <text class="item-title">3. 选择的位置信息</text>
-      <text class="item-body">用于你在发布活动或编辑活动时选择活动地点，并在活动详情页展示活动地址信息，帮助其他用户判断活动位置和参与距离。</text>
+      <text class="item-title">3. 位置信息</text>
+      <text class="item-body">用于获取你当前的大致位置，展示附近活动、按距离排序和筛选，帮助你更高效地发现同城活动。仅在你主动授权后获取，不用于持续追踪。</text>
 
-      <text class="item-title">4. 手机号</text>
-      <text class="item-body">用于账号安全校验（方案1：绑定手机号）、身份核验与风险场景复核（方案2：按需触发）。仅在你主动授权后使用，不向其他用户公开展示，也不用于营销推广。</text>
+      <text class="item-title">4. 选择的位置信息</text>
+      <text class="item-body">用于你在发布或编辑活动时手动选择活动地点，并在活动详情页展示地址，帮助其他用户判断活动位置和参与距离。</text>
 
-      <text class="item-title">5. 剪贴板</text>
-      <text class="item-body">用于发布者导出活动参与者昵称清单并复制到系统剪贴板，方便活动通知、名单整理和运营管理。</text>
+      <text class="item-title">5. 手机号</text>
+      <text class="item-body">用于账号安全校验与风险防护。我们在报名/发布等关键动作中触发手机号绑定流程，不向其他用户公开展示，也不用于营销推广。</text>
+
+      <text class="item-title">6. 身份证号码</text>
+      <text class="item-body">用于身份核验与风险场景复核（例如发布活动前核验、被举报或高风险行为触发复核）。仅用于平台安全治理与合规审核，加密存储，不向其他用户公开展示。</text>
 
       <!-- 二 -->
       <text class="section-title">二、信息的使用方式</text>
@@ -34,7 +37,11 @@
         </view>
         <view class="bullet-item">
           <text class="bullet">·</text>
-          <text class="bullet-text">手机号用于账号安全与风险控制：全量用户可自主绑定手机号，风险触发用户会进入补充核验流程；仅用于安全治理与实名核验。</text>
+          <text class="bullet-text">手机号用于账号安全与风险控制：在报名/发布等关键动作前触发绑定提示，未绑定时会提示后再继续流程。</text>
+        </view>
+        <view class="bullet-item">
+          <text class="bullet">·</text>
+          <text class="bullet-text">身份证号码仅用于身份核验与风险复核，不用于广告营销或用户画像扩展用途。</text>
         </view>
         <view class="bullet-item">
           <text class="bullet">·</text>
@@ -42,7 +49,7 @@
         </view>
         <view class="bullet-item">
           <text class="bullet">·</text>
-          <text class="bullet-text">剪贴板能力仅在你主动点击导出昵称等功能时调用，不会在后台静默读取你的剪贴板内容。</text>
+          <text class="bullet-text">剪贴板能力仅在你主动点击导出功能时调用，不会在后台静默读取你的剪贴板内容。</text>
         </view>
         <view class="bullet-item">
           <text class="bullet">·</text>
@@ -59,7 +66,7 @@
         </view>
         <view class="bullet-item">
           <text class="bullet">·</text>
-          <text class="bullet-text">手机号等敏感信息经加密处理后存储，平台仅在必要的审核和安全管理场景中使用。</text>
+          <text class="bullet-text">手机号、身份证号码等敏感信息经加密处理后存储，平台仅在必要的审核和安全管理场景中使用。</text>
         </view>
         <view class="bullet-item">
           <text class="bullet">·</text>
@@ -76,7 +83,7 @@
         </view>
         <view class="bullet-item">
           <text class="bullet">·</text>
-          <text class="bullet-text">你可随时通过小程序内的功能申请注销账号，注销后我们将在合理期限内删除或匿名化处理相关个人信息。</text>
+          <text class="bullet-text">你可随时通过小程序内的功能申请注销账号，注销后我们将在合理期限内删除或匿名化处理相关个人信息（法律法规另有要求的除外）。</text>
         </view>
         <view class="bullet-item">
           <text class="bullet">·</text>
