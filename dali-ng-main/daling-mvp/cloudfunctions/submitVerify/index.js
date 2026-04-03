@@ -9,15 +9,15 @@ function encrypt(str) {
 
 exports.main = async (event, context) => {
   const { OPENID } = cloud.getWXContext()
-  const { realName, phone, verifyProvider = 'manual' } = event
-  const provider = String(verifyProvider || 'manual')
+  const { realName, idCard } = event
+  const provider = 'manual'
 
   // 基础校验
   if (!realName || realName.trim().length < 2) {
     return { success: false, error: 'INVALID_NAME', message: '请填写真实姓名' }
   }
-  if (!/^1[3-9]\d{9}$/.test(phone)) {
-    return { success: false, error: 'INVALID_PHONE', message: '请填写正确的手机号' }
+  if (!/^\d{17}[\dXx]$/.test(String(idCard || '').trim())) {
+    return { success: false, error: 'INVALID_ID_CARD', message: '请填写正确的身份证号' }
   }
 
   // 检查是否已提交过
@@ -30,7 +30,7 @@ exports.main = async (event, context) => {
   }
 
   if (users[0].verifyStatus === 'approved') {
-    return { success: false, error: 'ALREADY_VERIFIED', message: '你已经完成实名认证' }
+    return { success: false, error: 'ALREADY_VERIFIED', message: '你已经完成身份核验' }
   }
 
   // 加密存储
@@ -38,15 +38,12 @@ exports.main = async (event, context) => {
   await db.collection('users').where({ _openid: OPENID }).update({
     data: {
       realName: encrypt(realName.trim()),
-      phone: encrypt(phone),
-      phoneVerified: true,
-      mobileBindStatus: 'bound',
-      mobileBoundAt: db.serverDate(),
+      idCard: encrypt(String(idCard || '').trim().toUpperCase()),
       verifyStatus: 'pending',
-      verifyProvider: provider === 'wechat_official' ? 'wechat_official' : 'manual',
+      verifyProvider: provider,
       identityCheckRequired: true,
       identityCheckStatus: 'pending',
-      officialVerifyStatus: provider === 'wechat_official' ? 'pending_callback' : (users[0].officialVerifyStatus || 'not_started'),
+      verifySubmittedAt: db.serverDate(),
       updatedAt: db.serverDate(),
     }
   })
@@ -64,9 +61,7 @@ exports.main = async (event, context) => {
         targetType: 'user',
         action: 'verify_request',
         actionType: 'verify_request',
-        reason: provider === 'wechat_official'
-          ? '用户申请实名认证（微信官方通道）'
-          : `用户申请实名认证：${realName.trim().slice(0,1)}**`,
+        reason: `用户申请身份核验：${realName.trim().slice(0,1)}**`,
         cityId,
         expiresAt: null,
         rollbackAt: null,
@@ -82,5 +77,5 @@ exports.main = async (event, context) => {
     console.error('写入adminActions失败', e)
   }
 
-  return { success: true, verifyProvider: provider === 'wechat_official' ? 'wechat_official' : 'manual' }
+  return { success: true, verifyProvider: provider }
 }

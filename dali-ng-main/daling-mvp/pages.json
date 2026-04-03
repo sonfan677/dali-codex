@@ -30,7 +30,7 @@
     },
     {
       "path": "pages/verify/index",
-      "style": { "navigationBarTitleText": "实名认证" }
+      "style": { "navigationBarTitleText": "身份核验" }
     },
 	{
 	  "path": "pages/admin/index",

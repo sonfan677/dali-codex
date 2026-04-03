@@ -14,7 +14,7 @@
       <!-- 标签 -->
       <view class="tags">
         <text v-if="activity.isRecommended" class="tag tag--recommend">官方推荐</text>
-        <text v-if="activity.isVerified"    class="tag tag--verified">已实名发布</text>
+        <text v-if="activity.isVerified"    class="tag tag--verified">已核验发布</text>
         <text class="tag tag--category">{{ categoryLabel }}</text>
         <text class="tag tag--trust">{{ trustStars }} {{ trustIdentity }}</text>
         <text
@@ -320,6 +320,27 @@
       </button>
     </view>
 
+    <view v-if="showJoinProfileDialog" class="phone-bind-mask" @tap="closeJoinProfileDialog">
+      <view class="phone-bind-dialog" @tap.stop>
+        <text class="phone-bind-title">报名前先完善资料</text>
+        <text class="phone-bind-desc">请先设置头像和用户名，方便活动中识别你的身份。</text>
+        <view class="profile-editor">
+          <button class="profile-avatar-btn" open-type="chooseAvatar" @chooseavatar="onJoinChooseAvatar">
+            <image v-if="joinProfileDraftAvatar" class="profile-avatar-img" :src="joinProfileDraftAvatar" mode="aspectFill" />
+            <text v-else class="profile-avatar-tip">设置头像</text>
+          </button>
+          <input
+            v-model="joinProfileDraftNickname"
+            class="profile-nickname-input"
+            maxlength="20"
+            placeholder="请输入用户名"
+          />
+        </view>
+        <button class="phone-bind-confirm" @tap="saveJoinProfileAndContinue">保存并继续报名</button>
+        <text class="phone-bind-cancel" @tap="closeJoinProfileDialog">稍后再说</text>
+      </view>
+    </view>
+
     <view v-if="showJoinPhoneBindDialog" class="phone-bind-mask" @tap="closeJoinPhoneBindDialog">
       <view class="phone-bind-dialog" @tap.stop>
         <text class="phone-bind-title">报名前先绑定手机号</text>
@@ -369,8 +390,12 @@ export default {
       replyTarget: null,
       canCommentAsParticipant: false,
       canReplyAsPublisher: false,
+      showJoinProfileDialog: false,
       showJoinPhoneBindDialog: false,
+      joinProfileDraftNickname: '',
+      joinProfileDraftAvatar: '',
       pendingJoinAfterPhoneBind: false,
+      pendingJoinAfterProfile: false,
     }
   },
 
@@ -1002,6 +1027,49 @@ export default {
         // #endif
       })
     },
+    initJoinProfileDraft() {
+      const gd = getApp().globalData || {}
+      this.joinProfileDraftNickname = String(gd.nickname || '').trim()
+      this.joinProfileDraftAvatar = String(gd.avatarUrl || '').trim()
+    },
+    closeJoinProfileDialog() {
+      this.showJoinProfileDialog = false
+      this.pendingJoinAfterProfile = false
+    },
+    onJoinChooseAvatar(e) {
+      this.joinProfileDraftAvatar = String(e?.detail?.avatarUrl || '').trim()
+    },
+    async saveJoinProfileAndContinue() {
+      const nickname = String(this.joinProfileDraftNickname || '').trim()
+      const avatarUrl = String(this.joinProfileDraftAvatar || '').trim()
+      if (!avatarUrl) {
+        uni.showToast({ title: '请先设置头像', icon: 'none' })
+        return
+      }
+      if (!nickname) {
+        uni.showToast({ title: '请先填写用户名', icon: 'none' })
+        return
+      }
+      try {
+        const res = await callCloud('login', { nickname, avatarUrl })
+        if (!res?.success) {
+          uni.showToast({ title: '保存资料失败，请重试', icon: 'none' })
+          return
+        }
+        const gd = getApp().globalData || {}
+        gd.nickname = nickname
+        gd.avatarUrl = avatarUrl
+        this.showJoinProfileDialog = false
+        uni.showToast({ title: '资料已完善', icon: 'success' })
+        if (this.pendingJoinAfterProfile) {
+          this.pendingJoinAfterProfile = false
+          setTimeout(() => this.join(), 250)
+        }
+      } catch (err) {
+        console.error('报名前完善资料失败', err)
+        uni.showToast({ title: '保存失败，请稍后重试', icon: 'none' })
+      }
+    },
     closeJoinPhoneBindDialog() {
       this.showJoinPhoneBindDialog = false
       this.pendingJoinAfterPhoneBind = false
@@ -1034,12 +1102,21 @@ export default {
       }
     },
     async join() {
-      const isLoggedIn = getApp().globalData?.isLoggedIn
+      const gd = getApp().globalData || {}
+      const isLoggedIn = !!gd.isLoggedIn
       if (!isLoggedIn) {
         uni.showToast({ title: '请先登录', icon: 'none' })
         return
       }
-      const phoneVerified = !!getApp().globalData?.phoneVerified
+      const nickname = String(gd.nickname || '').trim()
+      const avatarUrl = String(gd.avatarUrl || '').trim()
+      if (!nickname || !avatarUrl) {
+        this.pendingJoinAfterProfile = true
+        this.initJoinProfileDraft()
+        this.showJoinProfileDialog = true
+        return
+      }
+      const phoneVerified = !!gd.phoneVerified
       if (!phoneVerified) {
         this.pendingJoinAfterPhoneBind = true
         this.showJoinPhoneBindDialog = true
@@ -1756,6 +1833,43 @@ export default {
   text-align: center;
   font-size: 24rpx;
   color: #98A2B3;
+}
+.profile-editor {
+  margin-top: 16rpx;
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+}
+.profile-avatar-btn {
+  width: 96rpx;
+  height: 96rpx;
+  border-radius: 50%;
+  border: none;
+  background: #eef4fb;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.profile-avatar-btn::after { border: none; }
+.profile-avatar-img {
+  width: 100%;
+  height: 100%;
+}
+.profile-avatar-tip {
+  font-size: 22rpx;
+  color: #1A3C5E;
+}
+.profile-nickname-input {
+  flex: 1;
+  height: 72rpx;
+  border-radius: 10rpx;
+  background: #f5f7fa;
+  padding: 0 18rpx;
+  font-size: 26rpx;
+  color: #1a1a1a;
 }
 
 .bottom-bar {

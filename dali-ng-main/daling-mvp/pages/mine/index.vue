@@ -13,24 +13,15 @@
 
       <!-- 用户信息卡片 -->
       <view class="user-card">
-        <button
-          v-if="!userInfo.avatarUrl"
-          class="avatar avatar-btn"
-          open-type="chooseAvatar"
-          @chooseavatar="onChooseAvatar"
-        >
-          <text class="avatar-tip">点击设置头像</text>
-        </button>
         <image
-          v-else
           class="avatar"
-          :src="userInfo.avatarUrl"
+          :src="userInfo.avatarUrl || '/static/default-avatar.png'"
           mode="aspectFill"
         />
         <view class="user-info">
           <text class="nickname">{{ userInfo.nickname || '搭里用户' }}</text>
           <view class="badges">
-            <text v-if="userInfo.isVerified" class="badge badge--verified">✅ 已实名</text>
+            <text v-if="userInfo.isVerified" class="badge badge--verified">✅ 已核验</text>
             <text v-else-if="userInfo.verifyStatus === 'pending'" class="badge badge--pending">
               {{ pendingBadgeText }}
             </text>
@@ -289,28 +280,6 @@ export default {
       }
 	  
     },
-    async onChooseAvatar(e) {
-	  const avatarUrl = e.detail.avatarUrl
-	  uni.showModal({
-	    title: '设置昵称',
-	    editable: true,
-	    placeholderText: '请输入你的昵称',
-	    success: async (res) => {
-	      if (res.confirm) {
-            const nickname = res.content || '搭里用户'
-	        try {
-	          await callCloud('login', { nickname, avatarUrl })
-	          this.userInfo.avatarUrl = avatarUrl
-	          this.userInfo.nickname = nickname
-	          uni.showToast({ title: '设置成功', icon: 'success' })
-	        } catch(e) {
-	          uni.showToast({ title: '设置失败，请重试', icon: 'none' })
-	        }
-	      }
-	    }
-      })
-    },
-
     calcUserRiskScore(user = {}) {
       const noShowCount = Number(user.noShowCount || 0)
       const reportAgainstCount = Number(user.reportAgainstCount || 0)
@@ -515,24 +484,6 @@ export default {
 }
 .footer-link { font-size: 24rpx; color: #999; }
 .footer-sep  { font-size: 24rpx; color: #ccc; }
-.avatar-btn {
-  background: rgba(255,255,255,0.2);
-  border: none;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 120rpx;
-  height: 120rpx;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-.avatar-tip {
-  font-size: 20rpx;
-  color: rgba(255,255,255,0.8);
-  text-align: center;
-  line-height: 1.3;
-}
 .admin-entry {
   margin-top: 20rpx;
   padding: 16rpx 24rpx;

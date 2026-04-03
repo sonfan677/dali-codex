@@ -34,7 +34,7 @@
         </view>
         <view class="numbered-item">
           <text class="number">3.</text>
-          <text class="numbered-text">发布活动前需完成实名认证；当账号触发风险策略（如被举报、高频组织）时，需补充身份核验（方案2）后方可继续发布。</text>
+          <text class="numbered-text">发布活动前需完成身份核验；当账号触发风险策略（如被举报、高频组织）时，需补充身份核验（方案2）后方可继续发布。</text>
         </view>
         <view class="numbered-item">
           <text class="number">4.</text>

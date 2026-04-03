@@ -201,13 +201,13 @@ async function markHighFrequencyOrganizerIfNeeded(openid = '') {
 exports.main = async (event, context) => {
   const { OPENID } = cloud.getWXContext()
 
-  // 1. 校验实名认证
+  // 1. 校验身份核验状态
   const { data: users } = await db.collection('users')
     .where({ _openid: OPENID })
     .get()
 
   if (!users.length || !users[0].isVerified) {
-    return { success: false, error: 'NOT_VERIFIED', message: '请先完成实名认证' }
+    return { success: false, error: 'NOT_VERIFIED', message: '请先完成身份核验' }
   }
 
   const user = users[0]

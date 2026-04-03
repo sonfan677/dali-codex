@@ -154,6 +154,27 @@
       </button>
     </view>
 
+    <view v-if="showProfileDialog" class="phone-bind-mask" @tap="closeProfileDialog">
+      <view class="phone-bind-dialog" @tap.stop>
+        <text class="phone-bind-title">发布前先完善资料</text>
+        <text class="phone-bind-desc">请先设置头像和用户名，方便活动中识别你的身份。</text>
+        <view class="profile-editor">
+          <button class="profile-avatar-btn" open-type="chooseAvatar" @chooseavatar="onPublishChooseAvatar">
+            <image v-if="profileDraftAvatar" class="profile-avatar-img" :src="profileDraftAvatar" mode="aspectFill" />
+            <text v-else class="profile-avatar-tip">设置头像</text>
+          </button>
+          <input
+            v-model="profileDraftNickname"
+            class="profile-nickname-input"
+            maxlength="20"
+            placeholder="请输入用户名"
+          />
+        </view>
+        <button class="phone-bind-confirm" @tap="saveProfileAndContinuePublish">保存并继续</button>
+        <text class="phone-bind-cancel" @tap="closeProfileDialog">稍后再说</text>
+      </view>
+    </view>
+
     <view v-if="showPhoneBindDialog" class="phone-bind-mask" @tap="closePhoneBindDialog">
       <view class="phone-bind-dialog" @tap.stop>
         <text class="phone-bind-title">发布前先完成手机号绑定</text>
@@ -207,7 +228,10 @@ export default {
     const defaultHour = now.getHours() + 1 >= 24 ? 0 : now.getHours() + 1
     return {
       submitting: false,
+      showProfileDialog: false,
       showPhoneBindDialog: false,
+      profileDraftNickname: '',
+      profileDraftAvatar: '',
 	  scrollTop: 0,
       minParticipantsDisplay: '',
       form: {
@@ -371,6 +395,52 @@ _doChooseLocation() {
       return list.length ? list.join('；') : '当前账号需补充身份核验'
     },
 
+    initProfileDraft() {
+      const gd = getApp().globalData || {}
+      const nickname = String(gd.nickname || this.userStore.nickname || '').trim()
+      const avatarUrl = String(gd.avatarUrl || this.userStore.avatarUrl || '').trim()
+      this.profileDraftNickname = nickname
+      this.profileDraftAvatar = avatarUrl
+    },
+    closeProfileDialog() {
+      this.showProfileDialog = false
+    },
+    onPublishChooseAvatar(e) {
+      this.profileDraftAvatar = String(e?.detail?.avatarUrl || '').trim()
+    },
+    async saveProfileAndContinuePublish() {
+      const nickname = String(this.profileDraftNickname || '').trim()
+      const avatarUrl = String(this.profileDraftAvatar || '').trim()
+      if (!avatarUrl) {
+        uni.showToast({ title: '请先设置头像', icon: 'none' })
+        return
+      }
+      if (!nickname) {
+        uni.showToast({ title: '请先填写用户名', icon: 'none' })
+        return
+      }
+      try {
+        const res = await callCloud('login', { nickname, avatarUrl })
+        if (!res?.success) {
+          uni.showToast({ title: '保存资料失败，请重试', icon: 'none' })
+          return
+        }
+        const gd = getApp().globalData || {}
+        gd.nickname = nickname
+        gd.avatarUrl = avatarUrl
+        this.userStore.nickname = nickname
+        this.userStore.avatarUrl = avatarUrl
+        this.showProfileDialog = false
+        uni.showToast({ title: '资料已完善', icon: 'success' })
+        setTimeout(() => {
+          this.submit()
+        }, 250)
+      } catch (err) {
+        console.error('发布前完善资料失败', err)
+        uni.showToast({ title: '保存失败，请稍后重试', icon: 'none' })
+      }
+    },
+
     closePhoneBindDialog() {
       this.showPhoneBindDialog = false
     },
@@ -407,6 +477,13 @@ _doChooseLocation() {
 
     async submit() {
       const gd = getApp().globalData || {}
+      const nickname = String(gd.nickname || this.userStore.nickname || '').trim()
+      const avatarUrl = String(gd.avatarUrl || this.userStore.avatarUrl || '').trim()
+      if (!nickname || !avatarUrl) {
+        this.initProfileDraft()
+        this.showProfileDialog = true
+        return
+      }
       const phoneVerified = !!(gd.phoneVerified || this.userStore.phoneVerified)
       if (!phoneVerified) {
         this.showPhoneBindDialog = true
@@ -415,9 +492,9 @@ _doChooseLocation() {
       const isVerified = gd.isVerified || this.userStore.isVerified
       if (!isVerified) {
         uni.showModal({
-          title: '需要实名认证',
-          content: '发布活动需要先完成实名认证',
-          confirmText: '去认证',
+          title: '需要身份核验',
+          content: '发布活动需要先完成身份核验',
+          confirmText: '去核验',
           success: (res) => {
             if (res.confirm) uni.navigateTo({ url: '/pages/verify/index' })
           }
@@ -494,7 +571,7 @@ _doChooseLocation() {
             return
           }
           const msgs = {
-            NOT_VERIFIED:  '请先完成实名认证',
+            NOT_VERIFIED:  '请先完成身份核验',
             IDENTITY_CHECK_REQUIRED: '当前账号需补充身份核验',
             INVALID_TITLE: '标题格式有误',
             INVALID_CATEGORY: '请选择有效活动分类',
@@ -616,6 +693,43 @@ _doChooseLocation() {
   text-align: center;
   font-size: 24rpx;
   color: #98A2B3;
+}
+.profile-editor {
+  margin-top: 16rpx;
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+}
+.profile-avatar-btn {
+  width: 96rpx;
+  height: 96rpx;
+  border-radius: 50%;
+  border: none;
+  background: #eef4fb;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.profile-avatar-btn::after { border: none; }
+.profile-avatar-img {
+  width: 100%;
+  height: 100%;
+}
+.profile-avatar-tip {
+  font-size: 22rpx;
+  color: #1A3C5E;
+}
+.profile-nickname-input {
+  flex: 1;
+  height: 72rpx;
+  border-radius: 10rpx;
+  background: #f5f7fa;
+  padding: 0 18rpx;
+  font-size: 26rpx;
+  color: #1a1a1a;
 }
 
 .bottom-bar {
