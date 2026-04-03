@@ -2,6 +2,7 @@ const cloud = require('wx-server-sdk')
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 const db = cloud.database()
 const _ = db.command
+const VERIFY_AUTO_APPROVE_DEFAULT_MINUTES = 10
 
 const DEFAULT_CITY_CONFIG = {
   cityId: 'dali',
@@ -123,6 +124,80 @@ function normalizeIdentityReasons(raw) {
   return [...new Set(list)].slice(0, 8)
 }
 
+function toTimestamp(value) {
+  const ms = new Date(value).getTime()
+  return Number.isFinite(ms) ? ms : NaN
+}
+
+function resolveVerifyAutoApproveMinutes() {
+  const mins = Number(process.env.VERIFY_AUTO_APPROVE_MINUTES || VERIFY_AUTO_APPROVE_DEFAULT_MINUTES)
+  if (!Number.isFinite(mins) || mins <= 0) return VERIFY_AUTO_APPROVE_DEFAULT_MINUTES
+  return Math.max(1, Math.min(120, Math.round(mins)))
+}
+
+async function maybeAutoApprovePendingVerify(user = null, openid = '') {
+  if (!user?._id || !openid) return { autoApproved: false, userPatch: {} }
+  if (String(user.verifyStatus || '') !== 'pending') return { autoApproved: false, userPatch: {} }
+  const submitTs = toTimestamp(user.verifySubmittedAt || user.updatedAt || user.createdAt)
+  if (!Number.isFinite(submitTs)) return { autoApproved: false, userPatch: {} }
+
+  const windowMinutes = resolveVerifyAutoApproveMinutes()
+  if (Date.now() - submitTs < windowMinutes * 60 * 1000) return { autoApproved: false, userPatch: {} }
+
+  const updateRes = await db.collection('users').doc(user._id).update({
+    data: {
+      isVerified: true,
+      verifyStatus: 'approved',
+      identityCheckRequired: false,
+      identityCheckStatus: 'approved',
+      verifyAutoApproved: true,
+      verifyAutoApprovedAt: db.serverDate(),
+      verifyAutoPendingReview: true,
+      verifyAutoWindowMinutes: windowMinutes,
+      verifyFinalDecisionSource: 'auto',
+      verifyReviewedAt: null,
+      updatedAt: db.serverDate(),
+    },
+  }).catch(() => ({ stats: { updated: 0 } }))
+
+  if (Number(updateRes?.stats?.updated || 0) <= 0) return { autoApproved: false, userPatch: {} }
+
+  try {
+    await db.collection('adminActions').add({
+      data: {
+        actionId: `verify_auto_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        adminId: 'system',
+        adminOpenid: 'system',
+        adminRole: 'system',
+        targetId: openid,
+        targetType: 'user',
+        action: 'verify_auto_approved',
+        actionType: 'verify_auto_approved',
+        reason: `身份核验提交超过${windowMinutes}分钟未人工审核，系统自动通过（待人工复核）`,
+        result: '系统自动通过，待管理员复核',
+        actionSource: 'system',
+        canAutoExecute: true,
+        manualOverride: false,
+        cityId: user.cityId || 'dali',
+        createdAt: db.serverDate(),
+        updatedAt: db.serverDate(),
+      },
+    })
+  } catch (e) {}
+
+  return {
+    autoApproved: true,
+    userPatch: {
+      isVerified: true,
+      verifyStatus: 'approved',
+      identityCheckRequired: false,
+      identityCheckStatus: 'approved',
+      verifyAutoApproved: true,
+      verifyAutoPendingReview: true,
+    },
+  }
+}
+
 async function loadCityConfig(cityId = 'dali') {
   const finalCityId = cityId || DEFAULT_CITY_CONFIG.cityId
   try {
@@ -206,11 +281,23 @@ exports.main = async (event, context) => {
     .where({ _openid: OPENID })
     .get()
 
-  if (!users.length || !users[0].isVerified) {
+  if (!users.length) {
     return { success: false, error: 'NOT_VERIFIED', message: '请先完成身份核验' }
   }
 
-  const user = users[0]
+  let user = users[0]
+  const autoApproveResult = await maybeAutoApprovePendingVerify(user, OPENID)
+  if (autoApproveResult.autoApproved) {
+    user = {
+      ...user,
+      ...(autoApproveResult.userPatch || {}),
+    }
+  }
+
+  if (!user.isVerified) {
+    return { success: false, error: 'NOT_VERIFIED', message: '请先完成身份核验' }
+  }
+
   const identityCheckRequired = !!user.identityCheckRequired
   const identityCheckStatus = String(user.identityCheckStatus || 'none')
   if (identityCheckRequired && identityCheckStatus !== 'approved') {

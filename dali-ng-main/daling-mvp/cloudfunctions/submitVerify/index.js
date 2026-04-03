@@ -44,6 +44,12 @@ exports.main = async (event, context) => {
       identityCheckRequired: true,
       identityCheckStatus: 'pending',
       verifySubmittedAt: db.serverDate(),
+      verifyAutoApproved: false,
+      verifyAutoApprovedAt: null,
+      verifyAutoPendingReview: false,
+      verifyAutoWindowMinutes: null,
+      verifyFinalDecisionSource: 'manual_submit',
+      verifyReviewedAt: null,
       updatedAt: db.serverDate(),
     }
   })

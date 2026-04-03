@@ -162,6 +162,110 @@ function calcUserRiskScore(user = {}) {
   return Math.max(0, Math.min(100, Math.round(score)))
 }
 
+const VERIFY_AUTO_APPROVE_DEFAULT_MINUTES = 10
+
+function toTimestamp(value) {
+  const ms = new Date(value).getTime()
+  return Number.isFinite(ms) ? ms : NaN
+}
+
+function resolveVerifyAutoApproveMinutes() {
+  const mins = Number(process.env.VERIFY_AUTO_APPROVE_MINUTES || VERIFY_AUTO_APPROVE_DEFAULT_MINUTES)
+  if (!Number.isFinite(mins) || mins <= 0) return VERIFY_AUTO_APPROVE_DEFAULT_MINUTES
+  return Math.max(1, Math.min(120, Math.round(mins)))
+}
+
+async function autoApprovePendingVerifyUsers(pendingUsers = [], options = {}) {
+  const windowMinutes = Number(options.windowMinutes || VERIFY_AUTO_APPROVE_DEFAULT_MINUTES)
+  if (!Array.isArray(pendingUsers) || !pendingUsers.length) {
+    return { updatedCount: 0, updatedOpenids: [], windowMinutes, latestAutoApprovedAt: null }
+  }
+
+  const nowMs = Date.now()
+  const thresholdMs = nowMs - windowMinutes * 60 * 1000
+  const targetRows = pendingUsers.filter((item) => {
+    if (!item || !item._id || !item._openid) return false
+    if (String(item.verifyStatus || '') !== 'pending') return false
+    const submitTs = toTimestamp(item.verifySubmittedAt || item.updatedAt || item.createdAt)
+    return Number.isFinite(submitTs) && submitTs <= thresholdMs
+  })
+
+  if (!targetRows.length) {
+    return { updatedCount: 0, updatedOpenids: [], windowMinutes, latestAutoApprovedAt: null }
+  }
+
+  const updatedOpenids = []
+  let latestAutoApprovedAt = null
+
+  for (const item of targetRows) {
+    try {
+      await db.collection('users').doc(item._id).update({
+        data: {
+          isVerified: true,
+          verifyStatus: 'approved',
+          identityCheckRequired: false,
+          identityCheckStatus: 'approved',
+          verifyAutoApproved: true,
+          verifyAutoApprovedAt: db.serverDate(),
+          verifyAutoPendingReview: true,
+          verifyAutoWindowMinutes: windowMinutes,
+          verifyFinalDecisionSource: 'auto',
+          verifyReviewedAt: null,
+          updatedAt: db.serverDate(),
+        },
+      })
+
+      const cityId = item.cityId || 'dali'
+      await db.collection('adminActions').add({
+        data: {
+          actionId: `verify_auto_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          adminId: 'system',
+          adminOpenid: 'system',
+          adminRole: 'system',
+          targetId: item._openid,
+          targetType: 'user',
+          action: 'verify_auto_approved',
+          actionType: 'verify_auto_approved',
+          reason: `身份核验提交超过${windowMinutes}分钟未人工审核，系统自动通过（待人工复核）`,
+          result: '系统自动通过，待管理员复核',
+          actionSource: 'system',
+          canAutoExecute: true,
+          manualOverride: false,
+          beforeState: {
+            verifyStatus: item.verifyStatus || 'pending',
+            isVerified: !!item.isVerified,
+            identityCheckStatus: item.identityCheckStatus || 'pending',
+            verifySubmittedAt: item.verifySubmittedAt || null,
+          },
+          afterState: {
+            verifyStatus: 'approved',
+            isVerified: true,
+            identityCheckStatus: 'approved',
+            verifyAutoPendingReview: true,
+          },
+          cityId,
+          outcomeVerified: null,
+          outcomeNote: null,
+          createdAt: db.serverDate(),
+          updatedAt: db.serverDate(),
+        },
+      })
+
+      updatedOpenids.push(item._openid)
+      latestAutoApprovedAt = new Date().toISOString()
+    } catch (e) {
+      console.error('自动通过身份核验失败', item._openid, e)
+    }
+  }
+
+  return {
+    updatedCount: updatedOpenids.length,
+    updatedOpenids,
+    windowMinutes,
+    latestAutoApprovedAt,
+  }
+}
+
 exports.main = async () => {
   const { OPENID } = cloud.getWXContext()
   const meta = parseAdminMeta(OPENID)
@@ -176,8 +280,13 @@ exports.main = async () => {
       .field({
         _id: true,
         _openid: true,
+        cityId: true,
         nickname: true,
         avatarUrl: true,
+        verifyStatus: true,
+        isVerified: true,
+        identityCheckRequired: true,
+        identityCheckStatus: true,
         verifyProvider: true,
         officialVerifyStatus: true,
         officialVerifyTicket: true,
@@ -246,6 +355,7 @@ exports.main = async () => {
           'official_verify_alert',
           'official_verify_alert_immediate',
           'official_verify_callback',
+          'verify_auto_approved',
           'ops_patrol_run',
           'ops_patrol_alert',
         ]),
@@ -347,6 +457,12 @@ exports.main = async () => {
         identityCheckStatus: true,
         identityCheckReasons: true,
         identityCheckTriggeredAt: true,
+        verifyAutoApproved: true,
+        verifyAutoApprovedAt: true,
+        verifyAutoPendingReview: true,
+        verifyAutoWindowMinutes: true,
+        verifyFinalDecisionSource: true,
+        verifyReviewedAt: true,
         realName: true,
         phone: true,
         createdAt: true,
@@ -357,6 +473,47 @@ exports.main = async () => {
   ])
 
   const shouldFilterCity = meta.adminRole === 'cityAdmin'
+  const rawPendingUsers = pendingUsersRes.data || []
+  const pendingUsersInScope = shouldFilterCity
+    ? rawPendingUsers.filter((item) => !item.cityId || item.cityId === meta.cityId)
+    : rawPendingUsers
+  const autoVerifySummary = await autoApprovePendingVerifyUsers(
+    pendingUsersInScope,
+    { windowMinutes: resolveVerifyAutoApproveMinutes() }
+  )
+  const autoUpdatedOpenidSet = new Set(autoVerifySummary.updatedOpenids || [])
+  const pendingVerifyList = pendingUsersInScope
+    .filter((item) => !autoUpdatedOpenidSet.has(item._openid))
+    .sort((a, b) => toTimestamp(b.verifySubmittedAt || b.updatedAt || b.createdAt) - toTimestamp(a.verifySubmittedAt || a.updatedAt || a.createdAt))
+
+  const autoReviewUsersRes = await db.collection('users')
+    .where({ verifyAutoPendingReview: true })
+    .limit(200)
+    .field({
+      _id: true,
+      _openid: true,
+      nickname: true,
+      avatarUrl: true,
+      cityId: true,
+      verifyStatus: true,
+      isVerified: true,
+      verifyProvider: true,
+      verifySubmittedAt: true,
+      verifyAutoApprovedAt: true,
+      verifyAutoWindowMinutes: true,
+      verifyFinalDecisionSource: true,
+      verifyReviewedAt: true,
+      updatedAt: true,
+    })
+    .get()
+    .catch(() => ({ data: [] }))
+  const autoVerifyReviewList = ((autoReviewUsersRes.data || []).filter((item) => {
+    if (!shouldFilterCity) return true
+    return !item.cityId || item.cityId === meta.cityId
+  }))
+    .sort((a, b) => toTimestamp(b.verifyAutoApprovedAt || b.updatedAt) - toTimestamp(a.verifyAutoApprovedAt || a.updatedAt))
+    .slice(0, 80)
+
   const activityList = shouldFilterCity
     ? (activitiesRes.data || []).filter((item) => !item.cityId || item.cityId === meta.cityId).slice(0, 120)
     : (activitiesRes.data || []).slice(0, 120)
@@ -418,7 +575,7 @@ exports.main = async () => {
     ipDenied: 0,
   })
 
-  const pendingOfficialCount = (pendingUsersRes.data || [])
+  const pendingOfficialCount = (pendingVerifyList || [])
     .filter((item) => item.verifyProvider === 'wechat_official' || item.officialVerifyStatus === 'pending_callback')
     .length
 
@@ -574,7 +731,14 @@ exports.main = async () => {
     currentOpenid: OPENID,
     adminRole: meta.adminRole,
     cityId: meta.cityId,
-    pendingVerifyList: pendingUsersRes.data || [],
+    pendingVerifyList,
+    autoVerifyReviewList,
+    autoVerifySummary: {
+      pendingReviewCount: autoVerifyReviewList.length,
+      autoApprovedThisLoadCount: autoVerifySummary.updatedCount || 0,
+      windowMinutes: autoVerifySummary.windowMinutes || resolveVerifyAutoApproveMinutes(),
+      latestAutoApprovedAt: autoVerifySummary.latestAutoApprovedAt || null,
+    },
     officialVerifyAudit: {
       summary: {
         ...officialVerifyAuditSummary,

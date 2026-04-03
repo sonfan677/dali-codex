@@ -3,6 +3,7 @@ cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 const db = cloud.database()
 const _ = db.command
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000
+const VERIFY_AUTO_APPROVE_DEFAULT_MINUTES = 10
 
 function calcUserRiskScore(user = {}) {
   const noShowCount = Number(user.noShowCount || 0)
@@ -46,6 +47,88 @@ function shouldPromptNearbySubscription(subscriptions, nowMs = Date.now()) {
   return nowMs - lastPromptMs > SEVEN_DAYS_MS
 }
 
+function resolveVerifyAutoApproveMinutes() {
+  const mins = Number(process.env.VERIFY_AUTO_APPROVE_MINUTES || VERIFY_AUTO_APPROVE_DEFAULT_MINUTES)
+  if (!Number.isFinite(mins) || mins <= 0) return VERIFY_AUTO_APPROVE_DEFAULT_MINUTES
+  return Math.max(1, Math.min(120, Math.round(mins)))
+}
+
+function toTimestamp(input) {
+  const ms = new Date(input).getTime()
+  return Number.isFinite(ms) ? ms : NaN
+}
+
+async function maybeAutoApprovePendingVerify(user = null, openid = '') {
+  if (!user || !openid) return { autoApproved: false, userPatch: {} }
+  if (String(user.verifyStatus || '') !== 'pending') return { autoApproved: false, userPatch: {} }
+
+  const windowMinutes = resolveVerifyAutoApproveMinutes()
+  const submitTs = toTimestamp(user.verifySubmittedAt || user.updatedAt || user.createdAt)
+  if (!Number.isFinite(submitTs)) return { autoApproved: false, userPatch: {} }
+  if (Date.now() - submitTs < windowMinutes * 60 * 1000) return { autoApproved: false, userPatch: {} }
+
+  const updateRes = await db.collection('users')
+    .where({ _openid: openid, verifyStatus: 'pending' })
+    .update({
+      data: {
+        isVerified: true,
+        verifyStatus: 'approved',
+        identityCheckRequired: false,
+        identityCheckStatus: 'approved',
+        verifyAutoApproved: true,
+        verifyAutoApprovedAt: db.serverDate(),
+        verifyAutoPendingReview: true,
+        verifyAutoWindowMinutes: windowMinutes,
+        verifyFinalDecisionSource: 'auto',
+        verifyReviewedAt: null,
+        updatedAt: db.serverDate(),
+      },
+    })
+    .catch(() => ({ stats: { updated: 0 } }))
+
+  const updatedCount = Number(updateRes?.stats?.updated || 0)
+  if (updatedCount <= 0) return { autoApproved: false, userPatch: {} }
+
+  try {
+    await db.collection('adminActions').add({
+      data: {
+        actionId: `verify_auto_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        adminId: 'system',
+        adminOpenid: 'system',
+        adminRole: 'system',
+        targetId: openid,
+        targetType: 'user',
+        action: 'verify_auto_approved',
+        actionType: 'verify_auto_approved',
+        reason: `身份核验提交超过${windowMinutes}分钟未人工审核，系统自动通过（待人工复核）`,
+        result: '系统自动通过，待管理员复核',
+        actionSource: 'system',
+        canAutoExecute: true,
+        manualOverride: false,
+        cityId: user.cityId || 'dali',
+        createdAt: db.serverDate(),
+        updatedAt: db.serverDate(),
+      },
+    })
+  } catch (e) {}
+
+  return {
+    autoApproved: true,
+    userPatch: {
+      isVerified: true,
+      verifyStatus: 'approved',
+      identityCheckRequired: false,
+      identityCheckStatus: 'approved',
+      verifyAutoApproved: true,
+      verifyAutoApprovedAt: new Date().toISOString(),
+      verifyAutoPendingReview: true,
+      verifyAutoWindowMinutes: windowMinutes,
+      verifyFinalDecisionSource: 'auto',
+      verifyReviewedAt: null,
+    },
+  }
+}
+
 function buildReservedUserPatch(user = {}, cityId, todayKey) {
   const patch = {}
   if (!user.cityId) patch.cityId = cityId
@@ -79,6 +162,12 @@ function buildReservedUserPatch(user = {}, cityId, todayKey) {
   if (typeof user.officialVerifyLastCallbackAt === 'undefined') patch.officialVerifyLastCallbackAt = null
   if (typeof user.officialVerifyLastEventKey === 'undefined') patch.officialVerifyLastEventKey = null
   if (typeof user.officialVerifyLastError === 'undefined') patch.officialVerifyLastError = ''
+  if (typeof user.verifyAutoApproved !== 'boolean') patch.verifyAutoApproved = false
+  if (typeof user.verifyAutoApprovedAt === 'undefined') patch.verifyAutoApprovedAt = null
+  if (typeof user.verifyAutoPendingReview !== 'boolean') patch.verifyAutoPendingReview = false
+  if (typeof user.verifyAutoWindowMinutes !== 'number') patch.verifyAutoWindowMinutes = null
+  if (typeof user.verifyFinalDecisionSource !== 'string') patch.verifyFinalDecisionSource = ''
+  if (typeof user.verifyReviewedAt === 'undefined') patch.verifyReviewedAt = null
   if (typeof user.subscribeNearbyActivity !== 'boolean') patch.subscribeNearbyActivity = false
   if (!user.subscriptions || typeof user.subscriptions !== 'object') {
     patch.subscriptions = normalizeSubscriptions({})
@@ -135,6 +224,12 @@ exports.main = async (event, context) => {
         officialVerifyLastCallbackAt: null,
         officialVerifyLastEventKey: null,
         officialVerifyLastError: '',
+        verifyAutoApproved: false,
+        verifyAutoApprovedAt: null,
+        verifyAutoPendingReview: false,
+        verifyAutoWindowMinutes: null,
+        verifyFinalDecisionSource: '',
+        verifyReviewedAt: null,
         subscribeNearbyActivity: false,
         publishCount: 0,
         joinCount: 0,
@@ -195,7 +290,12 @@ exports.main = async (event, context) => {
   }
 
   const currentUser = users[0]
-  const reservedPatch = buildReservedUserPatch(currentUser, cityId, todayKey)
+  const autoApproveResult = await maybeAutoApprovePendingVerify(currentUser, OPENID)
+  const runtimeUser = {
+    ...currentUser,
+    ...(autoApproveResult.userPatch || {}),
+  }
+  const reservedPatch = buildReservedUserPatch(runtimeUser, cityId, todayKey)
 
   // 老用户：如果传入了昵称或头像则更新
   const basePatch = {
@@ -205,15 +305,15 @@ exports.main = async (event, context) => {
     lastLoginAt: db.serverDate(),
     updatedAt: db.serverDate(),
     ...reservedPatch,
-    userRiskScore: calcUserRiskScore(currentUser),
+    userRiskScore: calcUserRiskScore(runtimeUser),
   }
 
   if (event.nickname || event.avatarUrl) {
     await db.collection('users').where({ _openid: OPENID }).update({
       data: {
         ...basePatch,
-        nickname: event.nickname || users[0].nickname,
-        avatarUrl: event.avatarUrl || users[0].avatarUrl,
+        nickname: event.nickname || runtimeUser.nickname,
+        avatarUrl: event.avatarUrl || runtimeUser.avatarUrl,
       }
     })
   } else {
@@ -222,20 +322,20 @@ exports.main = async (event, context) => {
     })
   }
 
-  const nickname = event.nickname || users[0].nickname || ''
-  const avatarUrl = event.avatarUrl || users[0].avatarUrl || ''
+  const nickname = event.nickname || runtimeUser.nickname || ''
+  const avatarUrl = event.avatarUrl || runtimeUser.avatarUrl || ''
   const mergedUser = {
-    ...currentUser,
+    ...runtimeUser,
     ...reservedPatch,
-    cityId: currentUser.cityId || cityId,
+    cityId: runtimeUser.cityId || cityId,
   }
   const subscriptions = normalizeSubscriptions(mergedUser.subscriptions)
 
   return {
     success: true,
     isNewUser: false,
-    isVerified: users[0].isVerified,
-    verifyStatus: users[0].verifyStatus,
+    isVerified: !!mergedUser.isVerified,
+    verifyStatus: mergedUser.verifyStatus || 'none',
     verifyProvider: mergedUser.verifyProvider || 'manual',
     phoneVerified: !!mergedUser.phoneVerified,
     mobileBindStatus: mergedUser.mobileBindStatus || (mergedUser.phoneVerified ? 'bound' : 'unbound'),

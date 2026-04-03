@@ -37,7 +37,7 @@
         class="tab"
         :class="{ 'tab--active': activeTab === 'verify' }"
         @tap="activeTab = 'verify'"
-      >待审核认证 {{ pendingVerifyList.length > 0 ? '(' + pendingVerifyList.length + ')' : '' }}</view>
+      >待审核认证 {{ verifyTabCount > 0 ? '(' + verifyTabCount + ')' : '' }}</view>
       <view
         class="tab"
         :class="{ 'tab--active': activeTab === 'reports' }"
@@ -546,12 +546,12 @@
                 @tap="ignoreReportQuick(item.raw)"
               >一键忽略</button>
               <button
-                v-if="item.type === 'verify'"
+                v-if="item.type === 'verify' || item.type === 'verify_auto'"
                 class="action-btn action-btn--approve"
                 @tap="verifyUserQuick(item.raw._openid, 'verify')"
               >一键通过</button>
               <button
-                v-if="item.type === 'verify'"
+                v-if="item.type === 'verify' || item.type === 'verify_auto'"
                 class="action-btn action-btn--reject"
                 @tap="verifyUserQuick(item.raw._openid, 'reject_verify')"
               >一键驳回</button>
@@ -565,6 +565,31 @@
                 class="action-btn action-btn--unrecommend"
                 @tap="recommendActivity(item.raw._id, 'unrecommend')"
               >取消推荐</button>
+            </view>
+          </view>
+        </view>
+
+        <view class="card">
+          <view class="title-row">
+            <text class="card-title">自动通过待复核</text>
+            <text class="status-pill status-pill--pending">{{ displayAutoVerifyReviewTodoList.length }}</text>
+          </view>
+          <view v-if="displayAutoVerifyReviewTodoList.length === 0" class="empty empty--inline">
+            <text class="empty-text">暂无自动通过待复核项</text>
+          </view>
+          <view
+            v-for="item in displayAutoVerifyReviewTodoList"
+            :key="`auto_verify_todo_${item._id}`"
+            class="todo-item todo-item--overdue"
+          >
+            <view class="title-row">
+              <text class="card-sub">{{ item.nickname || shortOpenid(item._openid) }}</text>
+              <text class="card-openid">自动通过 {{ autoVerifyAgoText(item.verifyAutoApprovedAt) }}</text>
+            </view>
+            <text class="card-openid">{{ item._openid ? item._openid.slice(0, 20) + '...' : '--' }}</text>
+            <view class="card-actions">
+              <button class="action-btn action-btn--approve" @tap="verifyUserQuick(item._openid, 'verify')">维持通过</button>
+              <button class="action-btn action-btn--reject" @tap="verifyUserQuick(item._openid, 'reject_verify')">改判驳回</button>
             </view>
           </view>
         </view>
@@ -843,7 +868,33 @@
 
       <!-- 待审核认证 -->
       <template v-else-if="activeTab === 'verify'">
-        <view v-if="filteredPendingVerifyList.length === 0" class="empty">
+        <view v-if="filteredAutoVerifyReviewList.length > 0" class="card card--warn">
+          <view class="title-row">
+            <text class="card-title">系统自动通过待复核（优先）</text>
+            <text class="status-pill status-pill--pending">{{ filteredAutoVerifyReviewList.length }}</text>
+          </view>
+          <view
+            v-for="item in filteredAutoVerifyReviewList"
+            :key="`auto_verify_${item._id}`"
+            class="todo-item todo-item--overdue"
+          >
+            <view class="title-row">
+              <text class="card-sub">{{ item.nickname || shortOpenid(item._openid) }}</text>
+              <text class="card-openid">自动通过 {{ autoVerifyAgoText(item.verifyAutoApprovedAt) }}</text>
+            </view>
+            <text class="card-openid">
+              通道：{{ item.verifyProvider === 'wechat_official' ? '微信官方' : '人工审核' }}
+              · 状态：{{ item.verifyStatus || 'approved' }}
+            </text>
+            <text class="card-openid">{{ item._openid ? item._openid.slice(0,20) + '...' : '--' }}</text>
+            <view class="card-actions">
+              <button class="action-btn action-btn--approve" @tap="verifyUserQuick(item._openid, 'verify')">维持通过</button>
+              <button class="action-btn action-btn--reject" @tap="verifyUserQuick(item._openid, 'reject_verify')">改判驳回</button>
+            </view>
+          </view>
+        </view>
+
+        <view v-if="filteredAutoVerifyReviewList.length === 0 && filteredPendingVerifyList.length === 0" class="empty">
           <text class="empty-text">暂无待审核认证</text>
         </view>
         <view
@@ -855,7 +906,7 @@
             <image class="mini-avatar" :src="item.avatarUrl || '/static/default-avatar.png'" mode="aspectFill" />
             <view class="card-text">
               <text class="card-title">{{ item.nickname || '未知用户' }}</text>
-              <text class="card-sub">申请实名认证</text>
+              <text class="card-sub">申请身份核验</text>
               <text class="card-openid">
                 通道：{{ item.verifyProvider === 'wechat_official' ? '微信官方' : '人工审核' }}
                 {{ item.officialVerifyStatus ? ` · 状态:${item.officialVerifyStatus}` : '' }}
@@ -1384,6 +1435,14 @@ export default {
       adminRole: '',
       cityId: '',
       pendingVerifyList: [],
+      autoVerifyReviewList: [],
+      autoVerifySummary: {
+        pendingReviewCount: 0,
+        autoApprovedThisLoadCount: 0,
+        windowMinutes: 10,
+        latestAutoApprovedAt: null,
+      },
+      autoVerifyReminderToken: '',
       officialVerifyAudit: {
         summary: {
           total: 0,
@@ -1506,6 +1565,10 @@ export default {
 
     activeActivityCount() {
       return this.activityList.filter((item) => ['OPEN', 'FULL'].includes(item.status)).length
+    },
+
+    verifyTabCount() {
+      return this.pendingVerifyList.length + (this.autoVerifyReviewList || []).length
     },
 
     adminRoleLabel() {
@@ -1670,6 +1733,30 @@ export default {
       return this.pendingVerifyTodoList.filter((item) => item.isOverSla)
     },
 
+    autoVerifyReviewTodoList() {
+      const keyword = this.normalizeKeyword(this.searchKeyword)
+      const nowTs = Date.now()
+      return (this.autoVerifyReviewList || [])
+        .map((item) => {
+          const autoTs = this.toTimestamp(item.verifyAutoApprovedAt || item.updatedAt)
+          const waitHours = Number.isFinite(autoTs) ? Math.max(0, (nowTs - autoTs) / 3600000) : 0
+          return {
+            ...item,
+            waitHours,
+            waitHoursText: this.formatHoursText(waitHours),
+            isOverSla: true,
+            _searchText: [item.nickname, item._openid].join(' '),
+          }
+        })
+        .filter((item) => !keyword || String(item._searchText || '').toLowerCase().includes(keyword))
+        .sort((a, b) => this.toTimestamp(b.verifyAutoApprovedAt || b.updatedAt) - this.toTimestamp(a.verifyAutoApprovedAt || a.updatedAt))
+    },
+
+    displayAutoVerifyReviewTodoList() {
+      if (!this.todoOnlyOverdue) return this.autoVerifyReviewTodoList
+      return this.autoVerifyReviewTodoList
+    },
+
     upcomingActivityTodoList() {
       const keyword = this.normalizeKeyword(this.searchKeyword)
       const nowTs = Date.now()
@@ -1700,18 +1787,23 @@ export default {
     },
 
     todoTotalCount() {
-      return this.pendingReportTodoList.length + this.pendingVerifyTodoList.length + this.upcomingActivityTodoList.length
+      return this.pendingReportTodoList.length
+        + this.pendingVerifyTodoList.length
+        + this.autoVerifyReviewTodoList.length
+        + this.upcomingActivityTodoList.length
     },
 
     todoViewTotalCount() {
       return this.displayPendingReportTodoList.length
         + this.displayPendingVerifyTodoList.length
+        + this.displayAutoVerifyReviewTodoList.length
         + this.displayUpcomingActivityTodoList.length
     },
 
     overdueTodoCount() {
       return this.pendingReportTodoList.filter((item) => item.isOverSla).length
         + this.pendingVerifyTodoList.filter((item) => item.isOverSla).length
+        + this.autoVerifyReviewTodoList.length
         + this.upcomingActivityTodoList.filter((item) => item.isUrgent).length
     },
 
@@ -1736,7 +1828,8 @@ export default {
         newReportsToday,
         closedToday,
         overdueUnhandled: this.pendingReportTodoList.filter((item) => item.isOverSla).length
-          + this.pendingVerifyTodoList.filter((item) => item.isOverSla).length,
+          + this.pendingVerifyTodoList.filter((item) => item.isOverSla).length
+          + this.autoVerifyReviewTodoList.length,
         upcoming24h: this.upcomingActivityTodoList.length,
       }
     },
@@ -1766,6 +1859,18 @@ export default {
         raw: item,
       }))
 
+      const autoVerifyRows = this.displayAutoVerifyReviewTodoList.map((item) => ({
+        queueId: `verify_auto_${item._id}`,
+        type: 'verify_auto',
+        typeLabel: '自动通过待复核',
+        isRisk: true,
+        urgencyText: `自动通过后 ${item.waitHoursText}`,
+        priorityScore: 320 + Math.round(Number(item.waitHours || 0)),
+        title: item.nickname || this.shortOpenid(item._openid) || '待复核用户',
+        subTitle: `OPENID：${item._openid ? `${item._openid.slice(0, 20)}...` : '--'}`,
+        raw: item,
+      }))
+
       const activityRows = this.displayUpcomingActivityTodoList.map((item) => {
         const startInHours = Number(item.startInHours)
         const safeStart = Number.isFinite(startInHours) ? Math.max(0, startInHours) : 24
@@ -1782,7 +1887,7 @@ export default {
         }
       })
 
-      return [...reportRows, ...verifyRows, ...activityRows]
+      return [...autoVerifyRows, ...reportRows, ...verifyRows, ...activityRows]
         .sort((a, b) => b.priorityScore - a.priorityScore)
         .slice(0, 8)
     },
@@ -1797,6 +1902,7 @@ export default {
 
     overdueVerifyTodoCount() {
       return this.pendingVerifyTodoList.filter((item) => item.isOverSla).length
+        + this.autoVerifyReviewTodoList.length
     },
 
     urgentActivityTodoCount() {
@@ -2333,6 +2439,15 @@ export default {
       ]))
     },
 
+    filteredAutoVerifyReviewList() {
+      const keyword = this.normalizeKeyword(this.searchKeyword)
+      if (!keyword) return this.autoVerifyReviewList
+      return this.autoVerifyReviewList.filter((item) => this.matchAny(keyword, [
+        item.nickname,
+        item._openid,
+      ]))
+    },
+
     filteredReportList() {
       const keyword = this.normalizeKeyword(this.searchKeyword)
       const filtered = this.reportList.filter((item) => {
@@ -2434,6 +2549,7 @@ export default {
       this.todoPrefReady = true
     }
     await this.loadData()
+    this.maybeAutoRemindAutoVerify()
     this.maybeAutoRemindRiskTodos()
   },
 
@@ -2846,13 +2962,54 @@ export default {
         this.goActivityDetail(item.raw?._id)
         return
       }
-      if (item.type === 'verify') {
+      if (item.type === 'verify' || item.type === 'verify_auto') {
         const openid = item.raw?._openid || ''
         this.activeTab = 'verify'
         this.$nextTick(() => {
           this.searchKeyword = openid
         })
       }
+    },
+
+    autoVerifyAgoText(value) {
+      const ts = this.toTimestamp(value)
+      if (!Number.isFinite(ts)) return '--'
+      const mins = Math.max(0, Math.round((Date.now() - ts) / 60000))
+      if (mins < 60) return `${mins}分钟`
+      const hours = Math.round(mins / 60)
+      return `${hours}小时`
+    },
+
+    maybeAutoRemindAutoVerify() {
+      const summary = this.autoVerifySummary || {}
+      const pending = Number(summary.pendingReviewCount || 0)
+      if (!this.hasAccess || pending <= 0) return
+      const token = [
+        pending,
+        Number(summary.autoApprovedThisLoadCount || 0),
+        summary.latestAutoApprovedAt || '',
+      ].join('|')
+      if (token && token === this.autoVerifyReminderToken) return
+      this.autoVerifyReminderToken = token
+
+      const autoNowCount = Number(summary.autoApprovedThisLoadCount || 0)
+      const windowMinutes = Number(summary.windowMinutes || 10)
+      const lines = []
+      if (autoNowCount > 0) {
+        lines.push(`本次系统已自动通过 ${autoNowCount} 条超过${windowMinutes}分钟未审核的核验申请。`)
+      }
+      lines.push(`当前共有 ${pending} 条“自动通过待复核”记录，建议优先复核。`)
+      uni.showModal({
+        title: '核验自动通过提醒',
+        content: lines.join('\n'),
+        confirmText: '去复核',
+        cancelText: '稍后',
+        success: (res) => {
+          if (!res.confirm) return
+          this.activeTab = 'verify'
+          this.searchKeyword = ''
+        },
+      })
     },
 
     toggleExportField(fieldKey) {
@@ -3152,6 +3309,13 @@ export default {
         this.adminRole = res.adminRole || 'superAdmin'
         this.cityId = res.cityId || 'dali'
         this.pendingVerifyList = res.pendingVerifyList || []
+        this.autoVerifyReviewList = res.autoVerifyReviewList || []
+        this.autoVerifySummary = res.autoVerifySummary || {
+          pendingReviewCount: 0,
+          autoApprovedThisLoadCount: 0,
+          windowMinutes: 10,
+          latestAutoApprovedAt: null,
+        }
         this.officialVerifyAudit = res.officialVerifyAudit || {
           summary: {
             total: 0,
@@ -3633,8 +3797,9 @@ export default {
         recommend: '设为推荐',
         unrecommend: '取消推荐',
         hide: '手动下架活动',
-        verify: '通过实名认证',
-        reject_verify: '拒绝实名认证',
+        verify: '通过身份核验',
+        reject_verify: '拒绝身份核验',
+        verify_auto_approved: '系统自动通过（待复核）',
         official_verify_retry: '重试官方认证',
         official_verify_callback: '官方回调处理',
         official_verify_alert: '官方认证异常告警',
@@ -3678,6 +3843,7 @@ export default {
         recommend: 'status-pill--result-positive',
         verify: 'status-pill--result-positive',
         official_verify_callback: 'status-pill--result-positive',
+        verify_auto_approved: 'status-pill--result-neutral',
         unrecommend: 'status-pill--result-neutral',
         resolve_report_ignore: 'status-pill--result-neutral',
         official_verify_retry: 'status-pill--result-neutral',
@@ -5400,6 +5566,10 @@ export default {
   background: white; border-radius: 12rpx;
   padding: 24rpx 28rpx; margin-bottom: 16rpx;
   transition: all .22s ease;
+}
+.card--warn {
+  box-shadow: 0 0 0 1rpx #fecaca inset;
+  background: #fff7f7;
 }
 .card--flash-handled {
   box-shadow: 0 0 0 2rpx #1E7145 inset;

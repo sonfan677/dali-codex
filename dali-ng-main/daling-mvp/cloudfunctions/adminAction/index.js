@@ -261,13 +261,21 @@ exports.main = async (event) => {
             verifyStatus: 'approved',
             identityCheckRequired: false,
             identityCheckStatus: 'approved',
+            verifyAutoPendingReview: false,
+            verifyFinalDecisionSource: 'manual',
+            verifyReviewedAt: db.serverDate(),
             updatedAt: db.serverDate(),
           }
         : action === 'reject_verify'
           ? {
+              isVerified: false,
               verifyStatus: 'rejected',
               identityCheckRequired: true,
               identityCheckStatus: 'rejected',
+              verifyAutoPendingReview: false,
+              verifyAutoApproved: false,
+              verifyFinalDecisionSource: 'manual',
+              verifyReviewedAt: db.serverDate(),
               updatedAt: db.serverDate(),
             }
           : { isBanned: true, updatedAt: db.serverDate() }
@@ -276,9 +284,9 @@ exports.main = async (event) => {
       afterState = await getUserSnapshot(targetId)
       result = {
         message: action === 'verify'
-          ? '实名认证已通过'
+          ? '身份核验已通过'
           : action === 'reject_verify'
-            ? '实名认证已拒绝'
+            ? '身份核验已拒绝'
             : '用户已封禁'
       }
       break
