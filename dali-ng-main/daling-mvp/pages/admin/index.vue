@@ -4623,6 +4623,8 @@ export default {
         '城市',
         '实名状态',
         '实名通道',
+        '手机号绑定',
+        '风控分',
         '方案2状态',
         '方案2触发原因',
         '被举报次数',
@@ -4638,7 +4640,7 @@ export default {
       ])
 
       if (users.length === 0) {
-        append(['-', '-', '-', '-', '-', '-', '-', '-', 0, 0, 0, 0, 0, 0, '-', '-', '-', '-'])
+        append(['-', '-', '-', '-', '-', '-', '-', 0, '-', '-', 0, 0, 0, 0, 0, 0, '-', '-', '-', '-'])
       } else {
         users.forEach((item, index) => {
           append([
@@ -4648,6 +4650,8 @@ export default {
             item.cityId || '',
             this.scheme2StatusText(item.verifyStatus || 'none'),
             item.verifyProvider || '',
+            item.phoneVerified ? '已绑定' : '未绑定',
+            Number(item.userRiskScore || 0),
             this.scheme2StatusText(item.identityCheckStatus || 'none'),
             this.scheme2ReasonText(item.identityCheckReasons || []),
             Number(item.reportAgainstCount || 0),

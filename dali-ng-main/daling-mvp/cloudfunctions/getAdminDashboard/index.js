@@ -148,6 +148,20 @@ function normalizeIdentityReasons(raw) {
     .slice(0, 8)
 }
 
+function calcUserRiskScore(user = {}) {
+  const noShowCount = Number(user.noShowCount || 0)
+  const reportAgainstCount = Number(user.reportAgainstCount || 0)
+  const recentPublish7dCount = Number(user.recentPublish7dCount || 0)
+  const locationAnomalyCount = Number(user.locationAnomalyCount || 0)
+  const overloadPublishPenalty = Math.max(0, recentPublish7dCount - 5) * 3
+  const score = 100
+    - noShowCount * 12
+    - reportAgainstCount * 8
+    - locationAnomalyCount * 5
+    - overloadPublishPenalty
+  return Math.max(0, Math.min(100, Math.round(score)))
+}
+
 exports.main = async () => {
   const { OPENID } = cloud.getWXContext()
   const meta = parseAdminMeta(OPENID)
@@ -324,6 +338,11 @@ exports.main = async () => {
         noShowCount: true,
         reportAgainstCount: true,
         recentPublish7dCount: true,
+        locationAnomalyCount: true,
+        userRiskScore: true,
+        phoneVerified: true,
+        mobileBindStatus: true,
+        mobileBoundAt: true,
         identityCheckRequired: true,
         identityCheckStatus: true,
         identityCheckReasons: true,
@@ -513,6 +532,9 @@ exports.main = async () => {
       const realNamePlain = maybeDecodeSensitive(item.realName || '')
       const phonePlain = maybeDecodeSensitive(item.phone || '')
       const identityReasons = normalizeIdentityReasons(item.identityCheckReasons)
+      const computedRiskScore = calcUserRiskScore(item)
+      const rawRiskScore = Number(item.userRiskScore)
+      const riskScore = Number.isFinite(rawRiskScore) ? rawRiskScore : computedRiskScore
       return {
         _id: item._id,
         openid: item._openid || '',
@@ -527,6 +549,11 @@ exports.main = async () => {
         noShowCount: Number(item.noShowCount || 0),
         reportAgainstCount: Number(item.reportAgainstCount || 0),
         recentPublish7dCount: Number(item.recentPublish7dCount || 0),
+        locationAnomalyCount: Number(item.locationAnomalyCount || 0),
+        userRiskScore: riskScore,
+        phoneVerified: !!item.phoneVerified,
+        mobileBindStatus: item.mobileBindStatus || (item.phoneVerified ? 'bound' : 'unbound'),
+        mobileBoundAt: item.mobileBoundAt || null,
         identityCheckRequired: !!item.identityCheckRequired,
         identityCheckStatus: item.identityCheckStatus || 'none',
         identityCheckReasons: identityReasons,

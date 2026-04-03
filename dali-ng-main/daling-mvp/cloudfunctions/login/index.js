@@ -4,6 +4,20 @@ const db = cloud.database()
 const _ = db.command
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000
 
+function calcUserRiskScore(user = {}) {
+  const noShowCount = Number(user.noShowCount || 0)
+  const reportAgainstCount = Number(user.reportAgainstCount || 0)
+  const recentPublish7dCount = Number(user.recentPublish7dCount || 0)
+  const locationAnomalyCount = Number(user.locationAnomalyCount || 0)
+  const overloadPublishPenalty = Math.max(0, recentPublish7dCount - 5) * 3
+  const score = 100
+    - noShowCount * 12
+    - reportAgainstCount * 8
+    - locationAnomalyCount * 5
+    - overloadPublishPenalty
+  return Math.max(0, Math.min(100, Math.round(score)))
+}
+
 function toChinaDateKey(input = Date.now()) {
   const ms = new Date(input).getTime()
   const chinaMs = ms + 8 * 60 * 60 * 1000
@@ -47,6 +61,10 @@ function buildReservedUserPatch(user = {}, cityId, todayKey) {
   if (typeof user.inactivityPenaltyAt === 'undefined') patch.inactivityPenaltyAt = null
   if (typeof user.currentDecayRate === 'undefined') patch.currentDecayRate = null
   if (!user.verifyProvider) patch.verifyProvider = 'manual'
+  if (typeof user.phoneVerified !== 'boolean') patch.phoneVerified = false
+  if (!user.mobileBindStatus) patch.mobileBindStatus = 'unbound'
+  if (typeof user.mobileBoundAt === 'undefined') patch.mobileBoundAt = null
+  if (typeof user.userRiskScore !== 'number') patch.userRiskScore = calcUserRiskScore(user)
   if (typeof user.identityCheckRequired !== 'boolean') patch.identityCheckRequired = false
   if (!user.identityCheckStatus) patch.identityCheckStatus = 'none'
   if (!Array.isArray(user.identityCheckReasons)) patch.identityCheckReasons = []
@@ -99,6 +117,10 @@ exports.main = async (event, context) => {
         isVerified: false,
         verifyStatus: 'none',
         verifyProvider: 'manual',
+        phoneVerified: false,
+        mobileBindStatus: 'unbound',
+        mobileBoundAt: null,
+        userRiskScore: 100,
         identityCheckRequired: false,
         identityCheckStatus: 'none',
         identityCheckReasons: [],
@@ -145,10 +167,14 @@ exports.main = async (event, context) => {
     return {
       success: true,
       isNewUser: true,
-      isVerified: false,
-      verifyStatus: 'none',
-      verifyProvider: 'manual',
-      officialVerifyStatus: 'not_started',
+    isVerified: false,
+    verifyStatus: 'none',
+    verifyProvider: 'manual',
+    phoneVerified: false,
+    mobileBindStatus: 'unbound',
+    mobileBoundAt: null,
+    userRiskScore: 100,
+    officialVerifyStatus: 'not_started',
       officialVerifyTicket: null,
       officialVerifiedAt: null,
       officialVerifyRetryCount: 0,
@@ -175,6 +201,7 @@ exports.main = async (event, context) => {
     lastLoginAt: db.serverDate(),
     updatedAt: db.serverDate(),
     ...reservedPatch,
+    userRiskScore: calcUserRiskScore(currentUser),
   }
 
   if (event.nickname || event.avatarUrl) {
@@ -206,6 +233,12 @@ exports.main = async (event, context) => {
     isVerified: users[0].isVerified,
     verifyStatus: users[0].verifyStatus,
     verifyProvider: mergedUser.verifyProvider || 'manual',
+    phoneVerified: !!mergedUser.phoneVerified,
+    mobileBindStatus: mergedUser.mobileBindStatus || (mergedUser.phoneVerified ? 'bound' : 'unbound'),
+    mobileBoundAt: mergedUser.mobileBoundAt || null,
+    userRiskScore: Number.isFinite(Number(mergedUser.userRiskScore))
+      ? Number(mergedUser.userRiskScore)
+      : calcUserRiskScore(mergedUser),
     officialVerifyStatus: mergedUser.officialVerifyStatus || 'not_started',
     officialVerifyTicket: mergedUser.officialVerifyTicket || null,
     officialVerifiedAt: mergedUser.officialVerifiedAt || null,

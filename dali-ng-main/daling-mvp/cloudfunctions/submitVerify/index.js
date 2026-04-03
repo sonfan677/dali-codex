@@ -39,6 +39,9 @@ exports.main = async (event, context) => {
     data: {
       realName: encrypt(realName.trim()),
       phone: encrypt(phone),
+      phoneVerified: true,
+      mobileBindStatus: 'bound',
+      mobileBoundAt: db.serverDate(),
       verifyStatus: 'pending',
       verifyProvider: provider === 'wechat_official' ? 'wechat_official' : 'manual',
       identityCheckRequired: true,

@@ -35,6 +35,18 @@
               {{ verifyBadgeText }}
             </text>
           </view>
+          <view class="scheme1-row">
+            <text class="scheme1-label">方案1状态：</text>
+            <text class="scheme1-value" :class="userInfo.phoneVerified ? 'scheme1-value--ok' : 'scheme1-value--warn'">
+              {{ userInfo.phoneVerified ? (userInfo.phoneMasked ? `已绑定手机号 ${userInfo.phoneMasked}` : '已绑定手机号') : '未绑定手机号' }}
+            </text>
+          </view>
+          <button
+            v-if="!userInfo.phoneVerified"
+            class="phone-bind-btn"
+            open-type="getPhoneNumber"
+            @getphonenumber="onGetPhoneNumber"
+          >一键绑定手机号</button>
         </view>
         <view class="stats">
           <view class="stat-item">
@@ -53,8 +65,8 @@
 
         <view class="credit-row">
           <view class="credit-item">
-            <text class="credit-label">信用分</text>
-            <text class="credit-value">{{ creditScoreText }}</text>
+            <text class="credit-label">风控分</text>
+            <text class="credit-value">{{ riskScoreText }}</text>
           </view>
           <view class="credit-item">
             <text class="credit-label">到场率</text>
@@ -173,10 +185,18 @@ export default {
         isVerified: false,
         verifyStatus: 'none',
         verifyProvider: 'manual',
+        phoneVerified: false,
+        mobileBindStatus: 'unbound',
+        mobileBoundAt: null,
+        phoneMasked: '',
+        userRiskScore: 100,
         reliabilityScore: null,
         historicalCompletionRate: null,
         noShowCount: 0,
         attendCount: 0,
+        reportAgainstCount: 0,
+        recentPublish7dCount: 0,
+        locationAnomalyCount: 0,
       },
       publishCount: 0,
       joinCount: 0,
@@ -194,8 +214,8 @@ export default {
       }
       return '去认证 →'
     },
-    creditScoreText() {
-      const score = Number(this.userInfo.reliabilityScore)
+    riskScoreText() {
+      const score = Number(this.userInfo.userRiskScore)
       if (!Number.isFinite(score)) return '--'
       return `${Math.max(0, Math.min(100, Math.round(score)))}`
     },
@@ -243,10 +263,18 @@ export default {
             isVerified:   user.isVerified || false,
             verifyStatus: user.verifyStatus || 'none',
             verifyProvider: user.verifyProvider || 'manual',
+            phoneVerified: !!user.phoneVerified,
+            mobileBindStatus: user.mobileBindStatus || (user.phoneVerified ? 'bound' : 'unbound'),
+            mobileBoundAt: user.mobileBoundAt || null,
+            phoneMasked: this.maskPhone(user.phone),
+            userRiskScore: this.calcUserRiskScore(user),
             reliabilityScore: user.reliabilityScore ?? null,
             historicalCompletionRate: user.historicalCompletionRate ?? null,
             noShowCount: Number(user.noShowCount || 0),
             attendCount: Number(user.attendCount || 0),
+            reportAgainstCount: Number(user.reportAgainstCount || 0),
+            recentPublish7dCount: Number(user.recentPublish7dCount || 0),
+            locationAnomalyCount: Number(user.locationAnomalyCount || 0),
           }
           this.publishCount = user.publishCount || 0
           this.joinCount    = user.joinCount    || 0
@@ -255,6 +283,10 @@ export default {
           getApp().globalData.isVerified   = user.isVerified || false
           getApp().globalData.verifyStatus = user.verifyStatus || 'none'
           getApp().globalData.verifyProvider = user.verifyProvider || 'manual'
+          getApp().globalData.phoneVerified = !!user.phoneVerified
+          getApp().globalData.mobileBindStatus = user.mobileBindStatus || (user.phoneVerified ? 'bound' : 'unbound')
+          getApp().globalData.mobileBoundAt = user.mobileBoundAt || null
+          getApp().globalData.userRiskScore = this.calcUserRiskScore(user)
         }
         // #endif
       } catch(e) {
@@ -262,7 +294,7 @@ export default {
       }
 	  
     },
-	async onChooseAvatar(e) {
+    async onChooseAvatar(e) {
 	  const avatarUrl = e.detail.avatarUrl
 	  uni.showModal({
 	    title: '设置昵称',
@@ -281,8 +313,55 @@ export default {
 	        }
 	      }
 	    }
-	  })
-	},
+      })
+    },
+
+    maskPhone(raw = '') {
+      const text = String(raw || '').trim()
+      if (!text) return ''
+      if (/^1[3-9]\d{9}$/.test(text)) return `${text.slice(0, 3)}****${text.slice(-4)}`
+      return ''
+    },
+
+    calcUserRiskScore(user = {}) {
+      const noShowCount = Number(user.noShowCount || 0)
+      const reportAgainstCount = Number(user.reportAgainstCount || 0)
+      const recentPublish7dCount = Number(user.recentPublish7dCount || 0)
+      const locationAnomalyCount = Number(user.locationAnomalyCount || 0)
+      const overloadPublishPenalty = Math.max(0, recentPublish7dCount - 5) * 3
+      const score = 100
+        - noShowCount * 12
+        - reportAgainstCount * 8
+        - locationAnomalyCount * 5
+        - overloadPublishPenalty
+      return Math.max(0, Math.min(100, Math.round(score)))
+    },
+
+    async onGetPhoneNumber(e) {
+      const code = e?.detail?.code || ''
+      if (!code) {
+        uni.showToast({ title: '未获取到手机号凭证', icon: 'none' })
+        return
+      }
+      try {
+        const res = await callCloud('bindPhoneNumber', { code })
+        if (!res?.success) {
+          uni.showToast({ title: res?.message || '绑定失败，请重试', icon: 'none' })
+          return
+        }
+        this.userInfo.phoneVerified = true
+        this.userInfo.mobileBindStatus = 'bound'
+        this.userInfo.phoneMasked = res.phoneMasked || ''
+        getApp().globalData.phoneVerified = true
+        getApp().globalData.mobileBindStatus = 'bound'
+        uni.showToast({ title: '手机号绑定成功', icon: 'success' })
+        await this.loadUserInfo()
+      } catch (err) {
+        console.error('绑定手机号失败', err)
+        uni.showToast({ title: '绑定失败，请稍后重试', icon: 'none' })
+      }
+    },
+
 	goAdmin() {
 	  uni.navigateTo({ url: '/pages/admin/index' })
 	},
@@ -408,6 +487,34 @@ export default {
 .badge { font-size: 22rpx; padding: 4rpx 16rpx; border-radius: 20rpx; }
 .badge--verified { background: rgba(255,255,255,0.2); color: white; }
 .badge--pending  { background: rgba(255,255,255,0.15); color: rgba(255,255,255,0.8); }
+.scheme1-row {
+  margin-top: 10rpx;
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+}
+.scheme1-label {
+  font-size: 22rpx;
+  color: rgba(255,255,255,0.75);
+}
+.scheme1-value {
+  font-size: 22rpx;
+  color: rgba(255,255,255,0.95);
+}
+.scheme1-value--ok { color: #d1fadf; }
+.scheme1-value--warn { color: #fde68a; }
+.phone-bind-btn {
+  margin-top: 12rpx;
+  width: 240rpx;
+  height: 56rpx;
+  line-height: 56rpx;
+  border-radius: 999rpx;
+  background: #ffffff;
+  color: #1A3C5E;
+  font-size: 22rpx;
+  border: none;
+}
+.phone-bind-btn::after { border: none; }
 
 .stats { display: flex; gap: 32rpx; }
 .stat-item { display: flex; flex-direction: column; align-items: center; gap: 4rpx; }

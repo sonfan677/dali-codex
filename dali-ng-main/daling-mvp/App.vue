@@ -19,6 +19,10 @@ export default {
         getApp().globalData.isVerified   = res.isVerified || false
         getApp().globalData.verifyStatus = res.verifyStatus || 'none'
         getApp().globalData.verifyProvider = res.verifyProvider || 'manual'
+        getApp().globalData.phoneVerified = !!res.phoneVerified
+        getApp().globalData.mobileBindStatus = res.mobileBindStatus || (res.phoneVerified ? 'bound' : 'unbound')
+        getApp().globalData.mobileBoundAt = res.mobileBoundAt || null
+        getApp().globalData.userRiskScore = Number.isFinite(Number(res.userRiskScore)) ? Number(res.userRiskScore) : 100
         getApp().globalData.officialVerifyStatus = res.officialVerifyStatus || 'not_started'
         getApp().globalData.officialVerifyTicket = res.officialVerifyTicket || null
         getApp().globalData.officialVerifiedAt = res.officialVerifiedAt || null
