@@ -36,11 +36,6 @@ export default {
         getApp().globalData.subscriptions = res.subscriptions || {}
         getApp().globalData.shouldPromptNearbySubscription = !!res.shouldPromptNearbySubscription
 
-        if (res.isNewUser && !res.nickname && !res.avatarUrl) {
-          setTimeout(() => {
-            uni.navigateTo({ url: '/pages/welcome/index' })
-          }, 500)
-        }
       }
     } catch(e) {
       console.error('静默登录失败', e)

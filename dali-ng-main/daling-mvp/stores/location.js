@@ -48,9 +48,8 @@ function getFuzzyLocationAsync() {
 }
 
 function isFuzzyUnauthorized(err) {
-  const msg = String(err?.errMsg || '')
   const code = Number(err?.errCode || 0)
-  return code === -80424 || msg.includes('getFuzzyLocation') || msg.includes('not authorized')
+  return code === -80424
 }
 
 function isLocationAuthDenied(err) {

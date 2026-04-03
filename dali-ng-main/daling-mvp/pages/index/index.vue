@@ -434,7 +434,6 @@ export default {
             if (ok) {
               this.applyDefaultDistanceForMode('nearby')
               await this.loadActivities()
-              await this.maybePromptNearbySubscription()
               return
             }
           } catch(e) {
@@ -444,12 +443,10 @@ export default {
         // 无论有没有位置权限，都用默认坐标加载活动
         this.applyDefaultDistanceForMode('default')
         await this.loadActivitiesWithDefault()
-        await this.maybePromptNearbySubscription()
       },
       fail: async () => {
         this.applyDefaultDistanceForMode('default')
         await this.loadActivitiesWithDefault()
-        await this.maybePromptNearbySubscription()
       }
     })
     // #endif
@@ -683,7 +680,7 @@ export default {
         await this.loadActivities()
       } else {
         const msg = this.locationStore.lastErrorCode === 'FUZZY_API_PENDING'
-          ? '地理位置接口审核中，先为你展示示例活动'
+          ? '定位能力暂不可用，请稍后重试'
           : this.locationStore.lastErrorCode === 'LOCATION_DENIED'
             ? '你已拒绝定位授权，请到设置中开启'
             : '获取位置失败，请在设置中开启'
