@@ -1157,6 +1157,10 @@ export default {
           scene: 'detail_join',
         }).catch(() => {})
         const detail = subRes?.errMsg || ''
+        if (detail.includes('can only be invoked by user TAP gesture')) {
+          console.warn('[订阅消息] 非用户手势触发，跳过弹窗提示，不影响报名')
+          return
+        }
         uni.showModal({
           title: '订阅授权未弹出',
           content: detail
