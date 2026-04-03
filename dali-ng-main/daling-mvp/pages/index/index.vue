@@ -265,6 +265,12 @@ export default {
       distanceTouched: false,
       nearbySubPrompting: false,
       nearbySubPromptChecked: false,
+      accountGuideState: {
+        isLoggedIn: false,
+        phoneVerified: false,
+        identityCheckRequired: false,
+        identityCheckStatus: 'none',
+      },
     }
   },
 
@@ -311,13 +317,12 @@ export default {
       }
     },
     accountGuide() {
-      const gd = getApp().globalData || {}
-      const isLoggedIn = !!gd.isLoggedIn
+      const isLoggedIn = !!this.accountGuideState.isLoggedIn
       if (!isLoggedIn) {
         return { visible: false, title: '', desc: '', type: 'none' }
       }
-      const identityCheckRequired = !!gd.identityCheckRequired
-      const identityCheckStatus = gd.identityCheckStatus || 'none'
+      const identityCheckRequired = !!this.accountGuideState.identityCheckRequired
+      const identityCheckStatus = this.accountGuideState.identityCheckStatus || 'none'
       if (identityCheckRequired && identityCheckStatus !== 'approved') {
         return {
           visible: true,
@@ -326,7 +331,7 @@ export default {
           desc: '账号已进入方案2，请先完成核验，避免发布受限。',
         }
       }
-      if (!gd.phoneVerified) {
+      if (!this.accountGuideState.phoneVerified) {
         return {
           visible: true,
           type: 'scheme1',
@@ -424,6 +429,9 @@ export default {
     },
 
   async onShow() {
+    this.syncAccountGuideState()
+    setTimeout(() => this.syncAccountGuideState(), 300)
+    setTimeout(() => this.syncAccountGuideState(), 1200)
     await this.ensureAdminVisibility()
     // #ifdef MP-WEIXIN
     wx.getSetting({
@@ -455,6 +463,15 @@ export default {
 
 
   methods: {
+    syncAccountGuideState() {
+      const gd = getApp().globalData || {}
+      this.accountGuideState = {
+        isLoggedIn: !!gd.isLoggedIn,
+        phoneVerified: !!gd.phoneVerified,
+        identityCheckRequired: !!gd.identityCheckRequired,
+        identityCheckStatus: gd.identityCheckStatus || 'none',
+      }
+    },
     goCalendar() {
       uni.navigateTo({ url: '/pages/calendar/index' })
     },
@@ -700,21 +717,22 @@ export default {
         }
       }
     },
-	async loadActivitiesWithDefault() {
-	  // 使用大理古城坐标作为默认位置
-	  const defaultLat = 25.6065
-	  const defaultLng = 100.2679
-	  try {
+    async loadActivitiesWithDefault() {
+      // 使用大理古城坐标作为默认位置
+      const defaultLat = 25.6065
+      const defaultLng = 100.2679
+      try {
 	    this.loading = true
       this.lastQueryMode = 'default'
       const res = await callCloud('getActivityList', this.buildQueryParams(defaultLat, defaultLng))
       this.activities = Array.isArray(res?.activities) ? res.activities : []
       this.serverTime = res?.serverTime || Date.now()
-	  } catch(e) {
-	    console.error('加载活动失败', e)
-	  } finally {
-	    this.loading = false
-	  }
+      } catch(e) {
+        console.error('加载活动失败', e)
+      } finally {
+        this.loading = false
+        this.syncAccountGuideState()
+      }
 	},
 
     // 从云端加载附近活动
@@ -734,6 +752,7 @@ export default {
         uni.showToast({ title: '加载失败，请重试', icon: 'none' })
       } finally {
         this.loading = false
+        this.syncAccountGuideState()
       }
     },
 
