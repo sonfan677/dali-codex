@@ -47,6 +47,16 @@
             open-type="getPhoneNumber"
             @getphonenumber="onGetPhoneNumber"
           >一键绑定手机号</button>
+          <view class="scheme2-row">
+            <text class="scheme2-label">方案2状态：</text>
+            <text class="scheme2-value" :class="scheme2StatusClass">{{ scheme2StatusText }}</text>
+          </view>
+          <text v-if="needsIdentityRecheck" class="scheme2-reason">{{ scheme2ReasonText }}</text>
+          <button
+            v-if="needsIdentityRecheck"
+            class="scheme2-verify-btn"
+            @tap="goVerify"
+          >去补充核验</button>
         </view>
         <view class="stats">
           <view class="stat-item">
@@ -190,6 +200,10 @@ export default {
         mobileBoundAt: null,
         phoneMasked: '',
         userRiskScore: 100,
+        identityCheckRequired: false,
+        identityCheckStatus: 'none',
+        identityCheckReasons: [],
+        identityCheckTriggeredAt: null,
         reliabilityScore: null,
         historicalCompletionRate: null,
         noShowCount: 0,
@@ -223,7 +237,31 @@ export default {
       const ratio = Number(this.userInfo.historicalCompletionRate)
       if (!Number.isFinite(ratio)) return '--'
       return `${Math.round(ratio * 100)}%`
-    }
+    },
+    needsIdentityRecheck() {
+      return !!this.userInfo.identityCheckRequired && this.userInfo.identityCheckStatus !== 'approved'
+    },
+    scheme2StatusClass() {
+      if (this.needsIdentityRecheck) return 'scheme2-value--warn'
+      return 'scheme2-value--ok'
+    },
+    scheme2StatusText() {
+      if (!this.userInfo.identityCheckRequired) return '未触发补充核验'
+      if (this.userInfo.identityCheckStatus === 'approved') return '补充核验已通过'
+      if (this.userInfo.identityCheckStatus === 'pending') return '补充核验审核中'
+      if (this.userInfo.identityCheckStatus === 'rejected') return '补充核验未通过'
+      return '待补充核验'
+    },
+    scheme2ReasonText() {
+      const map = {
+        REPORTED_USER: '触发原因：账号被举报后需补充身份核验',
+        HIGH_FREQ_ORGANIZER: '触发原因：近期高频发布触发补充核验',
+      }
+      const reasons = Array.isArray(this.userInfo.identityCheckReasons)
+        ? this.userInfo.identityCheckReasons.map((code) => map[String(code)] || String(code)).filter(Boolean)
+        : []
+      return reasons.length ? reasons.join('；') : '触发原因：账号进入补充核验流程'
+    },
   },
 
   async onShow() {
@@ -268,6 +306,10 @@ export default {
             mobileBoundAt: user.mobileBoundAt || null,
             phoneMasked: this.maskPhone(user.phone),
             userRiskScore: this.calcUserRiskScore(user),
+            identityCheckRequired: !!user.identityCheckRequired,
+            identityCheckStatus: user.identityCheckStatus || 'none',
+            identityCheckReasons: Array.isArray(user.identityCheckReasons) ? user.identityCheckReasons : [],
+            identityCheckTriggeredAt: user.identityCheckTriggeredAt || null,
             reliabilityScore: user.reliabilityScore ?? null,
             historicalCompletionRate: user.historicalCompletionRate ?? null,
             noShowCount: Number(user.noShowCount || 0),
@@ -287,6 +329,10 @@ export default {
           getApp().globalData.mobileBindStatus = user.mobileBindStatus || (user.phoneVerified ? 'bound' : 'unbound')
           getApp().globalData.mobileBoundAt = user.mobileBoundAt || null
           getApp().globalData.userRiskScore = this.calcUserRiskScore(user)
+          getApp().globalData.identityCheckRequired = !!user.identityCheckRequired
+          getApp().globalData.identityCheckStatus = user.identityCheckStatus || 'none'
+          getApp().globalData.identityCheckReasons = Array.isArray(user.identityCheckReasons) ? user.identityCheckReasons : []
+          getApp().globalData.identityCheckTriggeredAt = user.identityCheckTriggeredAt || null
         }
         // #endif
       } catch(e) {
@@ -515,6 +561,41 @@ export default {
   border: none;
 }
 .phone-bind-btn::after { border: none; }
+.scheme2-row {
+  margin-top: 10rpx;
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+}
+.scheme2-label {
+  font-size: 22rpx;
+  color: rgba(255,255,255,0.75);
+}
+.scheme2-value {
+  font-size: 22rpx;
+  color: rgba(255,255,255,0.95);
+}
+.scheme2-value--ok { color: #d1fadf; }
+.scheme2-value--warn { color: #fecaca; }
+.scheme2-reason {
+  margin-top: 8rpx;
+  display: block;
+  font-size: 22rpx;
+  line-height: 1.5;
+  color: rgba(255,255,255,0.9);
+}
+.scheme2-verify-btn {
+  margin-top: 12rpx;
+  width: 240rpx;
+  height: 56rpx;
+  line-height: 56rpx;
+  border-radius: 999rpx;
+  background: #fde68a;
+  color: #5b3d00;
+  font-size: 22rpx;
+  border: none;
+}
+.scheme2-verify-btn::after { border: none; }
 
 .stats { display: flex; gap: 32rpx; }
 .stat-item { display: flex; flex-direction: column; align-items: center; gap: 4rpx; }

@@ -118,6 +118,11 @@ function mergeReasonCodes(existing = [], incoming = '') {
   return [...new Set(base)].slice(0, 8)
 }
 
+function normalizeIdentityReasons(raw) {
+  const list = Array.isArray(raw) ? raw.filter(Boolean) : []
+  return [...new Set(list)].slice(0, 8)
+}
+
 async function loadCityConfig(cityId = 'dali') {
   const finalCityId = cityId || DEFAULT_CITY_CONFIG.cityId
   try {
@@ -206,6 +211,19 @@ exports.main = async (event, context) => {
   }
 
   const user = users[0]
+  const identityCheckRequired = !!user.identityCheckRequired
+  const identityCheckStatus = String(user.identityCheckStatus || 'none')
+  if (identityCheckRequired && identityCheckStatus !== 'approved') {
+    return {
+      success: false,
+      error: 'IDENTITY_CHECK_REQUIRED',
+      message: '当前账号需补充身份核验后才可继续发布',
+      identityCheckRequired: true,
+      identityCheckStatus,
+      identityCheckReasons: normalizeIdentityReasons(user.identityCheckReasons),
+    }
+  }
+
   const {
     title,
     description = '',

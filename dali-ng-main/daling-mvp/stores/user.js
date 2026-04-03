@@ -14,6 +14,10 @@ export const useUserStore = defineStore('user', {
     mobileBindStatus: 'unbound',
     mobileBoundAt: null,
     userRiskScore: 100,
+    identityCheckRequired: false,
+    identityCheckStatus: 'none',
+    identityCheckReasons: [],
+    identityCheckTriggeredAt: null,
     officialVerifyStatus: 'not_started',
     isLoggedIn: false,
   }),
@@ -34,6 +38,10 @@ export const useUserStore = defineStore('user', {
         this.mobileBindStatus = res.mobileBindStatus || (res.phoneVerified ? 'bound' : 'unbound')
         this.mobileBoundAt = res.mobileBoundAt || null
         this.userRiskScore = Number.isFinite(Number(res.userRiskScore)) ? Number(res.userRiskScore) : 100
+        this.identityCheckRequired = !!res.identityCheckRequired
+        this.identityCheckStatus = res.identityCheckStatus || 'none'
+        this.identityCheckReasons = Array.isArray(res.identityCheckReasons) ? res.identityCheckReasons : []
+        this.identityCheckTriggeredAt = res.identityCheckTriggeredAt || null
         this.officialVerifyStatus = res.officialVerifyStatus || 'not_started'
         this.nickname = userInfo.nickname || ''
         this.avatarUrl = userInfo.avatarUrl || ''
@@ -56,6 +64,10 @@ export const useUserStore = defineStore('user', {
       this.mobileBindStatus = 'unbound'
       this.mobileBoundAt = null
       this.userRiskScore = 100
+      this.identityCheckRequired = false
+      this.identityCheckStatus = 'none'
+      this.identityCheckReasons = []
+      this.identityCheckTriggeredAt = null
       this.officialVerifyStatus = 'not_started'
       this.isLoggedIn = false
     }

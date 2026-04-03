@@ -23,6 +23,10 @@ export default {
         getApp().globalData.mobileBindStatus = res.mobileBindStatus || (res.phoneVerified ? 'bound' : 'unbound')
         getApp().globalData.mobileBoundAt = res.mobileBoundAt || null
         getApp().globalData.userRiskScore = Number.isFinite(Number(res.userRiskScore)) ? Number(res.userRiskScore) : 100
+        getApp().globalData.identityCheckRequired = !!res.identityCheckRequired
+        getApp().globalData.identityCheckStatus = res.identityCheckStatus || 'none'
+        getApp().globalData.identityCheckReasons = Array.isArray(res.identityCheckReasons) ? res.identityCheckReasons : []
+        getApp().globalData.identityCheckTriggeredAt = res.identityCheckTriggeredAt || null
         getApp().globalData.officialVerifyStatus = res.officialVerifyStatus || 'not_started'
         getApp().globalData.officialVerifyTicket = res.officialVerifyTicket || null
         getApp().globalData.officialVerifiedAt = res.officialVerifiedAt || null

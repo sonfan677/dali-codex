@@ -3,7 +3,7 @@
     <view class="content">
       <view class="header">
         <text class="title">实名认证</text>
-        <text class="desc">发布活动前需要完成实名认证。你的信息加密存储，不会对外展示。</text>
+        <text class="desc">{{ headerDesc }}</text>
       </view>
 
       <view class="channel-switch">
@@ -17,6 +17,11 @@
           :class="{ 'channel-pill--active': verifyChannel === 'official' }"
           @tap="verifyChannel = 'official'"
         >微信官方通道</text>
+      </view>
+
+      <view v-if="needsIdentityRecheck" class="risk-box">
+        <text class="risk-title">当前账号需补充身份核验</text>
+        <text class="risk-desc">{{ identityReasonText }}</text>
       </view>
 
       <view v-if="alreadyVerified" class="verified-box">
@@ -98,10 +103,19 @@ export default {
 
   computed: {
     alreadyVerified() {
-      return this.userStore.verifyStatus === 'approved' || this.userStore.isVerified
+      return (this.userStore.verifyStatus === 'approved' || this.userStore.isVerified) && !this.needsIdentityRecheck
     },
     isPending() {
       return this.userStore.verifyStatus === 'pending'
+    },
+    needsIdentityRecheck() {
+      return !!this.userStore.identityCheckRequired && this.userStore.identityCheckStatus !== 'approved'
+    },
+    headerDesc() {
+      if (this.needsIdentityRecheck) {
+        return '你的账号已进入补充核验流程。完成核验后可继续发布活动。信息加密存储，不对外展示。'
+      }
+      return '发布活动前需要完成实名认证。你的信息加密存储，不会对外展示。'
     },
     verifyProviderLabel() {
       return this.userStore.verifyProvider === 'wechat_official' ? '微信官方' : '人工审核'
@@ -112,9 +126,25 @@ export default {
       }
       return '认证申请已提交，我们将在24小时内完成审核'
     },
+    identityReasonText() {
+      const map = {
+        REPORTED_USER: '触发原因：账号被举报后需补充核验',
+        HIGH_FREQ_ORGANIZER: '触发原因：近期高频发布触发补充核验',
+      }
+      const reasons = Array.isArray(this.userStore.identityCheckReasons)
+        ? this.userStore.identityCheckReasons.map((code) => map[String(code)] || String(code)).filter(Boolean)
+        : []
+      return reasons.length ? reasons.join('；') : '触发原因：平台风险策略触发'
+    },
   },
 
   methods: {
+    syncIdentityToGlobal(patch = {}) {
+      getApp().globalData = getApp().globalData || {}
+      Object.keys(patch).forEach((key) => {
+        getApp().globalData[key] = patch[key]
+      })
+    },
     async submitManualVerify() {
       if (!this.form.realName.trim()) {
         uni.showToast({ title: '请填写真实姓名', icon: 'none' })
@@ -136,6 +166,14 @@ export default {
         if (res.success) {
           this.userStore.verifyStatus = 'pending'
           this.userStore.verifyProvider = 'manual'
+          this.userStore.identityCheckRequired = true
+          this.userStore.identityCheckStatus = 'pending'
+          this.syncIdentityToGlobal({
+            verifyStatus: 'pending',
+            verifyProvider: 'manual',
+            identityCheckRequired: true,
+            identityCheckStatus: 'pending',
+          })
           uni.showToast({ title: '提交成功！等待审核', icon: 'success' })
         } else {
           uni.showToast({ title: res.message || '提交失败', icon: 'none' })
@@ -159,6 +197,15 @@ export default {
         this.userStore.verifyStatus = 'pending'
         this.userStore.verifyProvider = 'wechat_official'
         this.userStore.officialVerifyStatus = res.officialVerifyStatus || 'pending_callback'
+        this.userStore.identityCheckRequired = true
+        this.userStore.identityCheckStatus = 'pending'
+        this.syncIdentityToGlobal({
+          verifyStatus: 'pending',
+          verifyProvider: 'wechat_official',
+          officialVerifyStatus: res.officialVerifyStatus || 'pending_callback',
+          identityCheckRequired: true,
+          identityCheckStatus: 'pending',
+        })
         uni.showModal({
           title: '已发起官方认证',
           content: res.officialEntryUrl
@@ -184,6 +231,15 @@ export default {
         this.userStore.verifyStatus = 'pending'
         this.userStore.verifyProvider = 'wechat_official'
         this.userStore.officialVerifyStatus = res.officialVerifyStatus || 'pending_callback'
+        this.userStore.identityCheckRequired = true
+        this.userStore.identityCheckStatus = 'pending'
+        this.syncIdentityToGlobal({
+          verifyStatus: 'pending',
+          verifyProvider: 'wechat_official',
+          officialVerifyStatus: res.officialVerifyStatus || 'pending_callback',
+          identityCheckRequired: true,
+          identityCheckStatus: 'pending',
+        })
         uni.showToast({ title: '已重新发起官方认证', icon: 'success' })
       } catch (e) {
         uni.showToast({ title: '重试失败，请稍后再试', icon: 'none' })
@@ -226,6 +282,26 @@ export default {
 .channel-pill--active {
   background: #1A3C5E;
   color: #fff;
+}
+.risk-box {
+  margin-bottom: 20rpx;
+  padding: 24rpx 24rpx;
+  background: #fff7ed;
+  border-radius: 14rpx;
+  border: 1rpx solid #fed7aa;
+}
+.risk-title {
+  display: block;
+  font-size: 28rpx;
+  color: #9a3412;
+  font-weight: 600;
+}
+.risk-desc {
+  margin-top: 10rpx;
+  display: block;
+  font-size: 24rpx;
+  color: #c2410c;
+  line-height: 1.6;
 }
 
 .verified-box,

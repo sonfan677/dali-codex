@@ -15,6 +15,14 @@
       </view>
     </view>
 
+    <view v-if="accountGuide.visible" class="account-guide" @tap="goAccountGuide">
+      <view class="account-guide-main">
+        <text class="account-guide-title">{{ accountGuide.title }}</text>
+        <text class="account-guide-desc">{{ accountGuide.desc }}</text>
+      </view>
+      <text class="account-guide-arrow">去完善 ›</text>
+    </view>
+
     <view class="calendar-entry" @tap="goCalendar">
       <text class="calendar-entry-title">官方活动日历</text>
       <text class="calendar-entry-sub">查看未来 14 天官方推荐活动 →</text>
@@ -302,6 +310,32 @@ export default {
         desc: `默认坐标 ${this.currentDistanceLabel}`,
       }
     },
+    accountGuide() {
+      const gd = getApp().globalData || {}
+      const isLoggedIn = !!gd.isLoggedIn
+      if (!isLoggedIn) {
+        return { visible: false, title: '', desc: '', type: 'none' }
+      }
+      const identityCheckRequired = !!gd.identityCheckRequired
+      const identityCheckStatus = gd.identityCheckStatus || 'none'
+      if (identityCheckRequired && identityCheckStatus !== 'approved') {
+        return {
+          visible: true,
+          type: 'scheme2',
+          title: '发布前需补充身份核验',
+          desc: '账号已进入方案2，请先完成核验，避免发布受限。',
+        }
+      }
+      if (!gd.phoneVerified) {
+        return {
+          visible: true,
+          type: 'scheme1',
+          title: '建议先绑定手机号',
+          desc: '可提升账号安全和风控可信度，后续操作更顺畅。',
+        }
+      }
+      return { visible: false, title: '', desc: '', type: 'none' }
+    },
 
     topTipText() {
       if (this.activities.length > 0) {
@@ -426,6 +460,14 @@ export default {
   methods: {
     goCalendar() {
       uni.navigateTo({ url: '/pages/calendar/index' })
+    },
+    goAccountGuide() {
+      const type = this.accountGuide?.type || 'none'
+      if (type === 'scheme2') {
+        uni.navigateTo({ url: '/pages/verify/index' })
+        return
+      }
+      uni.switchTab({ url: '/pages/mine/index' })
     },
 
     async touchSubscriptionState(action) {
@@ -779,6 +821,38 @@ export default {
 .data-badge--real-default .data-badge-title,
 .data-badge--real-default .data-badge-desc {
   color: #295fa6;
+}
+.account-guide {
+  margin: 10rpx 16rpx 8rpx;
+  padding: 18rpx 18rpx;
+  border-radius: 14rpx;
+  background: #fff7ed;
+  border: 1rpx solid #fed7aa;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+}
+.account-guide-main {
+  flex: 1;
+}
+.account-guide-title {
+  display: block;
+  font-size: 26rpx;
+  font-weight: 700;
+  color: #9a3412;
+}
+.account-guide-desc {
+  margin-top: 6rpx;
+  display: block;
+  font-size: 22rpx;
+  color: #b45309;
+  line-height: 1.45;
+}
+.account-guide-arrow {
+  font-size: 24rpx;
+  color: #9a3412;
+  font-weight: 700;
 }
 
 .calendar-entry {

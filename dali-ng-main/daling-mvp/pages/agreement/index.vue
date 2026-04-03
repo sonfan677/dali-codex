@@ -30,15 +30,15 @@
         </view>
         <view class="numbered-item">
           <text class="number">2.</text>
-          <text class="numbered-text">发布活动前需完成实名认证，提交真实姓名和手机号用于身份核验。</text>
+          <text class="numbered-text">全量用户可在“我的”页完成手机号绑定（方案1），用于账号安全与风险防护。</text>
         </view>
         <view class="numbered-item">
           <text class="number">3.</text>
-          <text class="numbered-text">用户须保证所填信息真实有效，不得冒用他人信息。</text>
+          <text class="numbered-text">发布活动前需完成实名认证；当账号触发风险策略（如被举报、高频组织）时，需补充身份核验（方案2）后方可继续发布。</text>
         </view>
         <view class="numbered-item">
           <text class="number">4.</text>
-          <text class="numbered-text">如用户信息存在虚假、冒用、误导或其他异常情形，平台有权限制相关功能或终止服务。</text>
+          <text class="numbered-text">用户须保证所填信息真实有效，不得冒用他人信息；如信息异常或存在风险，平台有权限制相关功能或终止服务。</text>
         </view>
       </view>
 

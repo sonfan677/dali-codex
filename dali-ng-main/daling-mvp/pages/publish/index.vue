@@ -346,13 +346,39 @@ _doChooseLocation() {
       return this.form.startTimeMs + hours[this.durationIndex] * 60 * 60 * 1000
     },
 
+    identityReasonText(codes = []) {
+      const map = {
+        REPORTED_USER: '账号被举报后需补充核验',
+        HIGH_FREQ_ORGANIZER: '近期高频发布触发补充核验',
+      }
+      const list = (Array.isArray(codes) ? codes : [])
+        .map((code) => map[String(code)] || String(code))
+        .filter(Boolean)
+      return list.length ? list.join('；') : '当前账号需补充身份核验'
+    },
+
     async submit() {
-      const isVerified = getApp().globalData?.isVerified || this.userStore.isVerified
+      const gd = getApp().globalData || {}
+      const isVerified = gd.isVerified || this.userStore.isVerified
       if (!isVerified) {
         uni.showModal({
           title: '需要实名认证',
           content: '发布活动需要先完成实名认证',
           confirmText: '去认证',
+          success: (res) => {
+            if (res.confirm) uni.navigateTo({ url: '/pages/verify/index' })
+          }
+        })
+        return
+      }
+      const identityCheckRequired = !!(gd.identityCheckRequired ?? this.userStore.identityCheckRequired)
+      const identityCheckStatus = gd.identityCheckStatus || this.userStore.identityCheckStatus || 'none'
+      if (identityCheckRequired && identityCheckStatus !== 'approved') {
+        const reasonText = this.identityReasonText(gd.identityCheckReasons || this.userStore.identityCheckReasons || [])
+        uni.showModal({
+          title: '需补充身份核验',
+          content: `${reasonText}，完成后可继续发布活动。`,
+          confirmText: '去核验',
           success: (res) => {
             if (res.confirm) uni.navigateTo({ url: '/pages/verify/index' })
           }
@@ -402,8 +428,21 @@ _doChooseLocation() {
           uni.showToast({ title: '发布成功！', icon: 'success' })
           setTimeout(() => uni.switchTab({ url: '/pages/index/index' }), 1500)
         } else {
+          if (res.error === 'IDENTITY_CHECK_REQUIRED') {
+            const reasonText = this.identityReasonText(res.identityCheckReasons || [])
+            uni.showModal({
+              title: '需补充身份核验',
+              content: `${reasonText}，完成后可继续发布活动。`,
+              confirmText: '去核验',
+              success: (r) => {
+                if (r.confirm) uni.navigateTo({ url: '/pages/verify/index' })
+              }
+            })
+            return
+          }
           const msgs = {
             NOT_VERIFIED:  '请先完成实名认证',
+            IDENTITY_CHECK_REQUIRED: '当前账号需补充身份核验',
             INVALID_TITLE: '标题格式有误',
             INVALID_CATEGORY: '请选择有效活动分类',
             START_PASSED:  '开始时间不能早于现在',

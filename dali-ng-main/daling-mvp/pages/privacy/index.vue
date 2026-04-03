@@ -20,7 +20,7 @@
       <text class="item-body">用于你在发布活动或编辑活动时选择活动地点，并在活动详情页展示活动地址信息，帮助其他用户判断活动位置和参与距离。</text>
 
       <text class="item-title">4. 手机号</text>
-      <text class="item-body">用于提交实名认证申请、进行身份核验和人工审核。手机号仅用于平台安全管理与发布者真实性确认，不向其他用户公开展示。</text>
+      <text class="item-body">用于账号安全校验（方案1：绑定手机号）、身份核验与风险场景复核（方案2：按需触发）。仅在你主动授权后使用，不向其他用户公开展示，也不用于营销推广。</text>
 
       <text class="item-title">5. 剪贴板</text>
       <text class="item-body">用于发布者导出活动参与者昵称清单并复制到系统剪贴板，方便活动通知、名单整理和运营管理。</text>
@@ -34,7 +34,7 @@
         </view>
         <view class="bullet-item">
           <text class="bullet">·</text>
-          <text class="bullet-text">手机号仅用于实名认证和身份核实，核实流程由平台管理员进行人工审核，不向其他用户展示，不用于营销推广。</text>
+          <text class="bullet-text">手机号用于账号安全与风险控制：全量用户可自主绑定手机号，风险触发用户会进入补充核验流程；仅用于安全治理与实名核验。</text>
         </view>
         <view class="bullet-item">
           <text class="bullet">·</text>
