@@ -256,9 +256,20 @@ exports.main = async (event) => {
       }
 
       const nextPatch = action === 'verify'
-        ? { isVerified: true, verifyStatus: 'approved', updatedAt: db.serverDate() }
+        ? {
+            isVerified: true,
+            verifyStatus: 'approved',
+            identityCheckRequired: false,
+            identityCheckStatus: 'approved',
+            updatedAt: db.serverDate(),
+          }
         : action === 'reject_verify'
-          ? { verifyStatus: 'rejected', updatedAt: db.serverDate() }
+          ? {
+              verifyStatus: 'rejected',
+              identityCheckRequired: true,
+              identityCheckStatus: 'rejected',
+              updatedAt: db.serverDate(),
+            }
           : { isBanned: true, updatedAt: db.serverDate() }
 
       await db.collection('users').where({ _openid: targetId }).update({ data: nextPatch })

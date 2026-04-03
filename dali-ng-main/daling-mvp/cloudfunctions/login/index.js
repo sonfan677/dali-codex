@@ -47,6 +47,12 @@ function buildReservedUserPatch(user = {}, cityId, todayKey) {
   if (typeof user.inactivityPenaltyAt === 'undefined') patch.inactivityPenaltyAt = null
   if (typeof user.currentDecayRate === 'undefined') patch.currentDecayRate = null
   if (!user.verifyProvider) patch.verifyProvider = 'manual'
+  if (typeof user.identityCheckRequired !== 'boolean') patch.identityCheckRequired = false
+  if (!user.identityCheckStatus) patch.identityCheckStatus = 'none'
+  if (!Array.isArray(user.identityCheckReasons)) patch.identityCheckReasons = []
+  if (typeof user.identityCheckTriggeredAt === 'undefined') patch.identityCheckTriggeredAt = null
+  if (typeof user.reportAgainstCount !== 'number') patch.reportAgainstCount = 0
+  if (typeof user.recentPublish7dCount !== 'number') patch.recentPublish7dCount = 0
   if (!user.officialVerifyStatus) patch.officialVerifyStatus = 'not_started'
   if (typeof user.officialVerifyTicket === 'undefined') patch.officialVerifyTicket = null
   if (typeof user.officialVerifiedAt === 'undefined') patch.officialVerifiedAt = null
@@ -93,6 +99,12 @@ exports.main = async (event, context) => {
         isVerified: false,
         verifyStatus: 'none',
         verifyProvider: 'manual',
+        identityCheckRequired: false,
+        identityCheckStatus: 'none',
+        identityCheckReasons: [],
+        identityCheckTriggeredAt: null,
+        reportAgainstCount: 0,
+        recentPublish7dCount: 0,
         officialVerifyStatus: 'not_started',
         officialVerifyTicket: null,
         officialVerifiedAt: null,

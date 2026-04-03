@@ -114,6 +114,40 @@ function resolveActionLinkedActivityId(item = {}) {
   return ''
 }
 
+function maybeDecodeSensitive(raw = '') {
+  const text = String(raw || '').trim()
+  if (!text) return ''
+  if (!/^[A-Za-z0-9+/=]+$/.test(text) || text.length % 4 !== 0) return text
+  try {
+    const decoded = Buffer.from(text, 'base64').toString('utf8')
+    if (!decoded || /[\u0000-\u0008]/.test(decoded)) return ''
+    return decoded
+  } catch (e) {
+    return ''
+  }
+}
+
+function maskPhone(phone = '') {
+  const p = String(phone || '')
+  if (p.length < 7) return p ? '***' : ''
+  return `${p.slice(0, 3)}****${p.slice(-4)}`
+}
+
+function maskName(name = '') {
+  const n = String(name || '')
+  if (!n) return ''
+  if (n.length <= 1) return '*'
+  return `${n.slice(0, 1)}${'*'.repeat(Math.max(1, n.length - 1))}`
+}
+
+function normalizeIdentityReasons(raw) {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((item) => String(item || '').trim().toUpperCase())
+    .filter(Boolean)
+    .slice(0, 8)
+}
+
 exports.main = async () => {
   const { OPENID } = cloud.getWXContext()
   const meta = parseAdminMeta(OPENID)
@@ -122,7 +156,7 @@ exports.main = async () => {
     return { success: false, error: 'UNAUTHORIZED', message: '无管理员权限' }
   }
 
-  const [pendingUsersRes, reportsRes, activitiesRes, actionLogsRes, officialVerifyAuditRes, retryUsersRes] = await Promise.all([
+  const [pendingUsersRes, reportsRes, activitiesRes, actionLogsRes, officialVerifyAuditRes, retryUsersRes, userProfilesRes] = await Promise.all([
     db.collection('users')
       .where({ verifyStatus: 'pending' })
       .field({
@@ -273,7 +307,34 @@ exports.main = async () => {
         officialVerifyRetryCount: true,
       })
       .get()
-      .catch(() => ({ data: [] }))
+      .catch(() => ({ data: [] })),
+    db.collection('users')
+      .limit(400)
+      .field({
+        _id: true,
+        _openid: true,
+        nickname: true,
+        cityId: true,
+        verifyStatus: true,
+        verifyProvider: true,
+        isVerified: true,
+        publishCount: true,
+        joinCount: true,
+        attendCount: true,
+        noShowCount: true,
+        reportAgainstCount: true,
+        recentPublish7dCount: true,
+        identityCheckRequired: true,
+        identityCheckStatus: true,
+        identityCheckReasons: true,
+        identityCheckTriggeredAt: true,
+        realName: true,
+        phone: true,
+        createdAt: true,
+        updatedAt: true,
+      })
+      .get()
+      .catch(() => ({ data: [] })),
   ])
 
   const shouldFilterCity = meta.adminRole === 'cityAdmin'
@@ -304,6 +365,9 @@ exports.main = async () => {
   const rawActionLogs = shouldFilterCity
     ? (actionLogsRes.data || []).filter((item) => !item.cityId || item.cityId === meta.cityId)
     : (actionLogsRes.data || [])
+  const rawUserProfiles = shouldFilterCity
+    ? (userProfilesRes.data || []).filter((item) => !item.cityId || item.cityId === meta.cityId)
+    : (userProfilesRes.data || [])
 
   const officialVerifyAuditList = (officialVerifyAuditRes.data || []).slice(0, 60)
   const officialVerifyAuditSummary = officialVerifyAuditList.reduce((acc, item) => {
@@ -443,6 +507,41 @@ exports.main = async () => {
     })
     .slice(0, 80)
 
+  const userProfileList = rawUserProfiles
+    .slice(0, 300)
+    .map((item) => {
+      const realNamePlain = maybeDecodeSensitive(item.realName || '')
+      const phonePlain = maybeDecodeSensitive(item.phone || '')
+      const identityReasons = normalizeIdentityReasons(item.identityCheckReasons)
+      return {
+        _id: item._id,
+        openid: item._openid || '',
+        nickname: item.nickname || '',
+        cityId: item.cityId || 'dali',
+        verifyStatus: item.verifyStatus || 'none',
+        verifyProvider: item.verifyProvider || 'manual',
+        isVerified: !!item.isVerified,
+        publishCount: Number(item.publishCount || 0),
+        joinCount: Number(item.joinCount || 0),
+        attendCount: Number(item.attendCount || 0),
+        noShowCount: Number(item.noShowCount || 0),
+        reportAgainstCount: Number(item.reportAgainstCount || 0),
+        recentPublish7dCount: Number(item.recentPublish7dCount || 0),
+        identityCheckRequired: !!item.identityCheckRequired,
+        identityCheckStatus: item.identityCheckStatus || 'none',
+        identityCheckReasons: identityReasons,
+        identityCheckTriggeredAt: item.identityCheckTriggeredAt || null,
+        hasRealName: !!realNamePlain,
+        hasPhone: !!phonePlain,
+        realNameMasked: maskName(realNamePlain),
+        phoneMasked: maskPhone(phonePlain),
+        realNamePlain,
+        phonePlain,
+        createdAt: item.createdAt || null,
+        updatedAt: item.updatedAt || null,
+      }
+    })
+
   return {
     success: true,
     currentOpenid: OPENID,
@@ -506,6 +605,7 @@ exports.main = async () => {
     reportList,
     activityList: enrichedActivityList,
     actionLogList,
+    userProfileList,
     serverTimestamp: Date.now(),
   }
 }

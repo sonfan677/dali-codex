@@ -1,6 +1,7 @@
 const cloud = require('wx-server-sdk')
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 const db = cloud.database()
+const _ = db.command
 
 const DEFAULT_CITY_CONFIG = {
   cityId: 'dali',
@@ -111,6 +112,12 @@ function mergeCityConfig(raw = {}, cityId = '') {
   }
 }
 
+function mergeReasonCodes(existing = [], incoming = '') {
+  const base = Array.isArray(existing) ? existing.filter(Boolean) : []
+  if (incoming) base.push(incoming)
+  return [...new Set(base)].slice(0, 8)
+}
+
 async function loadCityConfig(cityId = 'dali') {
   const finalCityId = cityId || DEFAULT_CITY_CONFIG.cityId
   try {
@@ -130,6 +137,60 @@ async function loadCityConfig(cityId = 'dali') {
   } catch (e) {}
 
   return mergeCityConfig({}, finalCityId)
+}
+
+async function markHighFrequencyOrganizerIfNeeded(openid = '') {
+  if (!openid) return
+  const threshold = Number(process.env.SCHEME2_HIGH_FREQ_PUBLISH_7D || 6)
+  if (!Number.isFinite(threshold) || threshold <= 0) return
+
+  try {
+    const { data: users } = await db.collection('users')
+      .where({ _openid: openid })
+      .limit(1)
+      .field({
+        _id: true,
+        identityCheckReasons: true,
+      })
+      .get()
+    const user = users[0]
+    if (!user?._id) return
+
+    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+    const { data: published } = await db.collection('activities')
+      .where({
+        publisherId: openid,
+        createdAt: _.gte(since),
+      })
+      .field({
+        _id: true,
+      })
+      .limit(Math.max(100, threshold + 20))
+      .get()
+    const publish7dCount = Array.isArray(published) ? published.length : 0
+    if (publish7dCount < threshold) {
+      await db.collection('users').doc(user._id).update({
+        data: {
+          recentPublish7dCount: publish7dCount,
+          updatedAt: db.serverDate(),
+        },
+      })
+      return
+    }
+
+    await db.collection('users').doc(user._id).update({
+      data: {
+        recentPublish7dCount: publish7dCount,
+        identityCheckRequired: true,
+        identityCheckStatus: 'required',
+        identityCheckReasons: mergeReasonCodes(user.identityCheckReasons, 'HIGH_FREQ_ORGANIZER'),
+        identityCheckTriggeredAt: db.serverDate(),
+        updatedAt: db.serverDate(),
+      },
+    })
+  } catch (e) {
+    console.error('高频组织者方案2触发更新失败', e)
+  }
 }
 
 exports.main = async (event, context) => {
@@ -304,6 +365,7 @@ exports.main = async (event, context) => {
       updatedAt: db.serverDate(),
     }
   }).catch(() => {})
+  markHighFrequencyOrganizerIfNeeded(OPENID)
 
   return {
     success: true,

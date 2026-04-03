@@ -41,6 +41,8 @@ exports.main = async (event, context) => {
       phone: encrypt(phone),
       verifyStatus: 'pending',
       verifyProvider: provider === 'wechat_official' ? 'wechat_official' : 'manual',
+      identityCheckRequired: true,
+      identityCheckStatus: 'pending',
       officialVerifyStatus: provider === 'wechat_official' ? 'pending_callback' : (users[0].officialVerifyStatus || 'not_started'),
       updatedAt: db.serverDate(),
     }

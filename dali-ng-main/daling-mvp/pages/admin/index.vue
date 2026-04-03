@@ -285,6 +285,42 @@
 
         <view class="card">
           <view class="title-row">
+            <text class="card-title">方案2触发队列（按需核验）</text>
+            <text class="status-pill status-pill--pending">{{ scheme2TriggeredUserList.length }}</text>
+          </view>
+          <text class="card-openid">
+            触发逻辑：被举报用户 / 高频组织者（不对全量发布者强制）
+          </text>
+          <view class="card-actions card-actions--single">
+            <button
+              class="action-btn action-btn--detail"
+              :disabled="userProfileCsvExporting"
+              @tap="exportUserProfileCsv"
+            >导出用户资料CSV</button>
+            <button
+              class="action-btn action-btn--approve"
+              @tap="activeTab = 'verify'"
+            >去处理认证</button>
+          </view>
+          <view v-if="scheme2TriggeredUserList.length === 0" class="empty empty--inline">
+            <text class="empty-text">暂无触发方案2的用户</text>
+          </view>
+          <view
+            v-for="item in scheme2TriggeredUserList.slice(0, 5)"
+            :key="`scheme2_${item.openid}`"
+            class="todo-item"
+          >
+            <view class="title-row">
+              <text class="card-sub">{{ item.nickname || '未命名用户' }}</text>
+              <text class="card-openid">{{ shortOpenid(item.openid) }}</text>
+            </view>
+            <text class="card-openid">原因：{{ scheme2ReasonText(item.identityCheckReasons) }}</text>
+            <text class="card-openid">发布7天：{{ item.recentPublish7dCount || 0 }} · 被举报：{{ item.reportAgainstCount || 0 }} · 状态：{{ scheme2StatusText(item.identityCheckStatus) }}</text>
+          </view>
+        </view>
+
+        <view class="card">
+          <view class="title-row">
             <text class="card-title">官方实名审计看板</text>
             <text class="status-pill status-pill--log">待回调 {{ officialVerifyAuditSummary.pendingOfficialCount }}</text>
           </view>
@@ -986,21 +1022,27 @@
             <button
               class="action-btn action-btn--export"
               :loading="csvExporting"
-              :disabled="csvExportingV2 || trendCsvExporting"
+              :disabled="csvExportingV2 || trendCsvExporting || userProfileCsvExporting"
               @tap="exportStatsCsv"
             >导出基础报表 CSV</button>
             <button
               class="action-btn action-btn--export action-btn--export-v2"
               :loading="csvExportingV2"
-              :disabled="csvExporting || trendCsvExporting"
+              :disabled="csvExporting || trendCsvExporting || userProfileCsvExporting"
               @tap="exportStatsCsvV2"
             >导出报表二期 CSV（双表）</button>
             <button
               class="action-btn action-btn--export action-btn--export-trend"
               :loading="trendCsvExporting"
-              :disabled="csvExporting || csvExportingV2"
+              :disabled="csvExporting || csvExportingV2 || userProfileCsvExporting"
               @tap="exportTrendCsv"
             >导出周/月趋势 CSV</button>
+            <button
+              class="action-btn action-btn--export action-btn--export-user"
+              :loading="userProfileCsvExporting"
+              :disabled="csvExporting || csvExportingV2 || trendCsvExporting"
+              @tap="exportUserProfileCsv"
+            >导出用户资料 CSV</button>
           </view>
           <text class="export-tip">导出总览统计 + 操作记录明细（当前筛选 + 当前时间范围）</text>
           <view class="export-config">
@@ -1332,6 +1374,7 @@ export default {
       officialCsvExporting: false,
       csvExportingV2: false,
       trendCsvExporting: false,
+      userProfileCsvExporting: false,
       trendWeekWindow: 12,
       trendMonthWindow: 6,
       trendDashboardMode: 'week',
@@ -1390,6 +1433,7 @@ export default {
       reportList: [],
       activityList: [],
       actionLogList: [],
+      userProfileList: [],
       exportSelectedFields: [
         'createdAt',
         'actionText',
@@ -1529,6 +1573,16 @@ export default {
       return Array.isArray(this.opsPatrol?.alerts)
         ? this.opsPatrol.alerts.slice(0, 3)
         : []
+    },
+
+    scheme2TriggeredUserList() {
+      return (this.userProfileList || [])
+        .filter((item) => item.identityCheckRequired || (Array.isArray(item.identityCheckReasons) && item.identityCheckReasons.length > 0))
+        .sort((a, b) => {
+          const scoreA = Number(a.reportAgainstCount || 0) * 20 + Number(a.recentPublish7dCount || 0)
+          const scoreB = Number(b.reportAgainstCount || 0) * 20 + Number(b.recentPublish7dCount || 0)
+          return scoreB - scoreA
+        })
     },
 
     searchPlaceholder() {
@@ -3145,6 +3199,7 @@ export default {
         this.reportList = res.reportList || []
         this.activityList = res.activityList || []
         this.actionLogList = res.actionLogList || []
+        this.userProfileList = res.userProfileList || []
         const pendingReportIdSet = new Set(
           this.reportList
             .filter((item) => (item.reportStatus || 'PENDING') === 'PENDING')
@@ -3676,6 +3731,26 @@ export default {
     shortOpenid(openid) {
       if (!openid) return ''
       return openid.slice(0, 6) + '...'
+    },
+
+    scheme2ReasonText(reasons = []) {
+      const map = {
+        REPORTED_USER: '被举报触发',
+        HIGH_FREQ_ORGANIZER: '高频组织者',
+      }
+      if (!Array.isArray(reasons) || reasons.length === 0) return '暂无'
+      return reasons.map((item) => map[item] || item).join(' / ')
+    },
+
+    scheme2StatusText(status = '') {
+      const map = {
+        none: '未触发',
+        required: '待补充核验',
+        pending: '核验中',
+        approved: '已通过',
+        rejected: '已驳回',
+      }
+      return map[String(status || '').toLowerCase()] || '待确认'
     },
 
     formatTime(t) {
@@ -4525,6 +4600,73 @@ export default {
       return lines.join('\n')
     },
 
+    buildUserProfileCsv(includeSensitive = false) {
+      const lines = []
+      const append = (values = []) => lines.push(this.buildCsvLine(values))
+      const now = new Date()
+      const users = this.userProfileList || []
+      const triggeredUsers = this.scheme2TriggeredUserList || []
+
+      append(['搭里用户资料导出'])
+      append(['导出时间', this.formatExportTime(now)])
+      append(['导出角色', this.adminRoleLabel])
+      append(['城市范围', this.cityIdLabel])
+      append(['记录数量', users.length])
+      append(['方案2触发数量', triggeredUsers.length])
+      append(['导出类型', includeSensitive ? '含敏感字段（姓名/手机号明文）' : '脱敏导出'])
+      append([])
+
+      append([
+        '序号',
+        'OPENID',
+        '昵称',
+        '城市',
+        '实名状态',
+        '实名通道',
+        '方案2状态',
+        '方案2触发原因',
+        '被举报次数',
+        '近7天发布数',
+        '累计发布',
+        '累计报名',
+        '累计到场',
+        '累计爽约',
+        '姓名',
+        '手机号',
+        '创建时间',
+        '更新时间',
+      ])
+
+      if (users.length === 0) {
+        append(['-', '-', '-', '-', '-', '-', '-', '-', 0, 0, 0, 0, 0, 0, '-', '-', '-', '-'])
+      } else {
+        users.forEach((item, index) => {
+          append([
+            index + 1,
+            item.openid || '',
+            item.nickname || '',
+            item.cityId || '',
+            this.scheme2StatusText(item.verifyStatus || 'none'),
+            item.verifyProvider || '',
+            this.scheme2StatusText(item.identityCheckStatus || 'none'),
+            this.scheme2ReasonText(item.identityCheckReasons || []),
+            Number(item.reportAgainstCount || 0),
+            Number(item.recentPublish7dCount || 0),
+            Number(item.publishCount || 0),
+            Number(item.joinCount || 0),
+            Number(item.attendCount || 0),
+            Number(item.noShowCount || 0),
+            includeSensitive ? (item.realNamePlain || '') : (item.realNameMasked || ''),
+            includeSensitive ? (item.phonePlain || '') : (item.phoneMasked || ''),
+            this.formatTime(item.createdAt),
+            this.formatTime(item.updatedAt),
+          ])
+        })
+      }
+
+      return lines.join('\n')
+    },
+
     async saveCsvToClipboard(csvText) {
       return new Promise((resolve, reject) => {
         uni.setClipboardData({
@@ -4569,8 +4711,63 @@ export default {
       })
     },
 
+    async exportUserProfileCsv() {
+      if (this.userProfileCsvExporting || this.csvExporting || this.csvExportingV2 || this.trendCsvExporting) return
+      const includeSensitive = await new Promise((resolve) => {
+        uni.showActionSheet({
+          itemList: ['导出脱敏版（推荐）', '导出含敏感字段（姓名/手机号明文）'],
+          success: (res) => resolve(res.tapIndex === 1),
+          fail: () => resolve(null),
+        })
+      })
+      if (includeSensitive === null) return
+
+      if (includeSensitive) {
+        const confirmed = await new Promise((resolve) => {
+          uni.showModal({
+            title: '确认敏感导出',
+            content: '该文件将包含用户真实姓名与手机号明文。请仅用于必要运营，避免外传。',
+            confirmText: '确认导出',
+            cancelText: '取消',
+            success: (res) => resolve(!!res.confirm),
+            fail: () => resolve(false),
+          })
+        })
+        if (!confirmed) return
+      }
+
+      this.userProfileCsvExporting = true
+      try {
+        const csvText = this.buildUserProfileCsv(includeSensitive)
+        const fileName = includeSensitive
+          ? `dali_user_profile_sensitive_${this.formatDateToken(new Date())}.csv`
+          : `dali_user_profile_masked_${this.formatDateToken(new Date())}.csv`
+
+        try {
+          const filePath = await this.saveCsvToFile(csvText, fileName)
+          await this.openCsvFile(filePath)
+          uni.showToast({ title: '用户资料CSV已生成', icon: 'success' })
+          return
+        } catch (fileErr) {
+          console.warn('保存用户资料CSV失败，回退剪贴板', fileErr)
+        }
+
+        await this.saveCsvToClipboard(csvText)
+        uni.showModal({
+          title: '已复制用户资料CSV',
+          content: '当前环境不支持直接打开文件，已复制到剪贴板，可粘贴到表格工具保存。',
+          showCancel: false,
+        })
+      } catch (e) {
+        console.error('导出用户资料CSV失败', e)
+        uni.showToast({ title: '导出失败，请重试', icon: 'none' })
+      } finally {
+        this.userProfileCsvExporting = false
+      }
+    },
+
     async exportStatsCsv() {
-      if (this.csvExporting || this.csvExportingV2 || this.trendCsvExporting) return
+      if (this.csvExporting || this.csvExportingV2 || this.trendCsvExporting || this.userProfileCsvExporting) return
       this.csvExporting = true
       try {
         const csvText = this.buildStatsCsv()
@@ -4600,7 +4797,7 @@ export default {
     },
 
     async exportOfficialVerifyCsv() {
-      if (this.officialCsvExporting || this.csvExporting || this.csvExportingV2 || this.trendCsvExporting) return
+      if (this.officialCsvExporting || this.csvExporting || this.csvExportingV2 || this.trendCsvExporting || this.userProfileCsvExporting) return
       this.officialCsvExporting = true
       try {
         const csvText = this.buildOfficialVerifyCsv()
@@ -4630,7 +4827,7 @@ export default {
     },
 
     async exportStatsCsvV2() {
-      if (this.csvExportingV2 || this.csvExporting || this.trendCsvExporting) return
+      if (this.csvExportingV2 || this.csvExporting || this.trendCsvExporting || this.userProfileCsvExporting) return
       this.csvExportingV2 = true
       try {
         const token = this.formatDateToken(new Date())
@@ -4672,7 +4869,7 @@ export default {
     },
 
     async exportTrendCsv() {
-      if (this.trendCsvExporting || this.csvExporting || this.csvExportingV2) return
+      if (this.trendCsvExporting || this.csvExporting || this.csvExportingV2 || this.userProfileCsvExporting) return
       this.trendCsvExporting = true
       try {
         const csvText = this.buildTrendCsv()
@@ -4948,6 +5145,10 @@ export default {
 }
 .action-btn--export-trend {
   background: #8A5A00;
+  color: #fff;
+}
+.action-btn--export-user {
+  background: #374151;
   color: #fff;
 }
 .export-config {

@@ -2,6 +2,41 @@ const cloud = require('wx-server-sdk')
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 const db = cloud.database()
 
+function mergeReasonCodes(existing = [], incoming = '') {
+  const base = Array.isArray(existing) ? existing.filter(Boolean) : []
+  if (incoming) base.push(incoming)
+  return [...new Set(base)].slice(0, 8)
+}
+
+async function markTargetPublisherForScheme2(publisherOpenid = '') {
+  if (!publisherOpenid) return
+  try {
+    const { data } = await db.collection('users')
+      .where({ _openid: publisherOpenid })
+      .limit(1)
+      .field({
+        _id: true,
+        identityCheckReasons: true,
+      })
+      .get()
+    const user = data[0]
+    if (!user?._id) return
+
+    await db.collection('users').doc(user._id).update({
+      data: {
+        reportAgainstCount: db.command.inc(1),
+        identityCheckRequired: true,
+        identityCheckStatus: 'required',
+        identityCheckReasons: mergeReasonCodes(user.identityCheckReasons, 'REPORTED_USER'),
+        identityCheckTriggeredAt: db.serverDate(),
+        updatedAt: db.serverDate(),
+      },
+    })
+  } catch (e) {
+    console.error('标记方案2触发失败', e)
+  }
+}
+
 exports.main = async (event) => {
   const { OPENID } = cloud.getWXContext()
   const { targetId, targetType = 'activity', reason } = event || {}
@@ -76,6 +111,8 @@ exports.main = async (event) => {
       updatedAt: db.serverDate(),
     }
   })
+
+  await markTargetPublisherForScheme2(activity.publisherId || activity._openid || '')
 
   return { success: true, message: '举报已提交，平台会尽快处理' }
 }
