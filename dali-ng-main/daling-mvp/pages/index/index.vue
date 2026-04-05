@@ -101,7 +101,9 @@
       class="list"
       refresher-enabled
       :refresher-triggered="isRefreshing"
-      @refresherrefresh="onPullDownRefresh"
+      @refresherrefresh="handleListRefresh"
+      @refresherrestore="onRefresherRestore"
+      @refresherabort="onRefresherAbort"
     >
       <view v-if="loading" class="center-tip">
         <text>加载中...</text>
@@ -485,22 +487,42 @@ export default {
     await this.initAndLoad()
   },
 
-  async onPullDownRefresh() {
-    if (this.isRefreshing) return
-    this.isRefreshing = true
-    try {
-      await this.ensureAdminVisibility(true)
-      await this.initAndLoad()
-      uni.showToast({ title: '已刷新', icon: 'success', duration: 1200 })
-    } catch (e) {
-      uni.showToast({ title: '刷新失败，请重试', icon: 'none' })
-    } finally {
-      this.isRefreshing = false
-      uni.stopPullDownRefresh()
-    }
+  onPullDownRefresh() {
+    this.handleListRefresh()
   },
 
   methods: {
+    finishListRefresh() {
+      this.isRefreshing = false
+      uni.stopPullDownRefresh()
+    },
+
+    onRefresherRestore() {
+      this.finishListRefresh()
+    },
+
+    onRefresherAbort() {
+      this.finishListRefresh()
+    },
+
+    async handleListRefresh() {
+      if (this.isRefreshing) return
+      this.isRefreshing = true
+      const guardTimer = setTimeout(() => {
+        this.finishListRefresh()
+      }, 8000)
+      try {
+        await this.ensureAdminVisibility(true)
+        await this.initAndLoad()
+        uni.showToast({ title: '已刷新', icon: 'success', duration: 1000 })
+      } catch (e) {
+        uni.showToast({ title: '刷新失败，请重试', icon: 'none' })
+      } finally {
+        clearTimeout(guardTimer)
+        this.finishListRefresh()
+      }
+    },
+
     goCalendar() {
       uni.navigateTo({ url: '/pages/calendar/index' })
     },
@@ -988,11 +1010,11 @@ export default {
 
 <style>
 .page {
-  min-height: 100vh;
+  height: 100vh;
   background: #f5f5f5;
   display: flex;
   flex-direction: column;
-  padding-bottom: 120rpx;
+  overflow: hidden;
 }
 
 .tip-bar {
@@ -1246,7 +1268,7 @@ export default {
 
 .list {
   flex: 1;
-  padding: 16rpx;
+  padding: 16rpx 16rpx 180rpx;
   box-sizing: border-box;
 }
 

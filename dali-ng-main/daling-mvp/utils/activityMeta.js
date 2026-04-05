@@ -8,8 +8,6 @@ export const ACTIVITY_CATEGORY_LABEL_MAP = {
   food: '美食',
   movie: '电影',
   travel: '旅行',
-  parentChild: '亲子',
-  handmade: '手作',
   other: '其他',
 }
 
@@ -41,8 +39,6 @@ export const PUBLISH_CATEGORY_OPTIONS = [
   { id: 'food', label: ACTIVITY_CATEGORY_LABEL_MAP.food },
   { id: 'movie', label: ACTIVITY_CATEGORY_LABEL_MAP.movie },
   { id: 'travel', label: ACTIVITY_CATEGORY_LABEL_MAP.travel },
-  { id: 'parentChild', label: ACTIVITY_CATEGORY_LABEL_MAP.parentChild },
-  { id: 'handmade', label: ACTIVITY_CATEGORY_LABEL_MAP.handmade },
   { id: 'other', label: ACTIVITY_CATEGORY_LABEL_MAP.other },
 ]
 

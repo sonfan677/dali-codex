@@ -38,8 +38,6 @@ const CATEGORY_MAP = {
   food: '美食',
   movie: '电影',
   travel: '旅行',
-  parentChild: '亲子',
-  handmade: '手作',
   other: '其他',
 }
 
