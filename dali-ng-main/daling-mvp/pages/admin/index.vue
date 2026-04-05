@@ -2549,8 +2549,10 @@ export default {
       this.todoPrefReady = true
     }
     await this.loadData()
-    this.maybeAutoRemindAutoVerify()
-    this.maybeAutoRemindRiskTodos()
+    const hasAutoVerifyReminder = this.maybeAutoRemindAutoVerify()
+    if (!hasAutoVerifyReminder) {
+      this.maybeAutoRemindRiskTodos()
+    }
   },
 
   watch: {
@@ -2983,13 +2985,13 @@ export default {
     maybeAutoRemindAutoVerify() {
       const summary = this.autoVerifySummary || {}
       const pending = Number(summary.pendingReviewCount || 0)
-      if (!this.hasAccess || pending <= 0) return
+      if (!this.hasAccess || pending <= 0) return false
       const token = [
         pending,
         Number(summary.autoApprovedThisLoadCount || 0),
         summary.latestAutoApprovedAt || '',
       ].join('|')
-      if (token && token === this.autoVerifyReminderToken) return
+      if (token && token === this.autoVerifyReminderToken) return false
       this.autoVerifyReminderToken = token
 
       const autoNowCount = Number(summary.autoApprovedThisLoadCount || 0)
@@ -3010,6 +3012,7 @@ export default {
           this.searchKeyword = ''
         },
       })
+      return true
     },
 
     toggleExportField(fieldKey) {

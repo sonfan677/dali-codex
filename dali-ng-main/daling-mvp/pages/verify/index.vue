@@ -6,12 +6,17 @@
         <text class="desc">{{ headerDesc }}</text>
       </view>
 
-      <view v-if="needsIdentityRecheck" class="risk-box">
+      <view v-if="!stateReady" class="pending-box">
+        <text class="pending-icon">⏳</text>
+        <text class="pending-text">核验状态加载中...</text>
+      </view>
+
+      <view v-else-if="needsIdentityRecheck" class="risk-box">
         <text class="risk-title">当前账号需补充身份核验</text>
         <text class="risk-desc">{{ identityReasonText }}</text>
       </view>
 
-      <view v-if="alreadyVerified" class="verified-box">
+      <view v-else-if="alreadyVerified" class="verified-box">
         <text class="verified-icon">✅</text>
         <text class="verified-text">你已完成身份核验，可以发布活动了</text>
         <text class="verified-sub">核验状态：已通过</text>
@@ -65,8 +70,13 @@ export default {
   data() {
     return {
       submitting: false,
+      stateReady: false,
       form: { realName: '', idCard: '' },
     }
+  },
+
+  async onShow() {
+    await this.syncVerifyState()
   },
 
   computed: {
@@ -101,6 +111,62 @@ export default {
   },
 
   methods: {
+    applyVerifyState(snapshot = {}) {
+      if (snapshot.openid) this.userStore.openid = snapshot.openid
+      if (typeof snapshot.nickname === 'string') this.userStore.nickname = snapshot.nickname
+      if (typeof snapshot.avatarUrl === 'string') this.userStore.avatarUrl = snapshot.avatarUrl
+      this.userStore.isVerified = !!snapshot.isVerified
+      this.userStore.verifyStatus = snapshot.verifyStatus || 'none'
+      this.userStore.verifyProvider = snapshot.verifyProvider || 'manual'
+      this.userStore.phoneVerified = !!snapshot.phoneVerified
+      this.userStore.mobileBindStatus = snapshot.mobileBindStatus || (snapshot.phoneVerified ? 'bound' : 'unbound')
+      this.userStore.mobileBoundAt = snapshot.mobileBoundAt || null
+      this.userStore.identityCheckRequired = !!snapshot.identityCheckRequired
+      this.userStore.identityCheckStatus = snapshot.identityCheckStatus || 'none'
+      this.userStore.identityCheckReasons = Array.isArray(snapshot.identityCheckReasons) ? snapshot.identityCheckReasons : []
+      this.userStore.identityCheckTriggeredAt = snapshot.identityCheckTriggeredAt || null
+      this.userStore.isLoggedIn = true
+    },
+
+    applyVerifyStateToGlobal(snapshot = {}) {
+      getApp().globalData = getApp().globalData || {}
+      getApp().globalData.isVerified = !!snapshot.isVerified
+      getApp().globalData.verifyStatus = snapshot.verifyStatus || 'none'
+      getApp().globalData.verifyProvider = snapshot.verifyProvider || 'manual'
+      getApp().globalData.identityCheckRequired = !!snapshot.identityCheckRequired
+      getApp().globalData.identityCheckStatus = snapshot.identityCheckStatus || 'none'
+      getApp().globalData.identityCheckReasons = Array.isArray(snapshot.identityCheckReasons) ? snapshot.identityCheckReasons : []
+      getApp().globalData.identityCheckTriggeredAt = snapshot.identityCheckTriggeredAt || null
+      if (snapshot.openid) getApp().globalData.openid = snapshot.openid
+      if (typeof snapshot.nickname === 'string') getApp().globalData.nickname = snapshot.nickname
+      if (typeof snapshot.avatarUrl === 'string') getApp().globalData.avatarUrl = snapshot.avatarUrl
+      if (typeof snapshot.phoneVerified !== 'undefined') getApp().globalData.phoneVerified = !!snapshot.phoneVerified
+      if (typeof snapshot.mobileBindStatus === 'string') getApp().globalData.mobileBindStatus = snapshot.mobileBindStatus
+      if (typeof snapshot.mobileBoundAt !== 'undefined') getApp().globalData.mobileBoundAt = snapshot.mobileBoundAt || null
+      getApp().globalData.isLoggedIn = true
+    },
+
+    async syncVerifyState() {
+      this.stateReady = false
+      const gd = getApp().globalData || {}
+      if (gd.isLoggedIn && (gd.openid || this.userStore.openid)) {
+        this.applyVerifyState(gd)
+        this.stateReady = true
+        return
+      }
+      try {
+        const res = await callCloud('login', {})
+        if (res && res.success) {
+          this.applyVerifyStateToGlobal(res)
+          this.applyVerifyState(res)
+        }
+      } catch (e) {
+        console.error('同步核验状态失败', e)
+      } finally {
+        this.stateReady = true
+      }
+    },
+
     syncIdentityToGlobal(patch = {}) {
       getApp().globalData = getApp().globalData || {}
       Object.keys(patch).forEach((key) => {
