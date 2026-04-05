@@ -1010,11 +1010,11 @@ export default {
 
 <style>
 .page {
+  min-height: 100vh;
   height: 100vh;
   background: #f5f5f5;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
 }
 
 .tip-bar {
@@ -1268,6 +1268,7 @@ export default {
 
 .list {
   flex: 1;
+  min-height: 0;
   padding: 16rpx 16rpx 180rpx;
   box-sizing: border-box;
 }
