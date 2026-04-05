@@ -61,6 +61,58 @@
 import { callCloud } from '@/utils/cloud.js'
 import { useUserStore } from '@/stores/user.js'
 
+const ID_CARD_WEIGHT = [7, 9, 10, 5, 8, 4, 2, 1, 6, 3, 7, 9, 10, 5, 8, 4, 2]
+const ID_CARD_CHECK_CODES = ['1', '0', 'X', '9', '8', '7', '6', '5', '4', '3', '2']
+const ID_CARD_REGION_PREFIX = new Set([
+  '11', '12', '13', '14', '15',
+  '21', '22', '23',
+  '31', '32', '33', '34', '35', '36', '37',
+  '41', '42', '43', '44', '45', '46',
+  '50', '51', '52', '53', '54',
+  '61', '62', '63', '64', '65',
+  '71', '81', '82', '91',
+])
+
+function isValidBirthDate(yyyymmdd = '') {
+  if (!/^\d{8}$/.test(yyyymmdd)) return false
+  const year = Number(yyyymmdd.slice(0, 4))
+  const month = Number(yyyymmdd.slice(4, 6))
+  const day = Number(yyyymmdd.slice(6, 8))
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return false
+  if (year < 1900 || year > 2099) return false
+  const date = new Date(year, month - 1, day)
+  if (
+    date.getFullYear() !== year
+    || date.getMonth() + 1 !== month
+    || date.getDate() !== day
+  ) return false
+  return date.getTime() <= Date.now()
+}
+
+function validateChineseIdCard(raw = '') {
+  const idCard = String(raw || '').trim().toUpperCase()
+  if (!idCard) {
+    return { ok: false, message: '请填写身份证号' }
+  }
+  if (!/^\d{17}[\dX]$/.test(idCard)) {
+    return { ok: false, message: '身份证号需为18位（最后一位可为X）' }
+  }
+  if (!ID_CARD_REGION_PREFIX.has(idCard.slice(0, 2))) {
+    return { ok: false, message: '身份证号地区码不合法' }
+  }
+  if (!isValidBirthDate(idCard.slice(6, 14))) {
+    return { ok: false, message: '身份证号出生日期不合法' }
+  }
+  const sum = ID_CARD_WEIGHT.reduce((acc, weight, idx) => {
+    return acc + weight * Number(idCard[idx])
+  }, 0)
+  const checkCode = ID_CARD_CHECK_CODES[sum % 11]
+  if (checkCode !== idCard[17]) {
+    return { ok: false, message: '身份证号校验位不正确，请检查后重试' }
+  }
+  return { ok: true, normalized: idCard }
+}
+
 export default {
   setup() {
     const userStore = useUserStore()
@@ -178,8 +230,9 @@ export default {
         uni.showToast({ title: '请填写真实姓名', icon: 'none' })
         return
       }
-      if (!/^\d{17}[\dXx]$/.test(String(this.form.idCard || '').trim())) {
-        uni.showToast({ title: '请填写正确的身份证号', icon: 'none' })
+      const idCardValidation = validateChineseIdCard(this.form.idCard)
+      if (!idCardValidation.ok) {
+        uni.showToast({ title: idCardValidation.message || '请填写正确的身份证号', icon: 'none' })
         return
       }
 
@@ -187,7 +240,7 @@ export default {
       try {
         const res = await callCloud('submitVerify', {
           realName: this.form.realName.trim(),
-          idCard: String(this.form.idCard || '').trim().toUpperCase(),
+          idCard: idCardValidation.normalized,
           verifyProvider: 'manual',
         })
 
