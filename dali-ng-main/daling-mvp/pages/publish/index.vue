@@ -42,6 +42,17 @@
           </picker>
         </view>
 
+        <view v-if="form.categoryId === 'other'" class="field">
+          <text class="label">其它分类说明 *</text>
+          <input
+            class="input"
+            v-model="form.customCategoryLabel"
+            placeholder="请填写具体分类（如：摄影、桌游教学）"
+            maxlength="20"
+          />
+          <text class="hint">发现页统一展示为“其它”，用于后台统计优化分类</text>
+        </view>
+
         <!-- 地点 -->
         <view class="field" @tap="chooseLocation">
           <text class="label">活动地点 *</text>
@@ -244,6 +255,7 @@ export default {
         startTimeMs: 0,
         categoryId: PUBLISH_CATEGORY_OPTIONS[0].id,
         categoryLabel: PUBLISH_CATEGORY_OPTIONS[0].label,
+        customCategoryLabel: '',
         maxParticipants: null,
         isGroupFormation: false,
         minParticipants: 2,
@@ -297,6 +309,9 @@ export default {
       const selected = this.categoryOptions[idx] || this.categoryOptions[0]
       this.form.categoryId = selected.id
       this.form.categoryLabel = selected.label
+      if (selected.id !== 'other') {
+        this.form.customCategoryLabel = ''
+      }
     },
 
     // 失焦时校验并格式化
@@ -527,6 +542,10 @@ _doChooseLocation() {
         uni.showToast({ title: '请选择开始时间', icon: 'none' })
         return
       }
+      if (this.form.categoryId === 'other' && !String(this.form.customCategoryLabel || '').trim()) {
+        uni.showToast({ title: '请选择“其它”时请填写具体分类', icon: 'none' })
+        return
+      }
       if (this.form.startTimeMs <= Date.now()) {
         uni.showToast({ title: '开始时间不能早于现在', icon: 'none' })
         return
@@ -543,6 +562,9 @@ _doChooseLocation() {
           description:      this.form.description.trim(),
           categoryId:       this.form.categoryId,
           categoryLabel:    this.form.categoryLabel,
+          customCategoryLabel: this.form.categoryId === 'other'
+            ? String(this.form.customCategoryLabel || '').trim()
+            : '',
           lat:              this.form.lat,
           lng:              this.form.lng,
           address:          this.form.address,
@@ -575,9 +597,12 @@ _doChooseLocation() {
             IDENTITY_CHECK_REQUIRED: '当前账号需补充身份核验',
             INVALID_TITLE: '标题格式有误',
             INVALID_CATEGORY: '请选择有效活动分类',
+            INVALID_CUSTOM_CATEGORY: '请选择“其它”时请填写具体分类',
             START_PASSED:  '开始时间不能早于现在',
             INVALID_MIN:   '成团人数至少2人',
             INVALID_WINDOW:'成团时间窗口不合法',
+            OUT_OF_DALI_REGION: '活动地点需在大理白族自治州范围内',
+            CITY_NOT_SUPPORTED: '当前仅支持在大理白族自治州发布活动',
           }
           uni.showToast({ title: msgs[res.error] || res.message || '发布失败', icon: 'none' })
         }

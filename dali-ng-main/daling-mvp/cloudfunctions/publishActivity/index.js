@@ -38,6 +38,8 @@ const CATEGORY_MAP = {
   food: '美食',
   movie: '电影',
   travel: '旅行',
+  parentChild: '亲子',
+  handmade: '手作',
   other: '其他',
 }
 
@@ -59,6 +61,58 @@ function isInDaliPrefecture(lat, lng) {
     nLng >= DALI_PREFECTURE_BOUNDS.minLng &&
     nLng <= DALI_PREFECTURE_BOUNDS.maxLng
   )
+}
+
+function normalizeCustomCategoryLabel(value = '') {
+  return String(value || '').trim().replace(/\s+/g, ' ')
+}
+
+async function recordCustomCategoryStat({
+  cityId = 'dali',
+  customCategoryLabel = '',
+  activityId = '',
+  publisherId = '',
+} = {}) {
+  const latestLabel = normalizeCustomCategoryLabel(customCategoryLabel)
+  if (!latestLabel) return
+  const normalizedLabel = latestLabel.toLowerCase()
+  try {
+    const { data } = await db.collection('categoryCustomStats')
+      .where({ cityId, normalizedLabel })
+      .limit(1)
+      .get()
+    const existed = Array.isArray(data) ? data[0] : null
+    if (existed?._id) {
+      await db.collection('categoryCustomStats').doc(existed._id).update({
+        data: {
+          count: _.inc(1),
+          latestLabel,
+          lastActivityId: activityId || existed.lastActivityId || '',
+          lastPublisherId: publisherId || existed.lastPublisherId || '',
+          lastUsedAt: db.serverDate(),
+          updatedAt: db.serverDate(),
+        },
+      })
+      return
+    }
+
+    await db.collection('categoryCustomStats').add({
+      data: {
+        cityId,
+        normalizedLabel,
+        latestLabel,
+        count: 1,
+        firstUsedAt: db.serverDate(),
+        lastUsedAt: db.serverDate(),
+        lastActivityId: activityId || '',
+        lastPublisherId: publisherId || '',
+        createdAt: db.serverDate(),
+        updatedAt: db.serverDate(),
+      },
+    })
+  } catch (e) {
+    console.error('记录自定义分类统计失败', e)
+  }
 }
 
 function buildTrustProfileForPublish(user) {
@@ -339,6 +393,7 @@ exports.main = async (event, context) => {
     description = '',
     categoryId = 'other',
     categoryLabel = '',
+    customCategoryLabel = '',
     lat,
     lng,
     address = '',
@@ -355,6 +410,8 @@ exports.main = async (event, context) => {
   const finalCityId = cityConfig.cityId
   const latNum = Number(lat)
   const lngNum = Number(lng)
+  const finalCategoryId = String(categoryId || 'other')
+  const normalizedCustomCategoryLabel = normalizeCustomCategoryLabel(customCategoryLabel)
 
   // 2. 参数校验
   if (!title || title.trim().length === 0) {
@@ -372,8 +429,11 @@ exports.main = async (event, context) => {
   if (!isInDaliPrefecture(latNum, lngNum)) {
     return { success: false, error: 'OUT_OF_DALI_REGION', message: '活动地点需在云南省大理白族自治州范围内' }
   }
-  if (!CATEGORY_MAP[categoryId]) {
+  if (!CATEGORY_MAP[finalCategoryId]) {
     return { success: false, error: 'INVALID_CATEGORY', message: '活动分类不合法' }
+  }
+  if (finalCategoryId === 'other' && !normalizedCustomCategoryLabel) {
+    return { success: false, error: 'INVALID_CUSTOM_CATEGORY', message: '选择“其它”时请填写具体分类' }
   }
   if (!startTime || !endTime) {
     return { success: false, error: 'INVALID_TIME', message: '请选择活动时间' }
@@ -403,6 +463,10 @@ exports.main = async (event, context) => {
     return { success: false, error: 'INVALID_MIN', message: '成团最低人数至少2人' }
   }
 
+  const finalCategoryLabel = finalCategoryId === 'other'
+    ? '其他'
+    : (categoryLabel || CATEGORY_MAP[finalCategoryId] || '其他')
+
   // 3. 成团截止时间（发布后N分钟）
   const formationDeadline = isGroupFormation
     ? new Date(now + finalFormationWindow * 60 * 1000)
@@ -417,8 +481,9 @@ exports.main = async (event, context) => {
       _openid: OPENID,
       title: title.trim(),
       description: description.trim(),
-      categoryId,
-      categoryLabel: categoryLabel || CATEGORY_MAP[categoryId] || '其他',
+      categoryId: finalCategoryId,
+      categoryLabel: finalCategoryLabel,
+      categoryCustomLabel: finalCategoryId === 'other' ? normalizedCustomCategoryLabel : '',
       coverImage: '',
       cityId: finalCityId,
       location: {
@@ -502,6 +567,14 @@ exports.main = async (event, context) => {
     }
   }).catch(() => {})
   markHighFrequencyOrganizerIfNeeded(OPENID)
+  if (finalCategoryId === 'other' && normalizedCustomCategoryLabel) {
+    recordCustomCategoryStat({
+      cityId: finalCityId,
+      customCategoryLabel: normalizedCustomCategoryLabel,
+      activityId: result._id,
+      publisherId: OPENID,
+    })
+  }
 
   return {
     success: true,

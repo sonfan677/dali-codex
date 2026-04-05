@@ -2,7 +2,10 @@
   "pages": [
     {
       "path": "pages/index/index",
-      "style": { "navigationBarTitleText": "搭里" }
+      "style": {
+        "navigationBarTitleText": "搭里",
+        "enablePullDownRefresh": true
+      }
     },
     {
       "path": "pages/calendar/index",

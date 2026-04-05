@@ -32,6 +32,8 @@ const CATEGORY_MAP = {
   food: '美食',
   movie: '电影',
   travel: '旅行',
+  parentChild: '亲子',
+  handmade: '手作',
   other: '其他',
 }
 
@@ -257,6 +259,7 @@ exports.main = async (event, context) => {
     Number.isFinite(inputRadius) && inputRadius > 0 ? inputRadius : defaultRadius
   )
   const normalizedKeyword = normalizeKeyword(keyword)
+  const keywordTokens = normalizedKeyword.split(/\s+/).filter(Boolean)
   const normalizedCategoryId = String(categoryId || 'all')
   const now = new Date()
   const safeLimit = Math.max(20, Math.min(1000, Number(limit) || 200))
@@ -304,7 +307,7 @@ exports.main = async (event, context) => {
       if (isCategoryDirectMatch && itemCategoryId !== normalizedCategoryId) {
         return false
       }
-      if (!normalizedKeyword) return true
+      if (!keywordTokens.length) return true
       const haystack = [
         a.title,
         a.description,
@@ -315,7 +318,7 @@ exports.main = async (event, context) => {
         .filter(Boolean)
         .join(' ')
         .toLowerCase()
-      return haystack.includes(normalizedKeyword)
+      return keywordTokens.every((token) => haystack.includes(token))
     })
 
   const publisherIds = [...new Set(mappedList.map((a) => a.publisherId).filter(Boolean))]

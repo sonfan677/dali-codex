@@ -96,7 +96,13 @@
       </view>
     </view>
 
-    <scroll-view scroll-y class="list">
+    <scroll-view
+      scroll-y
+      class="list"
+      refresher-enabled
+      :refresher-triggered="isRefreshing"
+      @refresherrefresh="onPullDownRefresh"
+    >
       <view v-if="loading" class="center-tip">
         <text>加载中...</text>
       </view>
@@ -275,6 +281,7 @@ export default {
       selectorTitle: '',
       selectorValue: '',
       selectorOptions: [],
+      isRefreshing: false,
     }
   },
 
@@ -284,12 +291,26 @@ export default {
       return this.activities
     },
 
+    hasSearchMode() {
+      return !!String(this.appliedKeyword || '').trim()
+    },
+
+    hasFilterMode() {
+      return !!(
+        this.categoryFilterId !== 'all' ||
+        !!this.distanceFilterId ||
+        this.dateFilterId !== 'all' ||
+        this.statusFilterId !== 'all'
+      )
+    },
+
     displayActivities() {
       return this.filterActivities(this.baseActivities)
     },
 
     emptyText() {
       if (this.onboardingMockActive) return '点击任意示例活动，授权后即可看你附近 5km 内活动'
+      if (this.hasSearchMode || this.hasFilterMode) return '暂时没有活动'
       if (this.lastQueryMode === 'nearby') return '附近暂无真实活动'
       return '当前暂无可展示活动'
     },
@@ -464,6 +485,21 @@ export default {
     await this.initAndLoad()
   },
 
+  async onPullDownRefresh() {
+    if (this.isRefreshing) return
+    this.isRefreshing = true
+    try {
+      await this.ensureAdminVisibility(true)
+      await this.initAndLoad()
+      uni.showToast({ title: '已刷新', icon: 'success', duration: 1200 })
+    } catch (e) {
+      uni.showToast({ title: '刷新失败，请重试', icon: 'none' })
+    } finally {
+      this.isRefreshing = false
+      uni.stopPullDownRefresh()
+    }
+  },
+
   methods: {
     goCalendar() {
       uni.navigateTo({ url: '/pages/calendar/index' })
@@ -597,6 +633,8 @@ export default {
     applySearchFilter(list = []) {
       const keyword = String(this.appliedKeyword || '').trim().toLowerCase()
       if (!keyword) return list
+      const tokens = keyword.split(/\s+/).filter(Boolean)
+      if (!tokens.length) return list
       return list.filter((item) => {
         const haystack = [
           item.title,
@@ -605,7 +643,7 @@ export default {
           item.categoryLabel,
           item.publisherNickname,
         ].filter(Boolean).join(' ').toLowerCase()
-        return haystack.includes(keyword)
+        return tokens.every((token) => haystack.includes(token))
       })
     },
 
