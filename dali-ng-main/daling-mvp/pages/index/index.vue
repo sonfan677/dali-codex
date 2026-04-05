@@ -98,7 +98,8 @@
 
     <scroll-view
       scroll-y
-      :class="['list', { 'list--with-banner': showBottomAuthBanner }]"
+      class="list"
+      :style="listStyle"
       refresher-enabled
       :refresher-triggered="isRefreshing"
       @refresherrefresh="handleListRefresh"
@@ -130,6 +131,7 @@
     <view
       v-if="showBottomAuthBanner"
       class="auth-banner"
+      :style="authBannerStyle"
       @tap="requestLocation"
     >
       <text class="banner-text">📍 发现你附近正在发生的活动 →</text>
@@ -284,6 +286,9 @@ export default {
       selectorValue: '',
       selectorOptions: [],
       isRefreshing: false,
+      listBottomPaddingPx: 12,
+      listBottomPaddingWithBannerPx: 120,
+      authBannerBottomPx: 16,
     }
   },
 
@@ -470,9 +475,21 @@ export default {
       if (meters >= 1000) return `${Math.round(meters / 1000)}km`
       return `${meters}m`
     },
+
+    listStyle() {
+      const bottom = this.showBottomAuthBanner
+        ? this.listBottomPaddingWithBannerPx
+        : this.listBottomPaddingPx
+      return { paddingBottom: `${Math.max(0, Number(bottom) || 0)}px` }
+    },
+
+    authBannerStyle() {
+      return { bottom: `${Math.max(0, Number(this.authBannerBottomPx) || 0)}px` }
+    },
   },
 
   onLoad() {
+    this.initLayoutAdaptiveMetrics()
     uni.$on('showPrivacyPopup', () => {
       this.$refs.privacyPopup && this.$refs.privacyPopup.authorize()
     })
@@ -492,6 +509,37 @@ export default {
   },
 
   methods: {
+    initLayoutAdaptiveMetrics() {
+      try {
+        const info = (typeof wx !== 'undefined' && typeof wx.getWindowInfo === 'function')
+          ? wx.getWindowInfo()
+          : uni.getSystemInfoSync()
+
+        const safeAreaInsetsBottom = Number(info?.safeAreaInsets?.bottom)
+        const screenHeight = Number(info?.screenHeight)
+        const safeAreaBottom = Number(info?.safeArea?.bottom)
+        const fallbackSafeBottom = (Number.isFinite(screenHeight) && Number.isFinite(safeAreaBottom))
+          ? Math.max(0, screenHeight - safeAreaBottom)
+          : 0
+        const safeBottom = Number.isFinite(safeAreaInsetsBottom)
+          ? Math.max(0, safeAreaInsetsBottom)
+          : fallbackSafeBottom
+
+        const isIOS = /ios/i.test(String(info?.system || ''))
+        const noBannerBase = isIOS ? 4 : 8
+        const withBannerBase = uni.upx2px ? uni.upx2px(180) : 90
+        const bannerBottomBase = uni.upx2px ? uni.upx2px(16) : 8
+
+        this.listBottomPaddingPx = Math.round(safeBottom + noBannerBase)
+        this.listBottomPaddingWithBannerPx = Math.round(safeBottom + withBannerBase)
+        this.authBannerBottomPx = Math.round(safeBottom + bannerBottomBase)
+      } catch (e) {
+        this.listBottomPaddingPx = 12
+        this.listBottomPaddingWithBannerPx = 120
+        this.authBannerBottomPx = 16
+      }
+    },
+
     finishListRefresh() {
       this.isRefreshing = false
       uni.stopPullDownRefresh()
@@ -1271,10 +1319,6 @@ export default {
   min-height: 0;
   padding: 16rpx 16rpx calc(env(safe-area-inset-bottom) + 16rpx);
   box-sizing: border-box;
-}
-
-.list--with-banner {
-  padding-bottom: calc(env(safe-area-inset-bottom) + 180rpx);
 }
 
 .center-tip {
