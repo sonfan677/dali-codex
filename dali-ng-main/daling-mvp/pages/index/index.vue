@@ -98,7 +98,7 @@
 
     <scroll-view
       scroll-y
-      class="list"
+      :class="['list', { 'list--with-banner': showBottomAuthBanner }]"
       refresher-enabled
       :refresher-triggered="isRefreshing"
       @refresherrefresh="handleListRefresh"
@@ -1269,8 +1269,12 @@ export default {
 .list {
   flex: 1;
   min-height: 0;
-  padding: 16rpx 16rpx 180rpx;
+  padding: 16rpx 16rpx calc(env(safe-area-inset-bottom) + 110rpx);
   box-sizing: border-box;
+}
+
+.list--with-banner {
+  padding-bottom: calc(env(safe-area-inset-bottom) + 180rpx);
 }
 
 .center-tip {
