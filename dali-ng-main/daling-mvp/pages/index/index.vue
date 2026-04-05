@@ -1269,7 +1269,7 @@ export default {
 .list {
   flex: 1;
   min-height: 0;
-  padding: 16rpx 16rpx calc(env(safe-area-inset-bottom) + 110rpx);
+  padding: 16rpx 16rpx calc(env(safe-area-inset-bottom) + 16rpx);
   box-sizing: border-box;
 }
 
