@@ -127,6 +127,27 @@
       <text class="banner-text">📍 发现你附近正在发生的活动 →</text>
     </view>
 
+    <view v-if="selectorVisible" class="selector-mask" @tap="closeFilterSelector">
+      <view class="selector-sheet" @tap.stop="">
+        <view class="selector-head">
+          <text class="selector-title">{{ selectorTitle }}</text>
+          <text class="selector-close" @tap="closeFilterSelector">取消</text>
+        </view>
+        <scroll-view scroll-y class="selector-list">
+          <view
+            v-for="opt in selectorOptions"
+            :key="`${selectorType}-${opt.id}`"
+            class="selector-item"
+            :class="{ 'selector-item--active': opt.id === selectorValue }"
+            @tap="handleSelectorChoose(opt)"
+          >
+            <text class="selector-item-label">{{ opt.label }}</text>
+            <text v-if="opt.id === selectorValue" class="selector-item-check">✓</text>
+          </view>
+        </scroll-view>
+      </view>
+    </view>
+
     <PrivacyPopup ref="privacyPopup" />
   </view>
 </template>
@@ -249,6 +270,11 @@ export default {
       distanceFilterId: '',
       dateFilterId: 'all',
       statusFilterId: 'all',
+      selectorVisible: false,
+      selectorType: '',
+      selectorTitle: '',
+      selectorValue: '',
+      selectorOptions: [],
     }
   },
 
@@ -313,6 +339,7 @@ export default {
     },
 
     categoryFilterLabel() {
+      if (this.categoryFilterId === 'all') return '分类'
       const item = this.categoryFilterOptions.find((opt) => opt.id === this.categoryFilterId)
       return item?.label || '分类'
     },
@@ -343,6 +370,7 @@ export default {
     },
 
     dateFilterLabel() {
+      if (this.dateFilterId === 'all') return '日期'
       const item = this.dateFilterOptions.find((opt) => opt.id === this.dateFilterId)
       return item?.label || '日期'
     },
@@ -358,6 +386,7 @@ export default {
     },
 
     statusFilterLabel() {
+      if (this.statusFilterId === 'all') return '状态'
       const item = this.statusFilterOptions.find((opt) => opt.id === this.statusFilterId)
       return item?.label || '状态'
     },
@@ -731,23 +760,40 @@ export default {
       }
     },
 
-    async openCategoryFilter() {
-      await new Promise((resolve) => {
-        uni.showActionSheet({
-          itemList: this.categoryFilterOptions.map((item) => item.label),
-          success: async (res) => {
-            const picked = this.categoryFilterOptions[res.tapIndex]
-            if (!picked) {
-              resolve()
-              return
-            }
-            this.clearSearchForFilterMode()
-            this.categoryFilterId = picked.id
-            await this.reloadActivitiesByContext()
-            resolve()
-          },
-          fail: () => resolve(),
-        })
+    openFilterSelector({ type = '', title = '', value = '', options = [] } = {}) {
+      this.selectorType = type
+      this.selectorTitle = title
+      this.selectorValue = value
+      this.selectorOptions = Array.isArray(options) ? options : []
+      this.selectorVisible = true
+    },
+
+    closeFilterSelector() {
+      this.selectorVisible = false
+      this.selectorType = ''
+      this.selectorTitle = ''
+      this.selectorValue = ''
+      this.selectorOptions = []
+    },
+
+    async handleSelectorChoose(option) {
+      if (!option || !this.selectorType) return
+      this.clearSearchForFilterMode()
+      if (this.selectorType === 'category') this.categoryFilterId = option.id
+      if (this.selectorType === 'distance') this.distanceFilterId = option.id
+      if (this.selectorType === 'date') this.dateFilterId = option.id
+      if (this.selectorType === 'status') this.statusFilterId = option.id
+      this.selectorValue = option.id
+      this.closeFilterSelector()
+      await this.reloadActivitiesByContext()
+    },
+
+    openCategoryFilter() {
+      this.openFilterSelector({
+        type: 'category',
+        title: '分类',
+        value: this.categoryFilterId,
+        options: this.categoryFilterOptions,
       })
     },
 
@@ -772,63 +818,29 @@ export default {
     async openDistanceFilter() {
       const canUseDistance = await this.ensureLocationForDistanceFilter()
       if (!canUseDistance) return
-
-      await new Promise((resolve) => {
-        uni.showActionSheet({
-          itemList: this.distanceFilterOptions.map((item) => item.label),
-          success: async (res) => {
-            const picked = this.distanceFilterOptions[res.tapIndex]
-            if (!picked) {
-              resolve()
-              return
-            }
-            this.clearSearchForFilterMode()
-            this.distanceFilterId = picked.id
-            await this.reloadActivitiesByContext()
-            resolve()
-          },
-          fail: () => resolve(),
-        })
+      this.openFilterSelector({
+        type: 'distance',
+        title: '距离',
+        value: this.distanceFilterId,
+        options: this.distanceFilterOptions,
       })
     },
 
-    async openDateFilter() {
-      await new Promise((resolve) => {
-        uni.showActionSheet({
-          itemList: this.dateFilterOptions.map((item) => item.label),
-          success: async (res) => {
-            const picked = this.dateFilterOptions[res.tapIndex]
-            if (!picked) {
-              resolve()
-              return
-            }
-            this.clearSearchForFilterMode()
-            this.dateFilterId = picked.id
-            await this.reloadActivitiesByContext()
-            resolve()
-          },
-          fail: () => resolve(),
-        })
+    openDateFilter() {
+      this.openFilterSelector({
+        type: 'date',
+        title: '日期',
+        value: this.dateFilterId,
+        options: this.dateFilterOptions,
       })
     },
 
-    async openStatusFilter() {
-      await new Promise((resolve) => {
-        uni.showActionSheet({
-          itemList: this.statusFilterOptions.map((item) => item.label),
-          success: async (res) => {
-            const picked = this.statusFilterOptions[res.tapIndex]
-            if (!picked) {
-              resolve()
-              return
-            }
-            this.clearSearchForFilterMode()
-            this.statusFilterId = picked.id
-            await this.reloadActivitiesByContext()
-            resolve()
-          },
-          fail: () => resolve(),
-        })
+    openStatusFilter() {
+      this.openFilterSelector({
+        type: 'status',
+        title: '状态',
+        value: this.statusFilterId,
+        options: this.statusFilterOptions,
       })
     },
 
@@ -860,7 +872,7 @@ export default {
             : '获取位置失败，已为你展示全量活动'
       uni.showToast({ title: msg, icon: 'none', duration: 2500 })
 
-      if (this.locationStore.lastErrorCode === 'LOCATION_DENIED' && !options.fromDistanceFilter) {
+      if (this.locationStore.lastErrorCode === 'LOCATION_DENIED') {
         uni.showModal({
           title: '需要定位权限',
           content: '请在设置页开启位置权限后重试',
@@ -1223,5 +1235,74 @@ export default {
   color: #fff;
   font-size: 30rpx;
   font-weight: bold;
+}
+
+.selector-mask {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  background: rgba(0, 0, 0, 0.35);
+  z-index: 999;
+  display: flex;
+  align-items: flex-end;
+}
+
+.selector-sheet {
+  width: 100%;
+  background: #fff;
+  border-radius: 24rpx 24rpx 0 0;
+  padding: 20rpx 20rpx calc(env(safe-area-inset-bottom) + 20rpx);
+  max-height: 70vh;
+  box-sizing: border-box;
+}
+
+.selector-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6rpx 8rpx 14rpx;
+  border-bottom: 1rpx solid #f0f2f5;
+}
+
+.selector-title {
+  font-size: 30rpx;
+  color: #1f2937;
+  font-weight: 700;
+}
+
+.selector-close {
+  font-size: 26rpx;
+  color: #667085;
+}
+
+.selector-list {
+  max-height: 52vh;
+}
+
+.selector-item {
+  min-height: 88rpx;
+  border-bottom: 1rpx solid #f6f7f9;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10rpx;
+}
+
+.selector-item--active .selector-item-label {
+  color: #1a3c5e;
+  font-weight: 700;
+}
+
+.selector-item-label {
+  font-size: 28rpx;
+  color: #1f2937;
+}
+
+.selector-item-check {
+  font-size: 28rpx;
+  color: #1a3c5e;
+  font-weight: 700;
 }
 </style>
