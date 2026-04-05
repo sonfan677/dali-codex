@@ -1,13 +1,10 @@
 <template>
   <view class="page">
-
-    <!-- 顶部：位置授权失败时的提示条 -->
-    <view v-if="locationStore.hasPermission === false" class="tip-bar">
+    <view v-if="showTopTipBar" class="tip-bar">
       <text class="tip-text">{{ topTipText }}</text>
       <text class="tip-btn" @tap="requestLocation">授权位置</text>
     </view>
 
-    <!-- 数据来源小角标 -->
     <view class="data-badge-wrap">
       <view class="data-badge" :class="`data-badge--${dataSourceBadge.type}`">
         <text class="data-badge-title">{{ dataSourceBadge.title }}</text>
@@ -20,7 +17,6 @@
       <text class="calendar-entry-sub">查看未来 14 天官方推荐活动 →</text>
     </view>
 
-    <!-- 搜索与筛选 -->
     <view class="filter-panel">
       <view class="search-row">
         <input
@@ -33,32 +29,26 @@
         <text class="search-action" @tap="onSearchConfirm">搜索</text>
       </view>
 
-      <scroll-view scroll-x class="category-scroll" show-scrollbar="false">
-        <view class="category-list">
-          <text
-            v-for="item in categoryOptions"
-            :key="`cat-${item.id}`"
-            class="category-chip"
-            :class="{ 'category-chip--active': selectedCategoryId === item.id }"
-            @tap="onCategoryChange(item.id)"
-          >{{ item.label }}</text>
+      <view class="filter-dropdown-row">
+        <view class="dropdown-btn" :class="{ 'dropdown-btn--active': categoryFilterId !== 'all' }" @tap="openCategoryFilter">
+          <text class="dropdown-btn-text">{{ categoryFilterLabel }}</text>
+          <text class="dropdown-btn-arrow">▾</text>
         </view>
-      </scroll-view>
-
-      <view class="filter-row">
-        <view class="distance-block">
-          <text class="filter-label">距离</text>
-          <picker
-            mode="selector"
-            :range="distancePickerRange"
-            :value="distanceIndex"
-            @change="onDistanceChange"
-          >
-            <view class="distance-picker">{{ currentDistanceLabel }} <text class="picker-arrow">›</text></view>
-          </picker>
+        <view class="dropdown-btn" :class="{ 'dropdown-btn--active': !!distanceFilterId }" @tap="openDistanceFilter">
+          <text class="dropdown-btn-text">{{ distanceFilterLabel }}</text>
+          <text class="dropdown-btn-arrow">▾</text>
         </view>
-        <text class="filter-hint">{{ filterHintText }}</text>
+        <view class="dropdown-btn" :class="{ 'dropdown-btn--active': dateFilterId !== 'all' }" @tap="openDateFilter">
+          <text class="dropdown-btn-text">{{ dateFilterLabel }}</text>
+          <text class="dropdown-btn-arrow">▾</text>
+        </view>
+        <view class="dropdown-btn" :class="{ 'dropdown-btn--active': statusFilterId !== 'all' }" @tap="openStatusFilter">
+          <text class="dropdown-btn-text">{{ statusFilterLabel }}</text>
+          <text class="dropdown-btn-arrow">▾</text>
+        </view>
       </view>
+
+      <text class="filter-hint">{{ filterHintText }}</text>
     </view>
 
     <view v-if="showDistributionCard" class="distribution-panel">
@@ -106,9 +96,7 @@
       </view>
     </view>
 
-    <!-- 活动列表 -->
     <scroll-view scroll-y class="list">
-
       <view v-if="loading" class="center-tip">
         <text>加载中...</text>
       </view>
@@ -126,48 +114,52 @@
 
         <view v-if="displayActivities.length === 0" class="center-tip">
           <text class="empty-icon">👀</text>
-          <text class="empty-text">附近暂时没有活动</text>
+          <text class="empty-text">{{ emptyText }}</text>
         </view>
       </template>
-
     </scroll-view>
 
-    <!-- 底部：未授权时的引导Banner -->
     <view
-      v-if="locationStore.hasPermission === null"
+      v-if="showBottomAuthBanner"
       class="auth-banner"
       @tap="requestLocation"
     >
       <text class="banner-text">📍 发现你附近正在发生的活动 →</text>
     </view>
-	<!-- 隐私弹窗 -->
-	<PrivacyPopup ref="privacyPopup" />
 
+    <PrivacyPopup ref="privacyPopup" />
   </view>
 </template>
 
 <script>
 import { useLocationStore } from '@/stores/location.js'
-import { useUserStore }     from '@/stores/user.js'
-import { callCloud }        from '@/utils/cloud.js'
-import ActivityCard  from '@/components/ActivityCard.vue'
-import PrivacyPopup  from '@/components/PrivacyPopup.vue'
+import { useUserStore } from '@/stores/user.js'
+import { callCloud } from '@/utils/cloud.js'
+import ActivityCard from '@/components/ActivityCard.vue'
+import PrivacyPopup from '@/components/PrivacyPopup.vue'
 import {
-  ACTIVITY_CATEGORY_OPTIONS,
+  DISCOVERY_CATEGORY_FILTER_OPTIONS,
   DISTANCE_FILTER_OPTIONS,
   getCategoryLabel,
 } from '@/utils/activityMeta.js'
 
-// 小开关：当前位置5km查不到真实活动时，是否回退示例数据
-// false: 不回退，直接显示“附近暂时没有活动”
-// true: 回退示例数据
-const NEARBY_EMPTY_USE_MOCK = false
-const SUB_PROMPT_SCENE = 'index_first_open'
-const TMPL_START   = 'zgiN-rGOY7w4igxoQA5cwB6DqO9jsFlPkXQund_ZBiM'
-const TMPL_CANCEL  = '3wPqnwBSWK5LnfA-BIDxFeXkSkD01D5meepLNQw6lVY'
-const TMPL_FORMING = 'LC4Z3cL8VoDl679__aRVVvuh4VRCys70b5ZQc0edI0o'
+const DEFAULT_CENTER = {
+  lat: 25.6065,
+  lng: 100.2679,
+}
+const ONBOARDING_DEMO_SEEN_PREFIX = 'dali_onboarding_demo_seen_'
+const COMMON_CATEGORY_ID_SET = new Set([
+  'sport',
+  'music',
+  'reading',
+  'game',
+  'social',
+  'outdoor',
+  'food',
+  'movie',
+  'travel',
+])
 
-// 3条示例数据（位置未授权时展示）
 const MOCK_ACTIVITIES = [
   {
     _id: 'mock1',
@@ -177,7 +169,7 @@ const MOCK_ACTIVITIES = [
     categoryLabel: '社交',
     location: { address: '大理古城洱海边', lat: 25.6065, lng: 100.2679 },
     startTime: new Date(Date.now() + 30 * 60 * 1000),
-    endTime:   new Date(Date.now() + 4 * 60 * 60 * 1000),
+    endTime: new Date(Date.now() + 4 * 60 * 60 * 1000),
     currentParticipants: 3,
     maxParticipants: 10,
     status: 'OPEN',
@@ -193,9 +185,9 @@ const MOCK_ACTIVITIES = [
     description: '一起骑行环洱海，约需3小时',
     categoryId: 'sport',
     categoryLabel: '运动',
-    location: { address: '才村码头集合', lat: 25.6200, lng: 100.2100 },
+    location: { address: '才村码头集合', lat: 25.62, lng: 100.21 },
     startTime: new Date(Date.now() + 2 * 60 * 60 * 1000),
-    endTime:   new Date(Date.now() + 6 * 60 * 60 * 1000),
+    endTime: new Date(Date.now() + 6 * 60 * 60 * 1000),
     currentParticipants: 5,
     maxParticipants: 8,
     status: 'OPEN',
@@ -213,9 +205,9 @@ const MOCK_ACTIVITIES = [
     description: '今晚在青旅大堂，欢迎新手',
     categoryId: 'game',
     categoryLabel: '游戏',
-    location: { address: '人民路某青旅', lat: 25.6010, lng: 100.2650 },
+    location: { address: '人民路某青旅', lat: 25.601, lng: 100.265 },
     startTime: new Date(Date.now() + 4 * 60 * 60 * 1000),
-    endTime:   new Date(Date.now() + 7 * 60 * 60 * 1000),
+    endTime: new Date(Date.now() + 7 * 60 * 60 * 1000),
     currentParticipants: 2,
     maxParticipants: 8,
     status: 'OPEN',
@@ -235,7 +227,7 @@ export default {
 
   setup() {
     const locationStore = useLocationStore()
-    const userStore     = useUserStore()
+    const userStore = useUserStore()
     return { locationStore, userStore }
   },
 
@@ -244,97 +236,139 @@ export default {
       activities: [],
       loading: false,
       serverTime: Date.now(),
-      lastQueryMode: 'default', // nearby: 当前位置5km, default: 默认坐标50km
       isAdminViewer: false,
       adminRole: '',
       adminCheckedAt: 0,
-      categoryOptions: ACTIVITY_CATEGORY_OPTIONS,
-      selectedCategoryId: 'all',
+      lastQueryMode: 'all', // all | nearby | mock
+      onboardingMockActive: false,
+      categoryFilterOptions: DISCOVERY_CATEGORY_FILTER_OPTIONS,
+      distanceFilterOptions: DISTANCE_FILTER_OPTIONS,
       searchKeyword: '',
       appliedKeyword: '',
-      distanceOptions: DISTANCE_FILTER_OPTIONS,
-      distanceIndex: Math.max(0, DISTANCE_FILTER_OPTIONS.findIndex((item) => item.radius === 50000)),
-      distanceTouched: false,
-      nearbySubPrompting: false,
-      nearbySubPromptChecked: false,
+      categoryFilterId: 'all',
+      distanceFilterId: '',
+      dateFilterId: 'all',
+      statusFilterId: 'all',
     }
   },
 
   computed: {
     baseActivities() {
-      // 只要云端返回了数据就优先展示真实数据
-      if (this.activities.length > 0) {
-        return this.activities
-      }
-
-      // 当前位置5km查询为空时，可按开关决定是否展示示例数据
-      if (this.lastQueryMode === 'nearby' && !NEARBY_EMPTY_USE_MOCK) {
-        return []
-      }
-
-      return MOCK_ACTIVITIES
+      if (this.onboardingMockActive) return MOCK_ACTIVITIES
+      return this.activities
     },
 
     displayActivities() {
       return this.filterActivities(this.baseActivities)
     },
 
+    emptyText() {
+      if (this.onboardingMockActive) return '点击任意示例活动，授权后即可看你附近 5km 内活动'
+      if (this.lastQueryMode === 'nearby') return '附近暂无真实活动'
+      return '当前暂无可展示活动'
+    },
+
+    showTopTipBar() {
+      return !this.onboardingMockActive && this.locationStore.hasPermission === false
+    },
+
+    topTipText() {
+      return '📍 未获取位置，当前展示全量活动'
+    },
+
+    showBottomAuthBanner() {
+      return !this.onboardingMockActive && this.locationStore.hasPermission !== true
+    },
+
     dataSourceBadge() {
+      if (this.onboardingMockActive) {
+        return {
+          type: 'mock',
+          title: '示例数据',
+          desc: '首次登录默认示例活动',
+        }
+      }
       if (this.lastQueryMode === 'nearby') {
         return {
           type: 'real',
           title: '真实数据',
-          desc: `当前位置 ${this.currentDistanceLabel}`,
+          desc: `当前位置 ${this.currentDistanceScopeLabel}`,
         }
       }
-
-      if (this.activities.length === 0) {
-        return {
-          type: 'mock',
-          title: '示例数据',
-          desc: '当前展示内置示例活动',
-        }
-      }
-
       return {
-        type: 'real-default',
+        type: 'real-all',
         title: '真实数据',
-        desc: `默认坐标 ${this.currentDistanceLabel}`,
+        desc: '未授权定位 · 全量活动',
       }
-    },
-    topTipText() {
-      if (this.activities.length > 0) {
-        return '📍 未获取位置，已按默认坐标展示活动'
-      }
-      return '📍 未获取位置，以下为示例活动'
-    },
-
-    distancePickerRange() {
-      return this.distanceOptions.map((item) => item.label)
-    },
-
-    currentDistanceLabel() {
-      return this.distanceOptions[this.distanceIndex]?.label || '5km'
-    },
-
-    selectedCategoryLabel() {
-      return this.categoryOptions.find((item) => item.id === this.selectedCategoryId)?.label || '全部'
     },
 
     filterHintText() {
+      if (this.appliedKeyword) return `搜索模式：${this.appliedKeyword}`
       const bits = []
-      if (this.selectedCategoryId !== 'all') bits.push(this.selectedCategoryLabel)
-      if (this.appliedKeyword) bits.push(`关键词:${this.appliedKeyword}`)
-      return bits.length > 0 ? bits.join(' · ') : '未设置筛选条件'
+      if (this.categoryFilterId !== 'all') bits.push(this.categoryFilterLabel)
+      if (this.distanceFilterId) bits.push(this.distanceFilterLabel)
+      if (this.dateFilterId !== 'all') bits.push(this.dateFilterLabel)
+      if (this.statusFilterId !== 'all') bits.push(this.statusFilterLabel)
+      return bits.length ? `筛选模式：${bits.join(' · ')}` : '未设置搜索或筛选条件'
+    },
+
+    categoryFilterLabel() {
+      const item = this.categoryFilterOptions.find((opt) => opt.id === this.categoryFilterId)
+      return item?.label || '分类'
+    },
+
+    distanceFilterLabel() {
+      const item = this.distanceFilterOptions.find((opt) => opt.id === this.distanceFilterId)
+      if (item) return item.label
+      if (this.lastQueryMode === 'nearby') return '5km(默认)'
+      return '距离'
+    },
+
+    dateFilterOptions() {
+      const baseMs = Number(this.serverTime || Date.now())
+      const list = [
+        { id: 'all', label: '全部日期' },
+        { id: 'today', label: '今天' },
+        { id: 'tomorrow', label: '明天' },
+      ]
+      for (let i = 2; i <= 6; i += 1) {
+        const targetMs = baseMs + i * 24 * 60 * 60 * 1000
+        const dateKey = this.toChinaDateKey(targetMs)
+        list.push({
+          id: `date_${dateKey}`,
+          label: this.formatDateLabel(targetMs),
+        })
+      }
+      return list
+    },
+
+    dateFilterLabel() {
+      const item = this.dateFilterOptions.find((opt) => opt.id === this.dateFilterId)
+      return item?.label || '日期'
+    },
+
+    statusFilterOptions() {
+      return [
+        { id: 'all', label: '全部状态' },
+        { id: 'imminent', label: '即将开始' },
+        { id: 'formed', label: '已成团' },
+        { id: 'recruiting', label: '招募中' },
+        { id: 'latest', label: '最新发布' },
+      ]
+    },
+
+    statusFilterLabel() {
+      const item = this.statusFilterOptions.find((opt) => opt.id === this.statusFilterId)
+      return item?.label || '状态'
     },
 
     showDistributionCard() {
-      return this.isAdminViewer && this.activities.length > 0 && this.dataSourceBadge.type !== 'mock'
+      return this.isAdminViewer && !this.onboardingMockActive && this.activities.length > 0
     },
 
     distributionSubtitle() {
-      const source = this.lastQueryMode === 'nearby' ? '当前位置' : '默认坐标'
-      return `${source} · 当前范围 ${this.currentDistanceLabel} · 共 ${this.activities.length} 条`
+      const source = this.lastQueryMode === 'nearby' ? '当前位置' : '未授权全量'
+      return `${source} · 当前范围 ${this.currentDistanceScopeLabel} · 共 ${this.activities.length} 条`
     },
 
     distanceDistribution() {
@@ -345,14 +379,12 @@ export default {
         { key: '5-10', label: '5-10km', min: 5000, max: 10000, count: 0 },
         { key: '10+', label: '10km+', min: 10000, max: Number.POSITIVE_INFINITY, count: 0 },
       ]
-
       ;(this.activities || []).forEach((item) => {
         const d = Number(item?._distance)
         if (!Number.isFinite(d) || d < 0) return
         const hit = buckets.find((bucket) => d >= bucket.min && d < bucket.max)
         if (hit) hit.count += 1
       })
-
       const maxCount = Math.max(...buckets.map((item) => item.count), 1)
       return buckets.map((item) => ({
         ...item,
@@ -369,7 +401,6 @@ export default {
         current.count += 1
         counter[categoryId] = current
       })
-
       const list = Object.values(counter).sort((a, b) => b.count - a.count).slice(0, 6)
       const maxCount = Math.max(...list.map((item) => item.count), 1)
       return list.map((item) => ({
@@ -377,159 +408,292 @@ export default {
         percent: Math.max(8, Math.round((item.count / maxCount) * 100)),
       }))
     },
-  },
-  onLoad() {
-      uni.$on('showPrivacyPopup', () => {
-        this.$refs.privacyPopup && this.$refs.privacyPopup.authorize()
-      })
+
+    currentDistanceScopeLabel() {
+      const scope = this.getDistanceScopeConfig(this.lastQueryMode)
+      const meters = Number(scope.radius || 0)
+      if (!Number.isFinite(meters) || meters <= 0) return '--'
+      if (meters >= 1000) return `${Math.round(meters / 1000)}km`
+      return `${meters}m`
     },
-  
-    onUnload() {
-      uni.$off('showPrivacyPopup')
+  },
+
+  onLoad() {
+    uni.$on('showPrivacyPopup', () => {
+      this.$refs.privacyPopup && this.$refs.privacyPopup.authorize()
+    })
+  },
+
+  onUnload() {
+    uni.$off('showPrivacyPopup')
   },
 
   async onShow() {
     await this.ensureAdminVisibility()
-    // #ifdef MP-WEIXIN
-    wx.getSetting({
-      success: async (settingRes) => {
-        if (settingRes.authSetting['scope.userFuzzyLocation']) {
-          try {
-            const ok = await this.locationStore.refreshLocation()
-            if (ok) {
-              this.applyDefaultDistanceForMode('nearby')
-              await this.loadActivities()
-              return
-            }
-          } catch(e) {
-            console.log('位置获取失败，使用默认坐标')
-          }
-        }
-        // 无论有没有位置权限，都用默认坐标加载活动
-        this.applyDefaultDistanceForMode('default')
-        await this.loadActivitiesWithDefault()
-      },
-      fail: async () => {
-        this.applyDefaultDistanceForMode('default')
-        await this.loadActivitiesWithDefault()
-      }
-    })
-    // #endif
+    await this.initAndLoad()
   },
-
-
 
   methods: {
     goCalendar() {
       uni.navigateTo({ url: '/pages/calendar/index' })
     },
 
-    async touchSubscriptionState(action) {
-      try {
-        const res = await callCloud('updateSubscriptionState', {
-          action,
-          scene: SUB_PROMPT_SCENE,
-        })
-        const gd = getApp().globalData || {}
-        gd.subscriptions = res?.subscriptions || gd.subscriptions || {}
-        gd.shouldPromptNearbySubscription = !!res?.shouldPromptNearbySubscription
-      } catch (e) {
-        console.warn('更新订阅状态失败:', e)
-      }
+    toChinaDateKey(input = Date.now()) {
+      const ms = new Date(input).getTime()
+      if (!Number.isFinite(ms)) return ''
+      const chinaMs = ms + 8 * 60 * 60 * 1000
+      const date = new Date(chinaMs)
+      const y = date.getUTCFullYear()
+      const m = `${date.getUTCMonth() + 1}`.padStart(2, '0')
+      const d = `${date.getUTCDate()}`.padStart(2, '0')
+      return `${y}-${m}-${d}`
     },
 
-    requestNearbySubscribeAuth() {
-      return new Promise((resolve) => {
-        // #ifdef MP-WEIXIN
-        if (typeof wx === 'undefined' || typeof wx.requestSubscribeMessage !== 'function') {
-          resolve({ ok: false, reason: 'UNSUPPORTED' })
-          return
-        }
-
-        const tmplIds = [TMPL_START, TMPL_CANCEL, TMPL_FORMING].filter(Boolean)
-        wx.requestSubscribeMessage({
-          tmplIds,
-          success: (res) => {
-            const states = Object.keys(res || {})
-              .filter((k) => k !== 'errMsg')
-              .map((k) => String(res[k] || ''))
-            resolve({
-              ok: true,
-              accepted: states.includes('accept'),
-              rejected: states.includes('reject'),
-              banned: states.includes('ban'),
-              raw: res,
-            })
-          },
-          fail: (err) => {
-            resolve({
-              ok: false,
-              reason: 'FAIL',
-              errMsg: String(err?.errMsg || ''),
-              raw: err,
-            })
-          },
-        })
-        // #endif
-
-        // #ifndef MP-WEIXIN
-        resolve({ ok: false, reason: 'NON_MP' })
-        // #endif
-      })
+    formatDateLabel(input) {
+      const ms = new Date(input).getTime()
+      const date = new Date(ms)
+      const weekMap = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+      return `${date.getMonth() + 1}/${date.getDate()} ${weekMap[date.getDay()]}`
     },
 
-    async maybePromptNearbySubscription() {
-      if (this.nearbySubPromptChecked || this.nearbySubPrompting) return
+    getOnboardingStorageKey() {
+      const openid = getApp().globalData?.openid || this.userStore.openid || 'anonymous'
+      return `${ONBOARDING_DEMO_SEEN_PREFIX}${openid}`
+    },
+
+    shouldUseOnboardingDemo() {
       const gd = getApp().globalData || {}
-      if (!gd?.isLoggedIn) return
+      const isNewUser = !!gd.isNewUser
+      if (!isNewUser) return false
+      const seen = uni.getStorageSync(this.getOnboardingStorageKey())
+      return !seen
+    },
 
-      const shouldPrompt = !!gd.shouldPromptNearbySubscription
-      if (!shouldPrompt) {
-        this.nearbySubPromptChecked = true
+    markOnboardingDemoSeen() {
+      uni.setStorageSync(this.getOnboardingStorageKey(), true)
+      const gd = getApp().globalData || {}
+      gd.isNewUser = false
+    },
+
+    async initAndLoad() {
+      this.onboardingMockActive = this.shouldUseOnboardingDemo()
+      if (this.onboardingMockActive) {
+        this.lastQueryMode = 'mock'
+        this.activities = []
+        this.loading = false
         return
       }
 
-      this.nearbySubPrompting = true
-      try {
-        // 记录已触发“首次打开时机”弹窗，防止重复打扰
-        await this.touchSubscriptionState('prompted')
-
-        const modalRes = await new Promise((resolve) => {
-          uni.showModal({
-            title: '接收附近活动提醒',
-            content: '首次进入可开启订阅：附近有新活动或成团状态变化时会提醒你。',
-            confirmText: '立即开启',
-            cancelText: '暂不开启',
-            success: (res) => resolve(res),
-            fail: () => resolve({ confirm: false }),
-          })
-        })
-
-        if (!modalRes?.confirm) {
-          this.nearbySubPromptChecked = true
-          return
-        }
-
-        const subRes = await this.requestNearbySubscribeAuth()
-        if (subRes?.ok && subRes.accepted) {
-          await this.touchSubscriptionState('accepted')
-          uni.showToast({ title: '已开启活动提醒', icon: 'none' })
-        } else if (subRes?.ok && (subRes.rejected || subRes.banned)) {
-          await this.touchSubscriptionState('rejected')
-          uni.showToast({ title: '你暂未开启提醒，可在设置中调整', icon: 'none' })
-        } else {
-          await this.touchSubscriptionState('rejected')
-          uni.showToast({ title: '订阅弹窗未成功，不影响使用', icon: 'none' })
-        }
-      } finally {
-        this.nearbySubPrompting = false
-        this.nearbySubPromptChecked = true
+      const hasLocation = await this.locationStore.refreshLocation()
+      if (hasLocation && this.locationStore.lat && this.locationStore.lng) {
+        await this.loadActivitiesNearby()
+      } else {
+        await this.loadActivitiesAll()
       }
+    },
+
+    clearSearch() {
+      this.searchKeyword = ''
+      this.appliedKeyword = ''
+    },
+
+    clearFiltersToDefault() {
+      this.categoryFilterId = 'all'
+      this.distanceFilterId = ''
+      this.dateFilterId = 'all'
+      this.statusFilterId = 'all'
+    },
+
+    getDistanceScopeConfig(mode = this.lastQueryMode) {
+      const selected = this.distanceFilterOptions.find((item) => item.id === this.distanceFilterId)
+      if (selected) {
+        if (selected.type === 'sort') {
+          return { radius: 2000000, sortBy: selected.sortBy || 'default' }
+        }
+        return { radius: Number(selected.radius || 5000), sortBy: 'default' }
+      }
+      if (mode === 'nearby') {
+        return { radius: 5000, sortBy: 'default' }
+      }
+      return { radius: 2000000, sortBy: 'default' }
+    },
+
+    isRealCategoryFilter(categoryId = '') {
+      return !!COMMON_CATEGORY_ID_SET.has(String(categoryId || ''))
+    },
+
+    buildQueryParams({ mode, lat, lng }) {
+      const scope = this.getDistanceScopeConfig(mode)
+      const useSearch = !!this.appliedKeyword
+      const queryCategoryId = (!useSearch && this.isRealCategoryFilter(this.categoryFilterId))
+        ? this.categoryFilterId
+        : 'all'
+      const queryKeyword = useSearch ? this.appliedKeyword : ''
+
+      return {
+        cityId: 'dali',
+        lat,
+        lng,
+        queryMode: mode === 'all' ? 'all' : 'nearby',
+        radius: Number(scope.radius || 5000),
+        sortBy: scope.sortBy || 'default',
+        categoryId: queryCategoryId,
+        keyword: queryKeyword,
+        limit: mode === 'all' ? 200 : 120,
+      }
+    },
+
+    normalizeActivityCategory(item) {
+      const categoryId = item?.categoryId || 'other'
+      return {
+        ...item,
+        categoryId,
+        categoryLabel: item?.categoryLabel || getCategoryLabel(categoryId),
+      }
+    },
+
+    isHotActivity(item = {}) {
+      if (item.isRecommended) return true
+      const current = Number(item.currentParticipants || 0)
+      const max = Number(item.maxParticipants || 0)
+      if (current >= 6) return true
+      if (max > 0 && current / max >= 0.6) return true
+      return false
+    },
+
+    isOngoing(item = {}, nowMs = Number(this.serverTime || Date.now())) {
+      const startMs = new Date(item.startTime).getTime()
+      const endMs = new Date(item.endTime).getTime()
+      return Number.isFinite(startMs) && Number.isFinite(endMs) && nowMs >= startMs && nowMs < endMs
+    },
+
+    applySearchFilter(list = []) {
+      const keyword = String(this.appliedKeyword || '').trim().toLowerCase()
+      if (!keyword) return list
+      return list.filter((item) => {
+        const haystack = [
+          item.title,
+          item.description,
+          item.location?.address,
+          item.categoryLabel,
+          item.publisherNickname,
+        ].filter(Boolean).join(' ').toLowerCase()
+        return haystack.includes(keyword)
+      })
+    },
+
+    applyCategoryFilter(list = []) {
+      const selected = this.categoryFilterId
+      if (selected === 'all') return list
+      if (selected === 'official') {
+        return list.filter((item) => !!item.isRecommended)
+      }
+      if (selected === 'hot') {
+        return list.filter((item) => this.isHotActivity(item))
+      }
+      if (selected === 'other') {
+        return list.filter((item) => {
+          const cid = String(item.categoryId || 'other')
+          return cid === 'other' || !COMMON_CATEGORY_ID_SET.has(cid)
+        })
+      }
+      return list.filter((item) => String(item.categoryId || 'other') === selected)
+    },
+
+    applyDistanceFilter(list = []) {
+      const option = this.distanceFilterOptions.find((item) => item.id === this.distanceFilterId)
+      if (!option || option.type !== 'radius') return list
+      const radius = Number(option.radius || 0)
+      return list.filter((item) => Number.isFinite(Number(item._distance)) && Number(item._distance) <= radius)
+    },
+
+    applyDateFilter(list = []) {
+      const selected = this.dateFilterId
+      if (selected === 'all') return list
+      const todayKey = this.toChinaDateKey(this.serverTime)
+      let targetKey = ''
+      if (selected === 'today') {
+        targetKey = todayKey
+      } else if (selected === 'tomorrow') {
+        targetKey = this.toChinaDateKey(Number(this.serverTime) + 24 * 60 * 60 * 1000)
+      } else if (selected.startsWith('date_')) {
+        targetKey = selected.replace('date_', '')
+      }
+      if (!targetKey) return list
+      return list.filter((item) => this.toChinaDateKey(item.startTime) === targetKey)
+    },
+
+    applyStatusFilter(list = []) {
+      const selected = this.statusFilterId
+      if (selected === 'all') return list
+      const nowMs = Number(this.serverTime || Date.now())
+      if (selected === 'imminent') {
+        return list.filter((item) => {
+          const startMs = new Date(item.startTime).getTime()
+          return Number.isFinite(startMs) && startMs > nowMs && startMs - nowMs <= 60 * 60 * 1000
+        })
+      }
+      if (selected === 'formed') {
+        return list.filter((item) => !!item.isGroupFormation && String(item.formationStatus || '').toUpperCase() === 'CONFIRMED')
+      }
+      if (selected === 'recruiting') {
+        return list.filter((item) => String(item.status || '').toUpperCase() === 'OPEN')
+      }
+      if (selected === 'latest') {
+        return list.filter((item) => {
+          const createdMs = new Date(item.createdAt).getTime()
+          return Number.isFinite(createdMs) && nowMs - createdMs <= 60 * 60 * 1000
+        })
+      }
+      return list
+    },
+
+    applySorting(list = []) {
+      const distanceOpt = this.distanceFilterOptions.find((item) => item.id === this.distanceFilterId)
+      if (distanceOpt && distanceOpt.type === 'sort') {
+        const isAsc = distanceOpt.sortBy === 'distance_asc'
+        return [...list].sort((a, b) => {
+          const ad = Number.isFinite(Number(a._distance)) ? Number(a._distance) : Number.POSITIVE_INFINITY
+          const bd = Number.isFinite(Number(b._distance)) ? Number(b._distance) : Number.POSITIVE_INFINITY
+          if (ad !== bd) return isAsc ? ad - bd : bd - ad
+          return new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
+        })
+      }
+
+      const nowMs = Number(this.serverTime || Date.now())
+      return [...list].sort((a, b) => {
+        const aRecommended = !!a.isRecommended
+        const bRecommended = !!b.isRecommended
+        if (aRecommended !== bRecommended) return aRecommended ? -1 : 1
+
+        const aOngoing = this.isOngoing(a, nowMs)
+        const bOngoing = this.isOngoing(b, nowMs)
+        if (aOngoing !== bOngoing) return aOngoing ? -1 : 1
+
+        const startDiff = new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
+        if (startDiff !== 0) return startDiff
+
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      })
+    },
+
+    filterActivities(list = []) {
+      let result = (list || []).map((item) => this.normalizeActivityCategory(item))
+
+      if (this.appliedKeyword) {
+        result = this.applySearchFilter(result)
+      } else {
+        result = this.applyCategoryFilter(result)
+        result = this.applyDistanceFilter(result)
+        result = this.applyDateFilter(result)
+        result = this.applyStatusFilter(result)
+      }
+
+      return this.applySorting(result)
     },
 
     async ensureAdminVisibility(force = false) {
       const now = Date.now()
-      // 5分钟内复用缓存，避免每次 onShow 都打云函数
       if (!force && this.adminCheckedAt && now - this.adminCheckedAt < 5 * 60 * 1000) {
         return this.isAdminViewer
       }
@@ -546,148 +710,204 @@ export default {
       return this.isAdminViewer
     },
 
-    getSelectedRadius() {
-      return Number(this.distanceOptions[this.distanceIndex]?.radius) || 5000
-    },
-
-    applyDefaultDistanceForMode(mode) {
-      if (this.distanceTouched) return
-      const targetRadius = mode === 'nearby' ? 5000 : 50000
-      const idx = this.distanceOptions.findIndex((item) => item.radius === targetRadius)
-      if (idx >= 0) this.distanceIndex = idx
-    },
-
-    buildQueryParams(lat, lng) {
-      return {
-        lat,
-        lng,
-        radius: this.getSelectedRadius(),
-        keyword: this.appliedKeyword,
-        categoryId: this.selectedCategoryId,
-      }
-    },
-
-    normalizeActivityCategory(item) {
-      const categoryId = item?.categoryId || 'other'
-      return {
-        ...item,
-        categoryId,
-        categoryLabel: item?.categoryLabel || getCategoryLabel(categoryId),
-      }
-    },
-
-    filterActivities(list = []) {
-      const keyword = String(this.appliedKeyword || '').trim().toLowerCase()
-      const selectedCategoryId = this.selectedCategoryId
-      const radius = this.getSelectedRadius()
-
-      return (list || [])
-        .map((item) => this.normalizeActivityCategory(item))
-        .filter((item) => {
-          if (selectedCategoryId !== 'all' && item.categoryId !== selectedCategoryId) {
-            return false
-          }
-          if (keyword) {
-            const haystack = [
-              item.title,
-              item.description,
-              item.location?.address,
-              item.categoryLabel,
-            ].filter(Boolean).join(' ').toLowerCase()
-            if (!haystack.includes(keyword)) return false
-          }
-          if (Number.isFinite(Number(item._distance)) && Number(item._distance) > radius) {
-            return false
-          }
-          return true
-        })
-    },
-
-    async reloadActivities() {
+    async reloadActivitiesByContext() {
+      if (this.onboardingMockActive) return
       if (this.locationStore.hasPermission === true && this.locationStore.lat && this.locationStore.lng) {
-        await this.loadActivities()
-        return
+        await this.loadActivitiesNearby()
+      } else {
+        await this.loadActivitiesAll()
       }
-      await this.loadActivitiesWithDefault()
     },
 
     async onSearchConfirm() {
       this.appliedKeyword = String(this.searchKeyword || '').trim()
-      await this.reloadActivities()
+      this.clearFiltersToDefault()
+      await this.reloadActivitiesByContext()
     },
 
-    async onCategoryChange(categoryId) {
-      if (this.selectedCategoryId === categoryId) return
-      this.selectedCategoryId = categoryId
-      await this.reloadActivities()
-    },
-
-    async onDistanceChange(e) {
-      const idx = Number(e?.detail?.value || 0)
-      this.distanceIndex = idx
-      this.distanceTouched = true
-      await this.reloadActivities()
-    },
-
-    // 用户点击授权Banner或提示条
-    async requestLocation() {
-      const ok = await this.locationStore.refreshLocation({ interactive: true, force: true })
-      if (ok) {
-        this.applyDefaultDistanceForMode('nearby')
-        await this.loadActivities()
-      } else {
-        const msg = this.locationStore.lastErrorCode === 'FUZZY_API_PENDING'
-          ? '定位能力暂不可用，请稍后重试'
-          : this.locationStore.lastErrorCode === 'LOCATION_DENIED'
-            ? '你已拒绝定位授权，请到设置中开启'
-            : '获取位置失败，请在设置中开启'
-        uni.showToast({ title: msg, icon: 'none', duration: 2500 })
-
-        if (this.locationStore.lastErrorCode === 'LOCATION_DENIED') {
-          uni.showModal({
-            title: '需要定位权限',
-            content: '请在设置页开启位置权限后重试',
-            confirmText: '去设置',
-            success: (res) => {
-              if (res.confirm && typeof wx !== 'undefined' && wx.openSetting) {
-                wx.openSetting({ withSubscriptions: false })
-              }
-            }
-          })
-        }
+    clearSearchForFilterMode() {
+      if (this.appliedKeyword || this.searchKeyword) {
+        this.clearSearch()
       }
     },
-    async loadActivitiesWithDefault() {
-      // 使用大理古城坐标作为默认位置
-      const defaultLat = 25.6065
-      const defaultLng = 100.2679
+
+    async openCategoryFilter() {
+      await new Promise((resolve) => {
+        uni.showActionSheet({
+          itemList: this.categoryFilterOptions.map((item) => item.label),
+          success: async (res) => {
+            const picked = this.categoryFilterOptions[res.tapIndex]
+            if (!picked) {
+              resolve()
+              return
+            }
+            this.clearSearchForFilterMode()
+            this.categoryFilterId = picked.id
+            await this.reloadActivitiesByContext()
+            resolve()
+          },
+          fail: () => resolve(),
+        })
+      })
+    },
+
+    async ensureLocationForDistanceFilter() {
+      if (this.locationStore.hasPermission === true) return true
+
+      const res = await new Promise((resolve) => {
+        uni.showModal({
+          title: '距离筛选需要定位授权',
+          content: '开启位置权限后，才能按距离筛选和排序活动。',
+          confirmText: '去授权',
+          cancelText: '取消',
+          success: (ret) => resolve(ret),
+          fail: () => resolve({ confirm: false }),
+        })
+      })
+      if (!res?.confirm) return false
+      const ok = await this.requestLocation({ fromDistanceFilter: true })
+      return !!ok
+    },
+
+    async openDistanceFilter() {
+      const canUseDistance = await this.ensureLocationForDistanceFilter()
+      if (!canUseDistance) return
+
+      await new Promise((resolve) => {
+        uni.showActionSheet({
+          itemList: this.distanceFilterOptions.map((item) => item.label),
+          success: async (res) => {
+            const picked = this.distanceFilterOptions[res.tapIndex]
+            if (!picked) {
+              resolve()
+              return
+            }
+            this.clearSearchForFilterMode()
+            this.distanceFilterId = picked.id
+            await this.reloadActivitiesByContext()
+            resolve()
+          },
+          fail: () => resolve(),
+        })
+      })
+    },
+
+    async openDateFilter() {
+      await new Promise((resolve) => {
+        uni.showActionSheet({
+          itemList: this.dateFilterOptions.map((item) => item.label),
+          success: async (res) => {
+            const picked = this.dateFilterOptions[res.tapIndex]
+            if (!picked) {
+              resolve()
+              return
+            }
+            this.clearSearchForFilterMode()
+            this.dateFilterId = picked.id
+            await this.reloadActivitiesByContext()
+            resolve()
+          },
+          fail: () => resolve(),
+        })
+      })
+    },
+
+    async openStatusFilter() {
+      await new Promise((resolve) => {
+        uni.showActionSheet({
+          itemList: this.statusFilterOptions.map((item) => item.label),
+          success: async (res) => {
+            const picked = this.statusFilterOptions[res.tapIndex]
+            if (!picked) {
+              resolve()
+              return
+            }
+            this.clearSearchForFilterMode()
+            this.statusFilterId = picked.id
+            await this.reloadActivitiesByContext()
+            resolve()
+          },
+          fail: () => resolve(),
+        })
+      })
+    },
+
+    async requestLocation(options = {}) {
+      const ok = await this.locationStore.refreshLocation({ interactive: true, force: true })
+      if (ok) {
+        if (this.onboardingMockActive) {
+          this.markOnboardingDemoSeen()
+          this.onboardingMockActive = false
+          if (!this.distanceFilterId) this.distanceFilterId = 'r_5'
+        }
+        await this.loadActivitiesNearby()
+        return true
+      }
+
+      if (this.onboardingMockActive) {
+        this.markOnboardingDemoSeen()
+        this.onboardingMockActive = false
+        this.distanceFilterId = ''
+        await this.loadActivitiesAll()
+      }
+
+      const msg = this.locationStore.lastErrorCode === 'FUZZY_API_PENDING'
+        ? '定位能力暂不可用，请稍后重试'
+        : this.locationStore.lastErrorCode === 'LOCATION_DENIED'
+          ? '你已拒绝定位授权，已为你展示全量活动'
+          : this.locationStore.lastErrorCode === 'PRIVACY_DENIED'
+            ? '你未同意隐私授权，已为你展示全量活动'
+            : '获取位置失败，已为你展示全量活动'
+      uni.showToast({ title: msg, icon: 'none', duration: 2500 })
+
+      if (this.locationStore.lastErrorCode === 'LOCATION_DENIED' && !options.fromDistanceFilter) {
+        uni.showModal({
+          title: '需要定位权限',
+          content: '请在设置页开启位置权限后重试',
+          confirmText: '去设置',
+          success: (res) => {
+            if (res.confirm && typeof wx !== 'undefined' && wx.openSetting) {
+              wx.openSetting({ withSubscriptions: false })
+            }
+          },
+        })
+      }
+      return false
+    },
+
+    async loadActivitiesAll() {
+      this.loading = true
+      this.lastQueryMode = 'all'
       try {
-	    this.loading = true
-      this.lastQueryMode = 'default'
-      const res = await callCloud('getActivityList', this.buildQueryParams(defaultLat, defaultLng))
-      this.activities = Array.isArray(res?.activities) ? res.activities : []
-      this.serverTime = res?.serverTime || Date.now()
-      } catch(e) {
-        console.error('加载活动失败', e)
+        const res = await callCloud('getActivityList', this.buildQueryParams({
+          mode: 'all',
+          lat: DEFAULT_CENTER.lat,
+          lng: DEFAULT_CENTER.lng,
+        }))
+        this.activities = Array.isArray(res?.activities) ? res.activities : []
+        this.serverTime = Number(res?.serverTime || Date.now())
+      } catch (e) {
+        console.error('加载全量活动失败', e)
+        this.activities = []
       } finally {
         this.loading = false
       }
-	},
+    },
 
-    // 从云端加载附近活动
-    async loadActivities() {
+    async loadActivitiesNearby() {
       if (!this.locationStore.lat || !this.locationStore.lng) return
       this.loading = true
+      this.lastQueryMode = 'nearby'
       try {
-        this.lastQueryMode = 'nearby'
-        const res = await callCloud('getActivityList', this.buildQueryParams(
-          this.locationStore.lat,
-          this.locationStore.lng
-        ))
-        this.activities  = res.activities  || []
-        this.serverTime  = res.serverTime  || Date.now()
-      } catch(e) {
-        console.error('加载活动失败', e)
+        const res = await callCloud('getActivityList', this.buildQueryParams({
+          mode: 'nearby',
+          lat: this.locationStore.lat,
+          lng: this.locationStore.lng,
+        }))
+        this.activities = Array.isArray(res?.activities) ? res.activities : []
+        this.serverTime = Number(res?.serverTime || Date.now())
+      } catch (e) {
+        console.error('加载附近活动失败', e)
         uni.showToast({ title: '加载失败，请重试', icon: 'none' })
       } finally {
         this.loading = false
@@ -695,14 +915,13 @@ export default {
     },
 
     onCardTap(item) {
-      if (item._isMock) {
-        // 示例卡片点击→引导授权
-        this.requestLocation()
+      if (this.onboardingMockActive || item?._isMock) {
+        this.requestLocation({ fromMockCard: true })
         return
       }
       uni.navigateTo({ url: `/pages/detail/index?id=${item._id}` })
     },
-  }
+  },
 }
 </script>
 
@@ -714,15 +933,26 @@ export default {
   flex-direction: column;
   padding-bottom: 120rpx;
 }
+
 .tip-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 20rpx 32rpx;
-  background: #FFF3CD;
+  background: #fff3cd;
 }
-.tip-text { font-size: 26rpx; color: #856404; }
-.tip-btn  { font-size: 26rpx; color: #2E75B6; font-weight: bold; padding: 8rpx 20rpx; }
+
+.tip-text {
+  font-size: 26rpx;
+  color: #856404;
+}
+
+.tip-btn {
+  font-size: 26rpx;
+  color: #2e75b6;
+  font-weight: bold;
+  padding: 8rpx 20rpx;
+}
 
 .data-badge-wrap {
   display: flex;
@@ -768,26 +998,29 @@ export default {
   color: #1f7a45;
 }
 
-.data-badge--real-default {
+.data-badge--real-all {
   background: #edf4ff;
 }
 
-.data-badge--real-default .data-badge-title,
-.data-badge--real-default .data-badge-desc {
+.data-badge--real-all .data-badge-title,
+.data-badge--real-all .data-badge-desc {
   color: #295fa6;
 }
+
 .calendar-entry {
   margin: 10rpx 16rpx 8rpx;
   padding: 16rpx 18rpx;
   border-radius: 14rpx;
-  background: linear-gradient(135deg, #1A3C5E, #335E84);
+  background: linear-gradient(135deg, #1a3c5e, #335e84);
   color: #fff;
 }
+
 .calendar-entry-title {
   font-size: 28rpx;
   font-weight: 700;
   display: block;
 }
+
 .calendar-entry-sub {
   margin-top: 6rpx;
   display: block;
@@ -799,7 +1032,75 @@ export default {
   background: #fff;
   margin: 0 16rpx 8rpx;
   border-radius: 14rpx;
-  padding: 18rpx 18rpx 16rpx;
+  padding: 18rpx;
+}
+
+.search-row {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.search-input {
+  flex: 1;
+  height: 68rpx;
+  border-radius: 34rpx;
+  background: #f4f6f8;
+  padding: 0 24rpx;
+  font-size: 26rpx;
+  color: #333;
+}
+
+.search-action {
+  min-width: 90rpx;
+  text-align: center;
+  font-size: 26rpx;
+  color: #1a3c5e;
+  font-weight: 700;
+}
+
+.filter-dropdown-row {
+  margin-top: 16rpx;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10rpx;
+}
+
+.dropdown-btn {
+  min-height: 64rpx;
+  border-radius: 12rpx;
+  background: #f5f7fa;
+  border: 1rpx solid #e6ebf2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12rpx;
+}
+
+.dropdown-btn--active {
+  background: #edf4ff;
+  border-color: #c7dcff;
+}
+
+.dropdown-btn-text {
+  font-size: 22rpx;
+  color: #1f2937;
+  max-width: 120rpx;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dropdown-btn-arrow {
+  font-size: 20rpx;
+  color: #667085;
+}
+
+.filter-hint {
+  display: block;
+  margin-top: 12rpx;
+  font-size: 22rpx;
+  color: #667085;
 }
 
 .distribution-panel {
@@ -818,7 +1119,7 @@ export default {
 
 .distribution-title {
   font-size: 28rpx;
-  color: #1A3C5E;
+  color: #1a3c5e;
   font-weight: 700;
 }
 
@@ -871,7 +1172,7 @@ export default {
 .distribution-bar-fill {
   height: 100%;
   border-radius: 999rpx;
-  background: linear-gradient(90deg, #2E75B6 0%, #1A3C5E 100%);
+  background: linear-gradient(90deg, #2e75b6 0%, #1a3c5e 100%);
 }
 
 .distribution-bar--cat {
@@ -882,95 +1183,11 @@ export default {
   background: linear-gradient(90deg, #39a169 0%, #1f7a45 100%);
 }
 
-.search-row {
-  display: flex;
-  align-items: center;
-  gap: 12rpx;
-}
-
-.search-input {
+.list {
   flex: 1;
-  height: 68rpx;
-  border-radius: 34rpx;
-  background: #f4f6f8;
-  padding: 0 24rpx;
-  font-size: 26rpx;
-  color: #333;
+  padding: 16rpx;
+  box-sizing: border-box;
 }
-
-.search-action {
-  min-width: 90rpx;
-  text-align: center;
-  font-size: 26rpx;
-  color: #1A3C5E;
-  font-weight: 700;
-}
-
-.category-scroll {
-  margin-top: 14rpx;
-  white-space: nowrap;
-}
-
-.category-list {
-  display: inline-flex;
-  gap: 10rpx;
-}
-
-.category-chip {
-  display: inline-block;
-  padding: 8rpx 18rpx;
-  border-radius: 20rpx;
-  background: #f3f3f3;
-  color: #666;
-  font-size: 24rpx;
-}
-
-.category-chip--active {
-  background: #1A3C5E;
-  color: #fff;
-}
-
-.filter-row {
-  margin-top: 14rpx;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16rpx;
-}
-
-.distance-block {
-  display: flex;
-  align-items: center;
-  gap: 10rpx;
-}
-
-.filter-label {
-  font-size: 22rpx;
-  color: #888;
-}
-
-.distance-picker {
-  display: inline-flex;
-  align-items: center;
-  gap: 4rpx;
-  font-size: 24rpx;
-  color: #1A3C5E;
-  font-weight: 700;
-}
-
-.picker-arrow {
-  font-size: 24rpx;
-  color: #999;
-}
-
-.filter-hint {
-  flex: 1;
-  text-align: right;
-  font-size: 22rpx;
-  color: #999;
-}
-
-.list { flex: 1; padding: 16rpx; box-sizing: border-box; }
 
 .center-tip {
   display: flex;
@@ -979,19 +1196,32 @@ export default {
   padding: 120rpx 40rpx;
   gap: 20rpx;
 }
-.empty-icon { font-size: 80rpx; }
-.empty-text { font-size: 28rpx; color: #999; }
+
+.empty-icon {
+  font-size: 80rpx;
+}
+
+.empty-text {
+  font-size: 28rpx;
+  color: #999;
+  text-align: center;
+}
 
 .auth-banner {
   position: fixed;
   bottom: 40rpx;
   left: 32rpx;
   right: 32rpx;
-  background: #1A3C5E;
+  background: #1a3c5e;
   border-radius: 16rpx;
   padding: 32rpx;
   text-align: center;
-  box-shadow: 0 8rpx 32rpx rgba(0,0,0,0.2);
+  box-shadow: 0 8rpx 32rpx rgba(0, 0, 0, 0.2);
 }
-.banner-text { color: white; font-size: 30rpx; font-weight: bold; }
+
+.banner-text {
+  color: #fff;
+  font-size: 30rpx;
+  font-weight: bold;
+}
 </style>

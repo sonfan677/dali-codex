@@ -6,6 +6,10 @@ const _ = db.command
 const DEFAULT_CITY_CONFIG = {
   cityId: 'dali',
   version: 'v1-default',
+  center: {
+    lat: 25.6065,
+    lng: 100.2679,
+  },
   geo: {
     defaultFenceRadius: 5000,
     minFenceRadius: 2000,
@@ -25,6 +29,9 @@ const CATEGORY_MAP = {
   game: '游戏',
   social: '社交',
   outdoor: '户外',
+  food: '美食',
+  movie: '电影',
+  travel: '旅行',
   other: '其他',
 }
 
@@ -38,6 +45,10 @@ function mergeCityConfig(raw = {}, cityId = '') {
   return {
     cityId: finalCityId,
     version: raw.version || DEFAULT_CITY_CONFIG.version,
+    center: {
+      lat: normalizeNumber(raw.center?.lat, DEFAULT_CITY_CONFIG.center.lat),
+      lng: normalizeNumber(raw.center?.lng, DEFAULT_CITY_CONFIG.center.lng),
+    },
     geo: {
       defaultFenceRadius: normalizeNumber(raw.geo?.defaultFenceRadius, DEFAULT_CITY_CONFIG.geo.defaultFenceRadius),
       minFenceRadius: normalizeNumber(raw.geo?.minFenceRadius, DEFAULT_CITY_CONFIG.geo.minFenceRadius),
@@ -114,6 +125,17 @@ function getTimeWeight(status) {
     ENDED: 0,
   }
   return weights[status] || 1
+}
+
+function resolveDefaultSortBucket(item = {}, nowMs = Date.now()) {
+  const isRecommended = !!item.isRecommended
+  if (isRecommended) return 0
+  const startMs = new Date(item.startTime).getTime()
+  const endMs = new Date(item.endTime).getTime()
+  if (Number.isFinite(startMs) && Number.isFinite(endMs) && nowMs >= startMs && nowMs < endMs) {
+    return 1
+  }
+  return 2
 }
 
 function chunkArray(arr, size) {
@@ -203,19 +225,30 @@ function buildTrustProfile(activity, user, nowMs) {
 }
 
 exports.main = async (event, context) => {
+  const targetCityId = String(event?.cityId || DEFAULT_CITY_CONFIG.cityId)
+  const cityConfig = await loadCityConfig(targetCityId)
   const inputLat = Number(event?.lat)
   const inputLng = Number(event?.lng)
-  if (!Number.isFinite(inputLat) || !Number.isFinite(inputLng)) {
+  const centerLat = Number.isFinite(inputLat)
+    ? inputLat
+    : Number(cityConfig?.center?.lat || DEFAULT_CITY_CONFIG.center.lat)
+  const centerLng = Number.isFinite(inputLng)
+    ? inputLng
+    : Number(cityConfig?.center?.lng || DEFAULT_CITY_CONFIG.center.lng)
+  if (!Number.isFinite(centerLat) || !Number.isFinite(centerLng)) {
     return { success: false, error: 'INVALID_LOCATION', message: '缺少有效定位坐标' }
   }
 
-  const targetCityId = String(event?.cityId || DEFAULT_CITY_CONFIG.cityId)
-  const cityConfig = await loadCityConfig(targetCityId)
   const {
     radius,
     keyword = '',
     categoryId = 'all',
+    queryMode = 'nearby',
+    sortBy = 'default',
+    limit = 100,
   } = event || {}
+  const normalizedQueryMode = String(queryMode || 'nearby').toLowerCase() === 'all' ? 'all' : 'nearby'
+  const normalizedSortBy = String(sortBy || 'default').toLowerCase()
   const inputRadius = Number(radius)
   const defaultRadius = cityConfig.geo.defaultFenceRadius
   const minRadius = cityConfig.geo.minFenceRadius
@@ -226,29 +259,36 @@ exports.main = async (event, context) => {
   const normalizedKeyword = normalizeKeyword(keyword)
   const normalizedCategoryId = String(categoryId || 'all')
   const now = new Date()
+  const safeLimit = Math.max(20, Math.min(200, Number(limit) || 100))
 
-  const latDelta = safeRadius / 111000
-  const lngDelta = safeRadius / (111000 * Math.cos(inputLat * Math.PI / 180))
+  const whereQuery = {
+    cityId: targetCityId,
+    status: _.in(['OPEN', 'FULL']),
+  }
 
-  // 先只用位置和状态过滤，不过滤时间（兼容字符串时间格式）
+  if (normalizedQueryMode !== 'all') {
+    const latDelta = safeRadius / 111000
+    const lngDelta = safeRadius / (111000 * Math.cos(centerLat * Math.PI / 180))
+    whereQuery['location.lat'] = _.gt(centerLat - latDelta).and(_.lt(centerLat + latDelta))
+    whereQuery['location.lng'] = _.gt(centerLng - lngDelta).and(_.lt(centerLng + lngDelta))
+  }
+
   const { data } = await db.collection('activities')
-    .where({
-      cityId: targetCityId,
-      status: _.in(['OPEN', 'FULL']),
-      'location.lat': _.gt(inputLat - latDelta).and(_.lt(inputLat + latDelta)),
-      'location.lng': _.gt(inputLng - lngDelta).and(_.lt(inputLng + lngDelta)),
-    })
+    .where(whereQuery)
     .orderBy('startTime', 'asc')
-    .limit(50)
+    .limit(safeLimit)
     .get()
 
   const nowMs = now.getTime()
+  const isCategoryDirectMatch = normalizedCategoryId !== 'all' && !!CATEGORY_MAP[normalizedCategoryId]
 
   // 在应用层过滤时间（兼容 Date对象、时间戳数字、字符串 三种格式）
   const mappedList = data
     .map(a => ({
       ...a,
-      _distance: getDistance(inputLat, inputLng, a.location.lat, a.location.lng),
+      _distance: Number.isFinite(Number(a?.location?.lat)) && Number.isFinite(Number(a?.location?.lng))
+        ? getDistance(centerLat, centerLng, Number(a.location.lat), Number(a.location.lng))
+        : null,
       _endMs: new Date(a.endTime).getTime(),   // 统一转成毫秒
       _startMs: new Date(a.startTime).getTime(),
       _statusByTime: getTimeStatus(new Date(a.startTime).getTime(), new Date(a.endTime).getTime(), nowMs, cityConfig),
@@ -256,11 +296,12 @@ exports.main = async (event, context) => {
     .filter(a => {
       // 过滤：未结束 + 在用户选择半径内
       if (a._endMs <= nowMs) return false
-      return a._distance <= safeRadius
+      if (normalizedQueryMode === 'all') return true
+      return Number.isFinite(Number(a._distance)) && Number(a._distance) <= safeRadius
     })
     .filter((a) => {
       const itemCategoryId = a.categoryId || 'other'
-      if (normalizedCategoryId !== 'all' && itemCategoryId !== normalizedCategoryId) {
+      if (isCategoryDirectMatch && itemCategoryId !== normalizedCategoryId) {
         return false
       }
       if (!normalizedKeyword) return true
@@ -297,11 +338,21 @@ exports.main = async (event, context) => {
 
   const activities = mappedList
     .sort((a, b) => {
-      if (a.isRecommended && !b.isRecommended) return -1
-      if (!a.isRecommended && b.isRecommended) return 1
-      const weightDiff = getTimeWeight(b._statusByTime) - getTimeWeight(a._statusByTime)
-      if (weightDiff !== 0) return weightDiff
-      return a._startMs - b._startMs
+      if (normalizedSortBy === 'distance_asc' || normalizedSortBy === 'distance_desc') {
+        const ad = Number.isFinite(Number(a._distance)) ? Number(a._distance) : Number.POSITIVE_INFINITY
+        const bd = Number.isFinite(Number(b._distance)) ? Number(b._distance) : Number.POSITIVE_INFINITY
+        if (ad !== bd) {
+          return normalizedSortBy === 'distance_asc' ? ad - bd : bd - ad
+        }
+      }
+
+      const bucketDiff = resolveDefaultSortBucket(a, nowMs) - resolveDefaultSortBucket(b, nowMs)
+      if (bucketDiff !== 0) return bucketDiff
+      const startDiff = a._startMs - b._startMs
+      if (startDiff !== 0) return startDiff
+      const createdDiff = new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      if (Number.isFinite(createdDiff) && createdDiff !== 0) return createdDiff
+      return 0
     })
     .map(a => {
       // 清理内部字段，不传给前端
@@ -322,13 +373,16 @@ exports.main = async (event, context) => {
     cityId: targetCityId,
     activities,
     query: {
+      mode: normalizedQueryMode,
       radius: safeRadius,
       categoryId: normalizedCategoryId,
       keyword: normalizedKeyword,
+      sortBy: normalizedSortBy,
     },
     config: {
       cityId: targetCityId,
       cityConfigVersion: cityConfig.version,
+      center: cityConfig.center || DEFAULT_CITY_CONFIG.center,
       defaultFenceRadius: cityConfig.geo.defaultFenceRadius,
       minFenceRadius: cityConfig.geo.minFenceRadius,
     },

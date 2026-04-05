@@ -9,6 +9,9 @@ const CATEGORY_MAP = {
   game: '游戏',
   social: '社交',
   outdoor: '户外',
+  food: '美食',
+  movie: '电影',
+  travel: '旅行',
   other: '其他',
 }
 

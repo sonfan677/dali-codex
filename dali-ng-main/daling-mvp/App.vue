@@ -16,6 +16,7 @@ export default {
       if (res && res.success) {
         getApp().globalData = getApp().globalData || {}
         getApp().globalData.openid       = res.openid || ''
+        getApp().globalData.isNewUser    = !!res.isNewUser
         getApp().globalData.isVerified   = res.isVerified || false
         getApp().globalData.verifyStatus = res.verifyStatus || 'none'
         getApp().globalData.verifyProvider = res.verifyProvider || 'manual'
