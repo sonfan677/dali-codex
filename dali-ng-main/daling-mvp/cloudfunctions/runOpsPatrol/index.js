@@ -107,7 +107,6 @@ async function collectPendingVerify(cityId, overdueHours = 24, nowMs = Date.now(
       updatedAt: true,
       createdAt: true,
       verifyProvider: true,
-      officialVerifyStatus: true,
     })
     .get()
     .catch(() => ({ data: [] }))
@@ -126,45 +125,8 @@ async function collectPendingVerify(cityId, overdueHours = 24, nowMs = Date.now(
       openid: item._openid || '',
       nickname: item.nickname || '',
       verifyProvider: item.verifyProvider || '',
-      officialVerifyStatus: item.officialVerifyStatus || '',
       verifySubmittedAt: item.verifySubmittedAt || item.updatedAt || item.createdAt || null,
     })), 3),
-  }
-}
-
-async function collectOfficialVerifyFails(windowHours = 24, nowMs = Date.now()) {
-  const since = new Date(nowMs - Math.max(1, windowHours) * 60 * 60 * 1000)
-  const { data } = await db.collection('officialVerifyAudits')
-    .where({
-      updatedAt: db.command.gte(since),
-    })
-    .orderBy('updatedAt', 'desc')
-    .limit(500)
-    .field({
-      _id: true,
-      status: true,
-      error: true,
-      message: true,
-      updatedAt: true,
-    })
-    .get()
-    .catch(() => ({ data: [] }))
-
-  const failedRows = (data || []).filter((item) => String(item.status || '').startsWith('FAILED'))
-  const grouped = failedRows.reduce((acc, item) => {
-    const key = item.error || item.status || 'FAILED_UNKNOWN'
-    acc[key] = Number(acc[key] || 0) + 1
-    return acc
-  }, {})
-
-  const topReasons = Object.keys(grouped)
-    .map((reason) => ({ reason, count: grouped[reason] }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 3)
-
-  return {
-    failedCount: failedRows.length,
-    topReasons,
   }
 }
 
@@ -249,16 +211,13 @@ exports.main = async (event = {}) => {
 
   const reportSlaHours = parsePositiveNumber(process.env.OPS_PATROL_REPORT_PENDING_SLA_HOURS, 24)
   const verifySlaHours = parsePositiveNumber(process.env.OPS_PATROL_VERIFY_PENDING_SLA_HOURS, 24)
-  const officialFailWindowHours = parsePositiveNumber(process.env.OPS_PATROL_OFFICIAL_FAIL_WINDOW_HOURS, 24)
-  const officialFailThreshold = parsePositiveNumber(process.env.OPS_PATROL_OFFICIAL_FAIL_THRESHOLD, 5)
   const supplyAlertLevel = String(process.env.OPS_PATROL_SUPPLY_ALERT_LEVEL || 'high').toLowerCase()
   const alertEnabled = String(process.env.OPS_PATROL_ENABLE_ALERT || 'true').toLowerCase() !== 'false'
   const alertCooldownMinutes = parsePositiveNumber(process.env.OPS_PATROL_ALERT_COOLDOWN_MINUTES, 30)
 
-  const [reportCheck, verifyCheck, officialCheck, supplyCheck] = await Promise.all([
+  const [reportCheck, verifyCheck, supplyCheck] = await Promise.all([
     collectPendingReports(cityId, reportSlaHours, nowMs),
     collectPendingVerify(cityId, verifySlaHours, nowMs),
-    collectOfficialVerifyFails(officialFailWindowHours, nowMs),
     collectSupplyAlert(cityId),
   ])
 
@@ -282,16 +241,6 @@ exports.main = async (event = {}) => {
       message: verifyCheck.overdueCount > 0
         ? `有 ${verifyCheck.overdueCount} 条认证超过 ${verifySlaHours}h 未处理`
         : '认证处理时效正常',
-    },
-    {
-      code: 'OFFICIAL_VERIFY_FAIL_SPIKE',
-      label: '官方实名失败波动',
-      severity: 'high',
-      triggered: officialCheck.failedCount >= officialFailThreshold,
-      metric: officialCheck.failedCount,
-      message: officialCheck.failedCount >= officialFailThreshold
-        ? `${officialFailWindowHours}h 内实名失败 ${officialCheck.failedCount} 次（阈值 ${officialFailThreshold}）`
-        : `实名失败 ${officialCheck.failedCount} 次（阈值 ${officialFailThreshold}）`,
     },
     {
       code: 'SUPPLY_ALERT_LEVEL',
@@ -322,15 +271,12 @@ exports.main = async (event = {}) => {
     triggeredCount: triggeredChecks.length,
     reportOverdueCount: reportCheck.overdueCount,
     verifyOverdueCount: verifyCheck.overdueCount,
-    officialVerifyFailedCount: officialCheck.failedCount,
     supplyAlertLevel: supplyCheck.alertLevel || 'normal',
     supplyAlertFlags: supplyCheck.alertFlags || [],
     checkedAt: new Date(nowMs).toISOString(),
     source,
     reportSlaHours,
     verifySlaHours,
-    officialFailWindowHours,
-    officialFailThreshold,
   }
 
   const patrolSignature = `${cityId}|${triggeredChecks.map((item) => item.code).sort().join(',') || 'NONE'}`
@@ -397,7 +343,6 @@ exports.main = async (event = {}) => {
     checks,
     reportCheck,
     verifyCheck,
-    officialCheck,
     supplyCheck,
     executedAt: new Date(nowMs).toISOString(),
   }

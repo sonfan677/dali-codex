@@ -9,7 +9,6 @@
 2. 巡检项覆盖：
    - 举报待处理超时
    - 认证待处理超时
-   - 官方实名失败波动
    - 供给指标预警（读取 `supplyMetrics`）
 3. 自动沉淀日志：
    - `ops_patrol_run`（每次巡检）
@@ -31,22 +30,16 @@
 2. `OPS_PATROL_VERIFY_PENDING_SLA_HOURS`
    - 含义：认证超过多少小时视为超时
    - 建议：`24`
-3. `OPS_PATROL_OFFICIAL_FAIL_WINDOW_HOURS`
-   - 含义：统计官方实名失败次数的窗口
-   - 建议：`24`
-4. `OPS_PATROL_OFFICIAL_FAIL_THRESHOLD`
-   - 含义：失败次数达到阈值触发风险
-   - 建议：`5`
-5. `OPS_PATROL_SUPPLY_ALERT_LEVEL`
+3. `OPS_PATROL_SUPPLY_ALERT_LEVEL`
    - 含义：供给预警触发级别（`high`/`medium`）
    - 建议：`high`
-6. `OPS_PATROL_ENABLE_ALERT`
+4. `OPS_PATROL_ENABLE_ALERT`
    - 含义：是否生成巡检告警动作
    - 建议：`true`
-7. `OPS_PATROL_ALERT_COOLDOWN_MINUTES`
+5. `OPS_PATROL_ALERT_COOLDOWN_MINUTES`
    - 含义：相同风险签名告警冷却时间
    - 建议：`30`
-8. `OPS_PATROL_RUN_TOKEN`（可选）
+6. `OPS_PATROL_RUN_TOKEN`（可选）
    - 含义：系统自动任务调用口令（非管理员调用时使用）
    - 建议：先不填，后续接定时器再配置
 
@@ -92,7 +85,7 @@
 }
 ```
 
-2. 造“高风险”样本（超时举报 + 实名失败波动，便于验证 high）
+2. 造“高风险”样本（超时举报 + 认证超时叠加，便于验证 high）
 
 ```json
 {
@@ -128,7 +121,6 @@
 2. 再配置定时任务（例如每 30 分钟）。
 3. 若告警过多，可先调大：
    - `OPS_PATROL_ALERT_COOLDOWN_MINUTES`
-   - `OPS_PATROL_OFFICIAL_FAIL_THRESHOLD`
 4. 生产环境建议：
    - `OPS_PATROL_SEED_ENABLED=false`
    - `OPS_PATROL_SEED_REQUIRE_DUAL_AUTH=true`

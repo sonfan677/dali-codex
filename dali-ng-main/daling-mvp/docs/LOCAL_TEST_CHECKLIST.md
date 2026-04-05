@@ -25,9 +25,6 @@
    - `autoUpdateStatus`
    - `checkAdmin`
    - `getAdminDashboard`
-   - `startOfficialVerify`
-   - `retryOfficialVerify`
-   - `officialVerifyCallback`
    - `runOpsPatrol`
    - `seedOpsPatrolTestData`（可选，压测巡检用）
    - `bindPhoneNumber`（方案1手机号绑定）
@@ -105,12 +102,11 @@
    - “导出报表二期 CSV（双表）”可生成 Summary + Detail 两份文件
    - “导出周/月趋势 CSV”可成功导出
    - 趋势 CSV 中可看到周维度、月维度、环比字段
-17. 官方实名 3.1（生产收口）
-   - 回调签名正确时返回 `success: true`
-   - 重复回调不重复落库，返回幂等成功
-   - 构造错误签名时返回 `SIGNATURE_MISMATCH`
-   - 同 nonce 的疑似重放请求会被拦截（`FAILED_REPLAY_ATTACK`）
-   - 管理后台“官方实名审计看板”可看到即时告警/阈值告警/重放拦截指标
+17. 身份核验自动通过 + 人工复核
+   - 普通用户提交身份核验后，10分钟内状态为“审核中”
+   - 超过10分钟未人工处理，系统自动通过并标记“待复核”
+   - 管理后台“待审核认证”可看到“系统自动通过待复核（优先）”
+   - 管理员可执行“维持通过/改判驳回”
 18. 运营自动巡检 3.2（低风险收口）
    - 管理后台可点击“立即巡检”
    - 巡检完成后看到健康等级、风险分、触发项、24h巡检告警

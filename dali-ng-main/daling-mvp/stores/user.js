@@ -18,7 +18,6 @@ export const useUserStore = defineStore('user', {
     identityCheckStatus: 'none',
     identityCheckReasons: [],
     identityCheckTriggeredAt: null,
-    officialVerifyStatus: 'not_started',
     isLoggedIn: false,
   }),
 
@@ -42,7 +41,6 @@ export const useUserStore = defineStore('user', {
         this.identityCheckStatus = res.identityCheckStatus || 'none'
         this.identityCheckReasons = Array.isArray(res.identityCheckReasons) ? res.identityCheckReasons : []
         this.identityCheckTriggeredAt = res.identityCheckTriggeredAt || null
-        this.officialVerifyStatus = res.officialVerifyStatus || 'not_started'
         this.nickname = userInfo.nickname || ''
         this.avatarUrl = userInfo.avatarUrl || ''
         this.isLoggedIn = true
@@ -68,7 +66,6 @@ export const useUserStore = defineStore('user', {
       this.identityCheckStatus = 'none'
       this.identityCheckReasons = []
       this.identityCheckTriggeredAt = null
-      this.officialVerifyStatus = 'not_started'
       this.isLoggedIn = false
     }
   }

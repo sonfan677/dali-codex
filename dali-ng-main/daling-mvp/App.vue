@@ -27,9 +27,6 @@ export default {
         getApp().globalData.identityCheckStatus = res.identityCheckStatus || 'none'
         getApp().globalData.identityCheckReasons = Array.isArray(res.identityCheckReasons) ? res.identityCheckReasons : []
         getApp().globalData.identityCheckTriggeredAt = res.identityCheckTriggeredAt || null
-        getApp().globalData.officialVerifyStatus = res.officialVerifyStatus || 'not_started'
-        getApp().globalData.officialVerifyTicket = res.officialVerifyTicket || null
-        getApp().globalData.officialVerifiedAt = res.officialVerifiedAt || null
         getApp().globalData.isLoggedIn   = true
         getApp().globalData.nickname     = res.nickname || ''
         getApp().globalData.avatarUrl    = res.avatarUrl || ''

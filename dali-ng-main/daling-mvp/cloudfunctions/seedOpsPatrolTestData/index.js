@@ -133,46 +133,12 @@ async function addVerifySeeds({
         nickname: `巡检待审样本${i + 1}`,
         cityId,
         verifyStatus: 'pending',
-        verifyProvider: 'wechat_official',
-        officialVerifyStatus: 'pending_callback',
-        officialVerifyTicket: `seed_ticket_${seedTag}_${i + 1}`,
+        verifyProvider: 'manual',
         verifySubmittedAt: new Date(createdBase - i * 6 * 60 * 1000),
         seedTag,
         isTestSeed: true,
         createdAt: new Date(createdBase - i * 6 * 60 * 1000),
         updatedAt: db.serverDate(),
-      },
-    })
-    ids.push(row._id)
-  }
-  return ids
-}
-
-async function addOfficialFailSeeds({
-  count = 0,
-  seedTag = '',
-}) {
-  if (!count) return []
-  const nowMs = Date.now()
-  const ids = []
-  for (let i = 0; i < count; i += 1) {
-    const row = await db.collection('officialVerifyAudits').add({
-      data: {
-        idempotencyKey: `seed_official_fail_${seedTag}_${i + 1}`,
-        callbackId: `seed_callback_${seedTag}_${i + 1}`,
-        traceId: `seed_trace_${seedTag}_${i + 1}`,
-        ticket: `seed_ticket_${seedTag}_${i + 1}`,
-        openid: `seed_openid_${seedTag}_${i + 1}`,
-        result: 'approved',
-        status: 'FAILED_SIGNATURE_MISMATCH',
-        retriable: true,
-        error: 'SIGNATURE_MISMATCH',
-        message: '【巡检造数】签名不匹配',
-        retryCount: 0,
-        seedTag,
-        isTestSeed: true,
-        createdAt: new Date(nowMs - (i + 1) * 8 * 60 * 1000),
-        updatedAt: new Date(nowMs - i * 5 * 60 * 1000),
       },
     })
     ids.push(row._id)
@@ -204,19 +170,16 @@ async function removeByQuery(collectionName, query = {}) {
 async function cleanupSeedData({ seedTag = '', cleanupAll = false }) {
   const reportQuery = cleanupAll ? { isTestSeed: true, action: 'report' } : { isTestSeed: true, seedTag, action: 'report' }
   const userQuery = cleanupAll ? { isTestSeed: true, verifyStatus: 'pending' } : { isTestSeed: true, seedTag, verifyStatus: 'pending' }
-  const auditQuery = cleanupAll ? { isTestSeed: true } : { isTestSeed: true, seedTag }
 
-  const [reportRemoved, userRemoved, auditRemoved] = await Promise.all([
+  const [reportRemoved, userRemoved] = await Promise.all([
     removeByQuery('adminActions', reportQuery),
     removeByQuery('users', userQuery),
-    removeByQuery('officialVerifyAudits', auditQuery),
   ])
 
   return {
     reportRemoved,
     userRemoved,
-    auditRemoved,
-    totalRemoved: reportRemoved + userRemoved + auditRemoved,
+    totalRemoved: reportRemoved + userRemoved,
   }
 }
 
@@ -296,8 +259,8 @@ exports.main = async (event = {}) => {
   }
 
   const profile = scenario === 'medium'
-    ? { reports: 0, verifies: 2, officialFails: 0 }
-    : { reports: 3, verifies: 2, officialFails: 6 }
+    ? { reports: 0, verifies: 2 }
+    : { reports: 3, verifies: 2 }
 
   if (event.clearBefore !== false) {
     await cleanupSeedData({
@@ -306,7 +269,7 @@ exports.main = async (event = {}) => {
     })
   }
 
-  const [reportIds, verifyIds, officialFailIds] = await Promise.all([
+  const [reportIds, verifyIds] = await Promise.all([
     addReportSeeds({
       count: profile.reports,
       cityId,
@@ -321,10 +284,6 @@ exports.main = async (event = {}) => {
       overdueHours: Number(event.verifyOverdueHours || 30),
       seedTag,
     }),
-    addOfficialFailSeeds({
-      count: profile.officialFails,
-      seedTag,
-    }),
   ])
 
   await addAdminAction({
@@ -335,7 +294,7 @@ exports.main = async (event = {}) => {
     cityId,
     seedTag,
     reason: `生成巡检测试数据（${scenario}）`,
-    result: `reports=${reportIds.length}; verifies=${verifyIds.length}; officialFails=${officialFailIds.length}`,
+    result: `reports=${reportIds.length}; verifies=${verifyIds.length}`,
   })
 
   return {
@@ -348,7 +307,6 @@ exports.main = async (event = {}) => {
     inserted: {
       reports: reportIds.length,
       verifies: verifyIds.length,
-      officialFails: officialFailIds.length,
     },
     tips: [
       '现在去管理后台点击「立即巡检」即可触发对应风险等级',

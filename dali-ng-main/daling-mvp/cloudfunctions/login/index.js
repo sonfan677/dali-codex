@@ -154,14 +154,6 @@ function buildReservedUserPatch(user = {}, cityId, todayKey) {
   if (typeof user.identityCheckTriggeredAt === 'undefined') patch.identityCheckTriggeredAt = null
   if (typeof user.reportAgainstCount !== 'number') patch.reportAgainstCount = 0
   if (typeof user.recentPublish7dCount !== 'number') patch.recentPublish7dCount = 0
-  if (!user.officialVerifyStatus) patch.officialVerifyStatus = 'not_started'
-  if (typeof user.officialVerifyTicket === 'undefined') patch.officialVerifyTicket = null
-  if (typeof user.officialVerifiedAt === 'undefined') patch.officialVerifiedAt = null
-  if (typeof user.officialVerifyRetryCount !== 'number') patch.officialVerifyRetryCount = 0
-  if (typeof user.officialVerifyLastRetryAt === 'undefined') patch.officialVerifyLastRetryAt = null
-  if (typeof user.officialVerifyLastCallbackAt === 'undefined') patch.officialVerifyLastCallbackAt = null
-  if (typeof user.officialVerifyLastEventKey === 'undefined') patch.officialVerifyLastEventKey = null
-  if (typeof user.officialVerifyLastError === 'undefined') patch.officialVerifyLastError = ''
   if (typeof user.verifyAutoApproved !== 'boolean') patch.verifyAutoApproved = false
   if (typeof user.verifyAutoApprovedAt === 'undefined') patch.verifyAutoApprovedAt = null
   if (typeof user.verifyAutoPendingReview !== 'boolean') patch.verifyAutoPendingReview = false
@@ -216,14 +208,6 @@ exports.main = async (event, context) => {
         identityCheckTriggeredAt: null,
         reportAgainstCount: 0,
         recentPublish7dCount: 0,
-        officialVerifyStatus: 'not_started',
-        officialVerifyTicket: null,
-        officialVerifiedAt: null,
-        officialVerifyRetryCount: 0,
-        officialVerifyLastRetryAt: null,
-        officialVerifyLastCallbackAt: null,
-        officialVerifyLastEventKey: null,
-        officialVerifyLastError: '',
         verifyAutoApproved: false,
         verifyAutoApprovedAt: null,
         verifyAutoPendingReview: false,
@@ -273,14 +257,6 @@ exports.main = async (event, context) => {
       identityCheckStatus: 'none',
       identityCheckReasons: [],
       identityCheckTriggeredAt: null,
-      officialVerifyStatus: 'not_started',
-      officialVerifyTicket: null,
-      officialVerifiedAt: null,
-      officialVerifyRetryCount: 0,
-      officialVerifyLastRetryAt: null,
-      officialVerifyLastCallbackAt: null,
-      officialVerifyLastEventKey: null,
-      officialVerifyLastError: '',
       openid: OPENID,
       nickname,
       avatarUrl,
@@ -347,13 +323,6 @@ exports.main = async (event, context) => {
     identityCheckStatus: mergedUser.identityCheckStatus || 'none',
     identityCheckReasons: Array.isArray(mergedUser.identityCheckReasons) ? mergedUser.identityCheckReasons : [],
     identityCheckTriggeredAt: mergedUser.identityCheckTriggeredAt || null,
-    officialVerifyStatus: mergedUser.officialVerifyStatus || 'not_started',
-    officialVerifyTicket: mergedUser.officialVerifyTicket || null,
-    officialVerifiedAt: mergedUser.officialVerifiedAt || null,
-    officialVerifyRetryCount: Number(mergedUser.officialVerifyRetryCount || 0),
-    officialVerifyLastRetryAt: mergedUser.officialVerifyLastRetryAt || null,
-    officialVerifyLastCallbackAt: mergedUser.officialVerifyLastCallbackAt || null,
-    officialVerifyLastError: mergedUser.officialVerifyLastError || '',
     openid: OPENID,
     nickname,
     avatarUrl,

@@ -191,7 +191,7 @@ export default {
       return !!getApp().globalData?.isLoggedIn
     },
     pendingBadgeText() {
-      return this.userInfo.verifyProvider === 'wechat_official' ? '⏳ 官方核验中' : '⏳ 审核中'
+      return '⏳ 审核中'
     },
     riskScoreText() {
       const score = Number(this.userInfo.userRiskScore)

@@ -274,7 +274,7 @@ exports.main = async () => {
     return { success: false, error: 'UNAUTHORIZED', message: '无管理员权限' }
   }
 
-  const [pendingUsersRes, reportsRes, activitiesRes, actionLogsRes, officialVerifyAuditRes, retryUsersRes, userProfilesRes] = await Promise.all([
+  const [pendingUsersRes, reportsRes, activitiesRes, actionLogsRes, userProfilesRes] = await Promise.all([
     db.collection('users')
       .where({ verifyStatus: 'pending' })
       .field({
@@ -288,10 +288,6 @@ exports.main = async () => {
         identityCheckRequired: true,
         identityCheckStatus: true,
         verifyProvider: true,
-        officialVerifyStatus: true,
-        officialVerifyTicket: true,
-        officialVerifyRetryCount: true,
-        officialVerifyLastError: true,
         verifySubmittedAt: true,
         createdAt: true,
         updatedAt: true,
@@ -347,14 +343,10 @@ exports.main = async () => {
           'hide',
           'verify',
           'reject_verify',
-          'official_verify_retry',
           'mark_attendance',
           'ban',
           'resolve_report_hide',
           'resolve_report_ignore',
-          'official_verify_alert',
-          'official_verify_alert_immediate',
-          'official_verify_callback',
           'verify_auto_approved',
           'ops_patrol_run',
           'ops_patrol_alert',
@@ -392,46 +384,6 @@ exports.main = async () => {
         createdAt: true,
       })
       .get(),
-    db.collection('officialVerifyAudits')
-      .orderBy('updatedAt', 'desc')
-      .limit(120)
-      .field({
-        _id: true,
-        idempotencyKey: true,
-        callbackId: true,
-        traceId: true,
-        ticket: true,
-        openid: true,
-        userOpenid: true,
-        result: true,
-        status: true,
-        retriable: true,
-        error: true,
-        message: true,
-        verifyStatus: true,
-        officialVerifyStatus: true,
-        retryCount: true,
-        processedAt: true,
-        createdAt: true,
-        updatedAt: true,
-      })
-      .get()
-      .catch(() => ({ data: [] })),
-    db.collection('users')
-      .where({
-        officialVerifyRetryCount: _.gt(0),
-      })
-      .limit(300)
-      .field({
-        _id: true,
-        _openid: true,
-        cityId: true,
-        isVerified: true,
-        verifyStatus: true,
-        officialVerifyRetryCount: true,
-      })
-      .get()
-      .catch(() => ({ data: [] })),
     db.collection('users')
       .limit(400)
       .field({
@@ -545,85 +497,7 @@ exports.main = async () => {
     ? (userProfilesRes.data || []).filter((item) => !item.cityId || item.cityId === meta.cityId)
     : (userProfilesRes.data || [])
 
-  const officialVerifyAuditList = (officialVerifyAuditRes.data || []).slice(0, 60)
-  const officialVerifyAuditSummary = officialVerifyAuditList.reduce((acc, item) => {
-    acc.total += 1
-    const status = String(item.status || '')
-    if (status === 'SUCCESS') acc.success += 1
-    else if (status.startsWith('FAILED')) acc.failed += 1
-    else acc.processing += 1
-    if (item.retriable) acc.retriable += 1
-    if (status === 'FAILED_REPLAY_ATTACK') acc.replayBlocked += 1
-    if (
-      status === 'FAILED_SIGNATURE_MISMATCH'
-      || status === 'FAILED_SIGNATURE_EXPIRED'
-      || status === 'FAILED_INVALID_SIGNATURE_PARAMS'
-      || status === 'FAILED_SIGN_CONFIG'
-    ) acc.signatureFailed += 1
-    if (status === 'FAILED_UNAUTHORIZED') acc.unauthorizedFailed += 1
-    if (status === 'FAILED_IP_DENIED') acc.ipDenied += 1
-    return acc
-  }, {
-    total: 0,
-    success: 0,
-    failed: 0,
-    processing: 0,
-    retriable: 0,
-    replayBlocked: 0,
-    signatureFailed: 0,
-    unauthorizedFailed: 0,
-    ipDenied: 0,
-  })
-
-  const pendingOfficialCount = (pendingVerifyList || [])
-    .filter((item) => item.verifyProvider === 'wechat_official' || item.officialVerifyStatus === 'pending_callback')
-    .length
-
-  const totalEffective = officialVerifyAuditSummary.success + officialVerifyAuditSummary.failed
-  const passRate = totalEffective > 0
-    ? Number((officialVerifyAuditSummary.success / totalEffective).toFixed(4))
-    : null
-
-  const failReasonCounter = {}
-  officialVerifyAuditList.forEach((item) => {
-    const status = String(item.status || '')
-    if (!status.startsWith('FAILED')) return
-    const key = item.error || item.message || status
-    failReasonCounter[key] = Number(failReasonCounter[key] || 0) + 1
-  })
-  const topFailReasons = Object.keys(failReasonCounter)
-    .map((reason) => ({ reason, count: failReasonCounter[reason] }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 5)
-
-  const rawRetryUsers = retryUsersRes.data || []
-  const retryUsers = shouldFilterCity
-    ? rawRetryUsers.filter((item) => !item.cityId || item.cityId === meta.cityId)
-    : rawRetryUsers
-  const retryUserCount = retryUsers.length
-  const retryConvertedCount = retryUsers.filter((item) => item.isVerified || item.verifyStatus === 'approved').length
-  const retryConversionRate = retryUserCount > 0
-    ? Number((retryConvertedCount / retryUserCount).toFixed(4))
-    : null
-
   const last24hMs = Date.now() - 24 * 60 * 60 * 1000
-  const officialVerifyThresholdAlertList = rawActionLogs
-    .filter((item) => item.action === 'official_verify_alert')
-    .slice(0, 10)
-  const officialVerifyImmediateAlertList = rawActionLogs
-    .filter((item) => item.action === 'official_verify_alert_immediate')
-    .slice(0, 20)
-  const thresholdAlertCount24h = officialVerifyThresholdAlertList.filter((item) => {
-    const ts = new Date(item.createdAt).getTime()
-    return Number.isFinite(ts) && ts >= last24hMs
-  }).length
-  const immediateAlertCount24h = officialVerifyImmediateAlertList.filter((item) => {
-    const ts = new Date(item.createdAt).getTime()
-    return Number.isFinite(ts) && ts >= last24hMs
-  }).length
-  const officialVerifyAlertList = [...officialVerifyImmediateAlertList, ...officialVerifyThresholdAlertList]
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-    .slice(0, 12)
 
   const opsPatrolRunList = rawActionLogs
     .filter((item) => item.action === 'ops_patrol_run')
@@ -739,24 +613,6 @@ exports.main = async () => {
       windowMinutes: autoVerifySummary.windowMinutes || resolveVerifyAutoApproveMinutes(),
       latestAutoApprovedAt: autoVerifySummary.latestAutoApprovedAt || null,
     },
-    officialVerifyAudit: {
-      summary: {
-        ...officialVerifyAuditSummary,
-        pendingOfficialCount,
-        passRate,
-        retryUserCount,
-        retryConvertedCount,
-        retryConversionRate,
-        topFailReasons,
-        alertCount24h: immediateAlertCount24h + thresholdAlertCount24h,
-        immediateAlertCount24h,
-        thresholdAlertCount24h,
-      },
-      recent: officialVerifyAuditList,
-      alerts: officialVerifyAlertList,
-      immediateAlerts: officialVerifyImmediateAlertList.slice(0, 10),
-      thresholdAlerts: officialVerifyThresholdAlertList,
-    },
     opsPatrol: {
       summary: latestOpsPatrol
         ? {
@@ -767,7 +623,6 @@ exports.main = async () => {
             checkedAt: latestOpsPatrol.patrolSummary?.checkedAt || latestOpsPatrol.createdAt || null,
             reportOverdueCount: Number(latestOpsPatrol.patrolSummary?.reportOverdueCount || 0),
             verifyOverdueCount: Number(latestOpsPatrol.patrolSummary?.verifyOverdueCount || 0),
-            officialVerifyFailedCount: Number(latestOpsPatrol.patrolSummary?.officialVerifyFailedCount || 0),
             supplyAlertLevel: latestOpsPatrol.patrolSummary?.supplyAlertLevel || 'normal',
             supplyAlertFlags: latestOpsPatrol.patrolSummary?.supplyAlertFlags || [],
             source: latestOpsPatrol.patrolSummary?.source || latestOpsPatrol.actionSource || '',
@@ -782,7 +637,6 @@ exports.main = async () => {
             checkedAt: null,
             reportOverdueCount: 0,
             verifyOverdueCount: 0,
-            officialVerifyFailedCount: 0,
             supplyAlertLevel: 'normal',
             supplyAlertFlags: [],
             source: '',
