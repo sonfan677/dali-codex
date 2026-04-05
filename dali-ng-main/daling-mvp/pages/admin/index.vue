@@ -905,6 +905,58 @@
 
       <!-- 活动管理 -->
       <template v-else-if="activeTab === 'activities'">
+        <view class="card admin-distribution-card">
+          <view class="title-row">
+            <text class="card-title">活动分布可视化</text>
+            <text class="mini-pill mini-pill--log">管理专用</text>
+          </view>
+          <text class="card-sub">
+            样本 {{ activityDistributionStats.total }} 条 · 已定位 {{ activityDistributionStats.withLocation }} 条 · 未定位 {{ activityDistributionStats.withoutLocation }} 条
+          </text>
+
+          <view class="admin-distribution-section">
+            <text class="admin-distribution-title">距离分布（以大理古城为基准）</text>
+            <view v-if="activityDistanceDistribution.length === 0" class="card-openid">暂无活动数据</view>
+            <view v-else class="admin-distribution-list">
+              <view
+                v-for="item in activityDistanceDistribution"
+                :key="`distance_${item.id}`"
+                class="admin-distribution-row"
+              >
+                <text class="admin-distribution-label">{{ item.label }}</text>
+                <view class="admin-distribution-track">
+                  <view
+                    class="admin-distribution-fill admin-distribution-fill--distance"
+                    :style="{ width: `${item.percent}%` }"
+                  />
+                </view>
+                <text class="admin-distribution-value">{{ item.count }}</text>
+              </view>
+            </view>
+          </view>
+
+          <view class="admin-distribution-section">
+            <text class="admin-distribution-title">分类分布（当前筛选）</text>
+            <view v-if="activityCategoryDistribution.length === 0" class="card-openid">暂无活动数据</view>
+            <view v-else class="admin-distribution-list">
+              <view
+                v-for="item in activityCategoryDistribution"
+                :key="`category_${item.label}`"
+                class="admin-distribution-row"
+              >
+                <text class="admin-distribution-label">{{ item.label }}</text>
+                <view class="admin-distribution-track">
+                  <view
+                    class="admin-distribution-fill admin-distribution-fill--category"
+                    :style="{ width: `${item.percent}%` }"
+                  />
+                </view>
+                <text class="admin-distribution-value">{{ item.count }}</text>
+              </view>
+            </view>
+          </view>
+        </view>
+
         <view v-if="filteredActivityList.length === 0" class="empty">
           <text class="empty-text">暂无活动</text>
         </view>
@@ -1272,6 +1324,34 @@
 
 <script>
 import { callCloud } from '@/utils/cloud.js'
+
+const DALI_CENTER = {
+  lat: 25.6065,
+  lng: 100.2679,
+}
+
+const ACTIVITY_DISTANCE_BUCKETS = [
+  { id: 'lt1', label: '0-1km', min: 0, max: 1000 },
+  { id: '1to3', label: '1-3km', min: 1000, max: 3000 },
+  { id: '3to5', label: '3-5km', min: 3000, max: 5000 },
+  { id: '5to10', label: '5-10km', min: 5000, max: 10000 },
+  { id: '10to20', label: '10-20km', min: 10000, max: 20000 },
+  { id: 'gt20', label: '20km+', min: 20000, max: Number.POSITIVE_INFINITY },
+  { id: 'unknown', label: '位置未知', min: null, max: null },
+]
+
+const CATEGORY_LABEL_MAP = {
+  sport: '运动',
+  music: '音乐',
+  reading: '读书',
+  game: '游戏',
+  social: '社交',
+  outdoor: '户外',
+  food: '美食',
+  movie: '观影',
+  travel: '旅行',
+  other: '其它',
+}
 
 export default {
   data() {
@@ -2337,6 +2417,93 @@ export default {
       })
     },
 
+    activityDistributionData() {
+      const total = this.filteredActivityList.length
+      if (!total) {
+        return {
+          stats: { total: 0, withLocation: 0, withoutLocation: 0 },
+          distanceRows: [],
+          categoryRows: [],
+        }
+      }
+
+      const distanceCounter = ACTIVITY_DISTANCE_BUCKETS.reduce((acc, item) => {
+        acc[item.id] = 0
+        return acc
+      }, {})
+      const categoryCounter = {}
+      let withLocation = 0
+
+      this.filteredActivityList.forEach((item) => {
+        const lat = Number(item?.location?.lat)
+        const lng = Number(item?.location?.lng)
+
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          withLocation += 1
+          const meters = this.distanceMetersFromDaliCenter(lat, lng)
+          const bucketId = this.resolveDistanceBucketId(meters)
+          distanceCounter[bucketId] = Number(distanceCounter[bucketId] || 0) + 1
+        } else {
+          distanceCounter.unknown = Number(distanceCounter.unknown || 0) + 1
+        }
+
+        const categoryLabel = this.resolveActivityCategoryLabel(item)
+        categoryCounter[categoryLabel] = Number(categoryCounter[categoryLabel] || 0) + 1
+      })
+
+      const distanceMax = Math.max(
+        1,
+        ...ACTIVITY_DISTANCE_BUCKETS.map((item) => Number(distanceCounter[item.id] || 0)),
+      )
+      const distanceRows = ACTIVITY_DISTANCE_BUCKETS
+        .map((item) => {
+          const count = Number(distanceCounter[item.id] || 0)
+          return {
+            id: item.id,
+            label: item.label,
+            count,
+            percent: count > 0 ? Math.max(6, Math.round((count / distanceMax) * 100)) : 0,
+          }
+        })
+        .filter((item) => item.count > 0)
+
+      const categoryRowsRaw = Object.keys(categoryCounter).map((label) => ({
+        label,
+        count: Number(categoryCounter[label] || 0),
+      }))
+      categoryRowsRaw.sort((a, b) => {
+        if (b.count !== a.count) return b.count - a.count
+        return a.label.localeCompare(b.label, 'zh-Hans-CN')
+      })
+      const categoryMax = Math.max(1, ...categoryRowsRaw.map((item) => item.count))
+      const categoryRows = categoryRowsRaw.slice(0, 8).map((item) => ({
+        ...item,
+        percent: Math.max(6, Math.round((item.count / categoryMax) * 100)),
+      }))
+
+      return {
+        stats: {
+          total,
+          withLocation,
+          withoutLocation: Math.max(0, total - withLocation),
+        },
+        distanceRows,
+        categoryRows,
+      }
+    },
+
+    activityDistributionStats() {
+      return this.activityDistributionData.stats
+    },
+
+    activityDistanceDistribution() {
+      return this.activityDistributionData.distanceRows
+    },
+
+    activityCategoryDistribution() {
+      return this.activityDistributionData.categoryRows
+    },
+
     filteredActionLogList() {
       const keyword = this.normalizeKeyword(this.searchKeyword)
       const filtered = this.actionLogList.filter((item) => {
@@ -2432,6 +2599,43 @@ export default {
       const date = new Date(y, m - 1, d, endOfDay ? 23 : 0, endOfDay ? 59 : 0, endOfDay ? 59 : 0, endOfDay ? 999 : 0)
       const ts = date.getTime()
       return Number.isFinite(ts) ? ts : NaN
+    },
+
+    resolveActivityCategoryLabel(item = {}) {
+      const label = String(item.categoryLabel || '').trim()
+      if (label) return label
+      const cid = String(item.categoryId || '').trim()
+      return CATEGORY_LABEL_MAP[cid] || '其它'
+    },
+
+    toRadians(value) {
+      return (Number(value) * Math.PI) / 180
+    },
+
+    distanceMetersFromDaliCenter(lat, lng) {
+      const lat1 = this.toRadians(lat)
+      const lng1 = this.toRadians(lng)
+      const lat2 = this.toRadians(DALI_CENTER.lat)
+      const lng2 = this.toRadians(DALI_CENTER.lng)
+      const dLat = lat1 - lat2
+      const dLng = lng1 - lng2
+      const sinLat = Math.sin(dLat / 2)
+      const sinLng = Math.sin(dLng / 2)
+      const a = sinLat * sinLat + Math.cos(lat1) * Math.cos(lat2) * sinLng * sinLng
+      const c = 2 * Math.asin(Math.sqrt(Math.max(0, Math.min(1, a))))
+      return 6371000 * c
+    },
+
+    resolveDistanceBucketId(meters) {
+      const value = Number(meters)
+      if (!Number.isFinite(value) || value < 0) return 'unknown'
+      const matched = ACTIVITY_DISTANCE_BUCKETS.find((item) => (
+        item.id !== 'unknown'
+        && Number.isFinite(item.min)
+        && value >= item.min
+        && value < item.max
+      ))
+      return matched?.id || 'gt20'
     },
 
     onPickLogStartDate(e) {
@@ -5193,6 +5397,58 @@ export default {
   margin-top: 8rpx;
   font-size: 20rpx;
   color: #667085;
+}
+.admin-distribution-card {
+  border: 1rpx solid #dbe7f3;
+  background: linear-gradient(180deg, #f8fbff, #ffffff);
+}
+.admin-distribution-section {
+  margin-top: 14rpx;
+  padding-top: 14rpx;
+  border-top: 1rpx solid #edf2f7;
+}
+.admin-distribution-title {
+  display: block;
+  font-size: 22rpx;
+  color: #475467;
+}
+.admin-distribution-list {
+  margin-top: 10rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+.admin-distribution-row {
+  display: grid;
+  grid-template-columns: 120rpx 1fr 56rpx;
+  align-items: center;
+  gap: 10rpx;
+}
+.admin-distribution-label {
+  font-size: 21rpx;
+  color: #475467;
+}
+.admin-distribution-track {
+  width: 100%;
+  height: 10rpx;
+  border-radius: 999rpx;
+  background: #e8edf3;
+  overflow: hidden;
+}
+.admin-distribution-fill {
+  height: 100%;
+  border-radius: 999rpx;
+}
+.admin-distribution-fill--distance {
+  background: #1a3c5e;
+}
+.admin-distribution-fill--category {
+  background: #0f8f6a;
+}
+.admin-distribution-value {
+  font-size: 21rpx;
+  color: #344054;
+  text-align: right;
 }
 
 .card {

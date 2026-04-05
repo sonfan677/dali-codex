@@ -51,51 +51,6 @@
       <text class="filter-hint">{{ filterHintText }}</text>
     </view>
 
-    <view v-if="showDistributionCard" class="distribution-panel">
-      <view class="distribution-head">
-        <text class="distribution-title">附近活动分布可视化</text>
-        <text class="distribution-sub">{{ distributionSubtitle }}</text>
-      </view>
-
-      <view class="distribution-section">
-        <text class="distribution-label">距离分布</text>
-        <view class="distribution-list">
-          <view
-            v-for="item in distanceDistribution"
-            :key="`dist-${item.key}`"
-            class="distribution-item"
-          >
-            <view class="distribution-item-top">
-              <text class="distribution-item-name">{{ item.label }}</text>
-              <text class="distribution-item-count">{{ item.count }}</text>
-            </view>
-            <view class="distribution-bar">
-              <view class="distribution-bar-fill" :style="{ width: item.percent + '%' }" />
-            </view>
-          </view>
-        </view>
-      </view>
-
-      <view class="distribution-section">
-        <text class="distribution-label">类型分布（Top 6）</text>
-        <view class="distribution-list">
-          <view
-            v-for="item in categoryDistribution"
-            :key="`cat-${item.id}`"
-            class="distribution-item"
-          >
-            <view class="distribution-item-top">
-              <text class="distribution-item-name">{{ item.label }}</text>
-              <text class="distribution-item-count">{{ item.count }}</text>
-            </view>
-            <view class="distribution-bar distribution-bar--cat">
-              <view class="distribution-bar-fill distribution-bar-fill--cat" :style="{ width: item.percent + '%' }" />
-            </view>
-          </view>
-        </view>
-      </view>
-    </view>
-
     <scroll-view
       scroll-y
       class="list"
@@ -421,61 +376,6 @@ export default {
       return item?.label || '状态'
     },
 
-    showDistributionCard() {
-      return this.isAdminViewer && !this.onboardingMockActive && this.activities.length > 0
-    },
-
-    distributionSubtitle() {
-      const source = this.locationStore.hasPermission === true ? '已授权定位' : '未授权全量'
-      return `${source} · 共 ${this.activities.length} 条`
-    },
-
-    distanceDistribution() {
-      const buckets = [
-        { key: '0-1', label: '0-1km', min: 0, max: 1000, count: 0 },
-        { key: '1-3', label: '1-3km', min: 1000, max: 3000, count: 0 },
-        { key: '3-5', label: '3-5km', min: 3000, max: 5000, count: 0 },
-        { key: '5-10', label: '5-10km', min: 5000, max: 10000, count: 0 },
-        { key: '10+', label: '10km+', min: 10000, max: Number.POSITIVE_INFINITY, count: 0 },
-      ]
-      ;(this.activities || []).forEach((item) => {
-        const d = Number(item?._distance)
-        if (!Number.isFinite(d) || d < 0) return
-        const hit = buckets.find((bucket) => d >= bucket.min && d < bucket.max)
-        if (hit) hit.count += 1
-      })
-      const maxCount = Math.max(...buckets.map((item) => item.count), 1)
-      return buckets.map((item) => ({
-        ...item,
-        percent: Math.max(8, Math.round((item.count / maxCount) * 100)),
-      }))
-    },
-
-    categoryDistribution() {
-      const counter = {}
-      ;(this.activities || []).forEach((item) => {
-        const categoryId = item?.categoryId || 'other'
-        const categoryLabel = item?.categoryLabel || getCategoryLabel(categoryId)
-        const current = counter[categoryId] || { id: categoryId, label: categoryLabel, count: 0 }
-        current.count += 1
-        counter[categoryId] = current
-      })
-      const list = Object.values(counter).sort((a, b) => b.count - a.count).slice(0, 6)
-      const maxCount = Math.max(...list.map((item) => item.count), 1)
-      return list.map((item) => ({
-        ...item,
-        percent: Math.max(8, Math.round((item.count / maxCount) * 100)),
-      }))
-    },
-
-    currentDistanceScopeLabel() {
-      const scope = this.getDistanceScopeConfig(this.lastQueryMode)
-      const meters = Number(scope.radius || 0)
-      if (!Number.isFinite(meters) || meters <= 0) return '--'
-      if (meters >= 1000) return `${Math.round(meters / 1000)}km`
-      return `${meters}m`
-    },
-
     listStyle() {
       const bottom = this.showBottomAuthBanner
         ? this.listBottomPaddingWithBannerPx
@@ -526,16 +426,21 @@ export default {
           : fallbackSafeBottom
 
         const isIOS = /ios/i.test(String(info?.system || ''))
-        const noBannerBase = isIOS ? 4 : 8
-        const withBannerBase = uni.upx2px ? uni.upx2px(180) : 90
-        const bannerBottomBase = uni.upx2px ? uni.upx2px(16) : 8
+        const noBannerBase = isIOS ? 0 : 2
+        const withBannerBase = uni.upx2px ? uni.upx2px(isIOS ? 118 : 132) : (isIOS ? 59 : 66)
+        const bannerBottomBase = uni.upx2px ? uni.upx2px(isIOS ? 4 : 8) : (isIOS ? 2 : 4)
 
-        this.listBottomPaddingPx = Math.round(safeBottom + noBannerBase)
-        this.listBottomPaddingWithBannerPx = Math.round(safeBottom + withBannerBase)
-        this.authBannerBottomPx = Math.round(safeBottom + bannerBottomBase)
+        // iOS 在有原生 tabBar + 安全区时容易出现底部留白，收敛无引导条场景的额外占位。
+        const noBannerSafeBottom = isIOS ? 0 : safeBottom
+        const withBannerSafeBottom = isIOS ? Math.min(safeBottom, 12) : safeBottom
+        const bannerSafeBottom = isIOS ? Math.min(safeBottom, 10) : safeBottom
+
+        this.listBottomPaddingPx = Math.max(0, Math.round(noBannerSafeBottom + noBannerBase))
+        this.listBottomPaddingWithBannerPx = Math.max(0, Math.round(withBannerSafeBottom + withBannerBase))
+        this.authBannerBottomPx = Math.max(0, Math.round(bannerSafeBottom + bannerBottomBase))
       } catch (e) {
-        this.listBottomPaddingPx = 12
-        this.listBottomPaddingWithBannerPx = 120
+        this.listBottomPaddingPx = 8
+        this.listBottomPaddingWithBannerPx = 104
         this.authBannerBottomPx = 16
       }
     },
@@ -1232,86 +1137,6 @@ export default {
   margin-top: 12rpx;
   font-size: 22rpx;
   color: #667085;
-}
-
-.distribution-panel {
-  background: #fff;
-  margin: 0 16rpx 10rpx;
-  border-radius: 14rpx;
-  padding: 18rpx;
-}
-
-.distribution-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12rpx;
-}
-
-.distribution-title {
-  font-size: 28rpx;
-  color: #1a3c5e;
-  font-weight: 700;
-}
-
-.distribution-sub {
-  font-size: 20rpx;
-  color: #667085;
-}
-
-.distribution-section {
-  margin-top: 16rpx;
-}
-
-.distribution-label {
-  display: block;
-  font-size: 22rpx;
-  color: #475467;
-  margin-bottom: 10rpx;
-}
-
-.distribution-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10rpx;
-}
-
-.distribution-item-top {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.distribution-item-name {
-  font-size: 22rpx;
-  color: #344054;
-}
-
-.distribution-item-count {
-  font-size: 22rpx;
-  color: #667085;
-}
-
-.distribution-bar {
-  margin-top: 6rpx;
-  height: 12rpx;
-  border-radius: 999rpx;
-  background: #e9eef5;
-  overflow: hidden;
-}
-
-.distribution-bar-fill {
-  height: 100%;
-  border-radius: 999rpx;
-  background: linear-gradient(90deg, #2e75b6 0%, #1a3c5e 100%);
-}
-
-.distribution-bar--cat {
-  background: #edf7f1;
-}
-
-.distribution-bar-fill--cat {
-  background: linear-gradient(90deg, #39a169 0%, #1f7a45 100%);
 }
 
 .list {
