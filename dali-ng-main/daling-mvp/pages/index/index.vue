@@ -314,11 +314,13 @@ export default {
           desc: '首次登录默认示例活动',
         }
       }
-      if (this.lastQueryMode === 'nearby') {
+      if (this.locationStore.hasPermission === true) {
         return {
           type: 'real',
           title: '真实数据',
-          desc: `当前位置 ${this.currentDistanceScopeLabel}`,
+          desc: this.distanceFilterId
+            ? `已授权定位 · ${this.distanceFilterLabel}`
+            : '已授权定位 · 默认从近到远',
         }
       }
       return {
@@ -347,7 +349,7 @@ export default {
     distanceFilterLabel() {
       const item = this.distanceFilterOptions.find((opt) => opt.id === this.distanceFilterId)
       if (item) return item.label
-      if (this.lastQueryMode === 'nearby') return '5km(默认)'
+      if (this.locationStore.hasPermission === true) return '从近到远'
       return '距离'
     },
 
@@ -396,8 +398,8 @@ export default {
     },
 
     distributionSubtitle() {
-      const source = this.lastQueryMode === 'nearby' ? '当前位置' : '未授权全量'
-      return `${source} · 当前范围 ${this.currentDistanceScopeLabel} · 共 ${this.activities.length} 条`
+      const source = this.locationStore.hasPermission === true ? '已授权定位' : '未授权全量'
+      return `${source} · 共 ${this.activities.length} 条`
     },
 
     distanceDistribution() {
@@ -513,12 +515,8 @@ export default {
         return
       }
 
-      const hasLocation = await this.locationStore.refreshLocation()
-      if (hasLocation && this.locationStore.lat && this.locationStore.lng) {
-        await this.loadActivitiesNearby()
-      } else {
-        await this.loadActivitiesAll()
-      }
+      await this.locationStore.refreshLocation()
+      await this.loadActivitiesAll()
     },
 
     clearSearch() {
@@ -541,8 +539,8 @@ export default {
         }
         return { radius: Number(selected.radius || 5000), sortBy: 'default' }
       }
-      if (mode === 'nearby') {
-        return { radius: 5000, sortBy: 'default' }
+      if (this.locationStore.hasPermission === true) {
+        return { radius: 2000000, sortBy: 'distance_asc' }
       }
       return { radius: 2000000, sortBy: 'default' }
     },
@@ -563,12 +561,12 @@ export default {
         cityId: 'dali',
         lat,
         lng,
-        queryMode: mode === 'all' ? 'all' : 'nearby',
+        queryMode: 'all',
         radius: Number(scope.radius || 5000),
         sortBy: scope.sortBy || 'default',
         categoryId: queryCategoryId,
         keyword: queryKeyword,
-        limit: mode === 'all' ? 200 : 120,
+        limit: 500,
       }
     },
 
@@ -689,6 +687,18 @@ export default {
         })
       }
 
+      // 已授权定位时，默认按距离从近到远（即使未手动选择“距离”筛选）
+      if (this.locationStore.hasPermission === true) {
+        return [...list].sort((a, b) => {
+          const ad = Number.isFinite(Number(a._distance)) ? Number(a._distance) : Number.POSITIVE_INFINITY
+          const bd = Number.isFinite(Number(b._distance)) ? Number(b._distance) : Number.POSITIVE_INFINITY
+          if (ad !== bd) return ad - bd
+          const startDiff = new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
+          if (startDiff !== 0) return startDiff
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        })
+      }
+
       const nowMs = Number(this.serverTime || Date.now())
       return [...list].sort((a, b) => {
         const aRecommended = !!a.isRecommended
@@ -741,11 +751,7 @@ export default {
 
     async reloadActivitiesByContext() {
       if (this.onboardingMockActive) return
-      if (this.locationStore.hasPermission === true && this.locationStore.lat && this.locationStore.lng) {
-        await this.loadActivitiesNearby()
-      } else {
-        await this.loadActivitiesAll()
-      }
+      await this.loadActivitiesAll()
     },
 
     async onSearchConfirm() {
@@ -850,9 +856,8 @@ export default {
         if (this.onboardingMockActive) {
           this.markOnboardingDemoSeen()
           this.onboardingMockActive = false
-          if (!this.distanceFilterId) this.distanceFilterId = 'r_5'
         }
-        await this.loadActivitiesNearby()
+        await this.loadActivitiesAll()
         return true
       }
 
@@ -891,10 +896,16 @@ export default {
       this.loading = true
       this.lastQueryMode = 'all'
       try {
+        const latForQuery = this.locationStore.hasPermission === true && Number.isFinite(Number(this.locationStore.lat))
+          ? Number(this.locationStore.lat)
+          : DEFAULT_CENTER.lat
+        const lngForQuery = this.locationStore.hasPermission === true && Number.isFinite(Number(this.locationStore.lng))
+          ? Number(this.locationStore.lng)
+          : DEFAULT_CENTER.lng
         const res = await callCloud('getActivityList', this.buildQueryParams({
           mode: 'all',
-          lat: DEFAULT_CENTER.lat,
-          lng: DEFAULT_CENTER.lng,
+          lat: latForQuery,
+          lng: lngForQuery,
         }))
         this.activities = Array.isArray(res?.activities) ? res.activities : []
         this.serverTime = Number(res?.serverTime || Date.now())

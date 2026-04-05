@@ -41,6 +41,26 @@ const CATEGORY_MAP = {
   other: '其他',
 }
 
+// 大理白族自治州发布范围（近似地理围栏，后续可改为配置化 polygon）
+const DALI_PREFECTURE_BOUNDS = {
+  minLat: 24.5,
+  maxLat: 26.7,
+  minLng: 98.7,
+  maxLng: 101.3,
+}
+
+function isInDaliPrefecture(lat, lng) {
+  const nLat = Number(lat)
+  const nLng = Number(lng)
+  if (!Number.isFinite(nLat) || !Number.isFinite(nLng)) return false
+  return (
+    nLat >= DALI_PREFECTURE_BOUNDS.minLat &&
+    nLat <= DALI_PREFECTURE_BOUNDS.maxLat &&
+    nLng >= DALI_PREFECTURE_BOUNDS.minLng &&
+    nLng <= DALI_PREFECTURE_BOUNDS.maxLng
+  )
+}
+
 function buildTrustProfileForPublish(user) {
   const trustLevel = user?.platformVerified || user?.trustVerified ? 'A' : 'B'
   const displayStars = trustLevel === 'A' ? 5 : 4
@@ -333,6 +353,8 @@ exports.main = async (event, context) => {
 
   const cityConfig = await loadCityConfig(cityId || DEFAULT_CITY_CONFIG.cityId)
   const finalCityId = cityConfig.cityId
+  const latNum = Number(lat)
+  const lngNum = Number(lng)
 
   // 2. 参数校验
   if (!title || title.trim().length === 0) {
@@ -341,8 +363,14 @@ exports.main = async (event, context) => {
   if (title.length > 30) {
     return { success: false, error: 'TITLE_TOO_LONG', message: '标题最多30字' }
   }
-  if (!lat || !lng) {
+  if (!Number.isFinite(latNum) || !Number.isFinite(lngNum)) {
     return { success: false, error: 'INVALID_LOCATION', message: '请选择活动地点' }
+  }
+  if (finalCityId !== 'dali') {
+    return { success: false, error: 'CITY_NOT_SUPPORTED', message: '当前仅支持在大理白族自治州发布活动' }
+  }
+  if (!isInDaliPrefecture(latNum, lngNum)) {
+    return { success: false, error: 'OUT_OF_DALI_REGION', message: '活动地点需在云南省大理白族自治州范围内' }
   }
   if (!CATEGORY_MAP[categoryId]) {
     return { success: false, error: 'INVALID_CATEGORY', message: '活动分类不合法' }
@@ -394,8 +422,8 @@ exports.main = async (event, context) => {
       coverImage: '',
       cityId: finalCityId,
       location: {
-        lat,
-        lng,
+        lat: latNum,
+        lng: lngNum,
         address,
         coordinateSystem: cityConfig.geo.coordinateSystem,
         radius: cityConfig.geo.defaultFenceRadius,

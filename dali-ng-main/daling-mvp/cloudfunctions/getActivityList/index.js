@@ -259,7 +259,7 @@ exports.main = async (event, context) => {
   const normalizedKeyword = normalizeKeyword(keyword)
   const normalizedCategoryId = String(categoryId || 'all')
   const now = new Date()
-  const safeLimit = Math.max(20, Math.min(200, Number(limit) || 100))
+  const safeLimit = Math.max(20, Math.min(1000, Number(limit) || 200))
 
   const whereQuery = {
     cityId: targetCityId,
