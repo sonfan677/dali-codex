@@ -411,9 +411,13 @@ export default {
   methods: {
     initLayoutAdaptiveMetrics() {
       try {
-        const info = (typeof wx !== 'undefined' && typeof wx.getWindowInfo === 'function')
+        const windowInfo = (typeof wx !== 'undefined' && typeof wx.getWindowInfo === 'function')
           ? wx.getWindowInfo()
           : uni.getSystemInfoSync()
+        const systemInfo = (typeof uni !== 'undefined' && typeof uni.getSystemInfoSync === 'function')
+          ? uni.getSystemInfoSync()
+          : {}
+        const info = { ...(systemInfo || {}), ...(windowInfo || {}) }
 
         const safeAreaInsetsBottom = Number(info?.safeAreaInsets?.bottom)
         const screenHeight = Number(info?.screenHeight)
@@ -425,22 +429,28 @@ export default {
           ? Math.max(0, safeAreaInsetsBottom)
           : fallbackSafeBottom
 
-        const isIOS = /ios/i.test(String(info?.system || ''))
+        const osHints = [
+          info?.system,
+          info?.platform,
+          systemInfo?.system,
+          systemInfo?.platform,
+        ].map((v) => String(v || '').toLowerCase())
+        const isIOS = osHints.some((item) => item.includes('ios') || item === 'iphone' || item === 'ipad')
         const noBannerBase = isIOS ? 0 : 2
         const withBannerBase = uni.upx2px ? uni.upx2px(isIOS ? 118 : 132) : (isIOS ? 59 : 66)
         const bannerBottomBase = uni.upx2px ? uni.upx2px(isIOS ? 4 : 8) : (isIOS ? 2 : 4)
 
         // iOS 在有原生 tabBar + 安全区时容易出现底部留白，收敛无引导条场景的额外占位。
         const noBannerSafeBottom = isIOS ? 0 : safeBottom
-        const withBannerSafeBottom = isIOS ? Math.min(safeBottom, 12) : safeBottom
-        const bannerSafeBottom = isIOS ? Math.min(safeBottom, 10) : safeBottom
+        const withBannerSafeBottom = isIOS ? Math.min(safeBottom, 8) : safeBottom
+        const bannerSafeBottom = isIOS ? Math.min(safeBottom, 8) : safeBottom
 
         this.listBottomPaddingPx = Math.max(0, Math.round(noBannerSafeBottom + noBannerBase))
         this.listBottomPaddingWithBannerPx = Math.max(0, Math.round(withBannerSafeBottom + withBannerBase))
         this.authBannerBottomPx = Math.max(0, Math.round(bannerSafeBottom + bannerBottomBase))
       } catch (e) {
-        this.listBottomPaddingPx = 8
-        this.listBottomPaddingWithBannerPx = 104
+        this.listBottomPaddingPx = 0
+        this.listBottomPaddingWithBannerPx = 96
         this.authBannerBottomPx = 16
       }
     },
