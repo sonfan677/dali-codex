@@ -317,6 +317,10 @@ export default {
     }
   },
 
+  onLoad(options = {}) {
+    this.applyPrefillFromQuery(options)
+  },
+
   async onShow() {
     try {
       await this.userStore.syncSession({ force: false, minIntervalMs: 15000 })
@@ -326,6 +330,77 @@ export default {
   },
 
   methods: {
+    safeDecodeURIComponent(value = '') {
+      const raw = String(value || '')
+      if (!raw) return ''
+      try {
+        return decodeURIComponent(raw)
+      } catch (e) {
+        return raw
+      }
+    },
+
+    formatStartTimeTextByMs(ms) {
+      const dt = new Date(ms)
+      if (!Number.isFinite(dt.getTime())) return ''
+      const m = dt.getMonth() + 1
+      const d = dt.getDate()
+      const h = `${dt.getHours()}`.padStart(2, '0')
+      const min = `${dt.getMinutes()}`.padStart(2, '0')
+      return `${m}月${d}日 ${h}:${min}`
+    },
+
+    applyPrefillFromQuery(options = {}) {
+      if (String(options.prefill || '') !== 'market') return
+
+      const title = this.safeDecodeURIComponent(options.title)
+      const description = this.safeDecodeURIComponent(options.description)
+      const address = this.safeDecodeURIComponent(options.address)
+      const categoryId = String(this.safeDecodeURIComponent(options.categoryId) || '').trim().toLowerCase()
+      const startTimeText = this.safeDecodeURIComponent(options.startTime)
+      const lat = Number(options.lat)
+      const lng = Number(options.lng)
+
+      if (title && !String(this.form.title || '').trim()) {
+        this.form.title = title
+      }
+      if (description && !String(this.form.description || '').trim()) {
+        this.form.description = description
+      }
+      if (address) {
+        this.form.address = address
+      }
+      if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        this.form.lat = lat
+        this.form.lng = lng
+      }
+
+      if (categoryId) {
+        const hitIndex = this.categoryOptions.findIndex((item) => String(item.id || '') === categoryId)
+        if (hitIndex >= 0) {
+          this.categoryIndex = hitIndex
+          const selected = this.categoryOptions[hitIndex]
+          this.form.categoryId = selected.id
+          this.form.categoryLabel = selected.label
+          if (selected.id !== 'other') {
+            this.form.customCategoryLabel = ''
+          }
+        }
+      }
+
+      const startMs = new Date(startTimeText).getTime()
+      if (Number.isFinite(startMs) && startMs > Date.now()) {
+        this.form.startTimeMs = startMs
+        this.form.startTimeStr = this.formatStartTimeTextByMs(startMs)
+      }
+
+      if (title || description || address || Number.isFinite(startMs)) {
+        setTimeout(() => {
+          uni.showToast({ title: '已带入集市同行信息', icon: 'none', duration: 1800 })
+        }, 100)
+      }
+    },
+
     normalizeCategoryText(value = '') {
       return String(value || '')
         .trim()
