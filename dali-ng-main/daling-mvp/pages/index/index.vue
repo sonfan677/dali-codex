@@ -237,6 +237,7 @@ export default {
       distanceFilterId: '',
       dateFilterId: 'all',
       statusFilterId: 'all',
+      dateFilterAnchorMs: Date.now(),
       selectorVisible: false,
       selectorType: '',
       selectorTitle: '',
@@ -339,21 +340,7 @@ export default {
     },
 
     dateFilterOptions() {
-      const baseMs = Number(this.serverTime || Date.now())
-      const list = [
-        { id: 'all', label: '全部日期' },
-        { id: 'today', label: '今天' },
-        { id: 'tomorrow', label: '明天' },
-      ]
-      for (let i = 2; i <= 6; i += 1) {
-        const targetMs = baseMs + i * 24 * 60 * 60 * 1000
-        const dateKey = this.toChinaDateKey(targetMs)
-        list.push({
-          id: `date_${dateKey}`,
-          label: this.formatDateLabel(targetMs),
-        })
-      }
-      return list
+      return this.buildDateFilterOptions(this.dateFilterAnchorMs)
     },
 
     dateFilterLabel() {
@@ -402,6 +389,7 @@ export default {
   },
 
   async onShow() {
+    this.refreshDateFilterAnchor()
     await this.ensureAdminVisibility()
     await this.initAndLoad()
   },
@@ -411,6 +399,32 @@ export default {
   },
 
   methods: {
+    buildDateFilterOptions(baseInput = Date.now()) {
+      const baseMs = Number(baseInput || Date.now())
+      const list = [
+        { id: 'all', label: '全部日期' },
+        { id: 'today', label: '今天' },
+        { id: 'tomorrow', label: '明天' },
+      ]
+      for (let i = 2; i <= 6; i += 1) {
+        const targetMs = baseMs + i * 24 * 60 * 60 * 1000
+        const dateKey = this.toChinaDateKey(targetMs)
+        list.push({
+          id: `date_${dateKey}`,
+          label: this.formatDateLabel(targetMs),
+        })
+      }
+      return list
+    },
+
+    refreshDateFilterAnchor() {
+      this.dateFilterAnchorMs = Date.now()
+      const latestOptions = this.buildDateFilterOptions(this.dateFilterAnchorMs)
+      if (this.dateFilterId.startsWith('date_') && !latestOptions.some((opt) => opt.id === this.dateFilterId)) {
+        this.dateFilterId = 'all'
+      }
+    },
+
     initLayoutAdaptiveMetrics() {
       try {
         const windowInfo = (typeof wx !== 'undefined' && typeof wx.getWindowInfo === 'function')
@@ -473,6 +487,7 @@ export default {
     async handleListRefresh() {
       if (this.isRefreshing) return
       this.isRefreshing = true
+      this.refreshDateFilterAnchor()
       const guardTimer = setTimeout(() => {
         this.finishListRefresh()
       }, 8000)
@@ -662,12 +677,13 @@ export default {
     applyDateFilter(list = []) {
       const selected = this.dateFilterId
       if (selected === 'all') return list
-      const todayKey = this.toChinaDateKey(this.serverTime)
+      const baseMs = Number(this.dateFilterAnchorMs || Date.now())
+      const todayKey = this.toChinaDateKey(baseMs)
       let targetKey = ''
       if (selected === 'today') {
         targetKey = todayKey
       } else if (selected === 'tomorrow') {
-        targetKey = this.toChinaDateKey(Number(this.serverTime) + 24 * 60 * 60 * 1000)
+        targetKey = this.toChinaDateKey(baseMs + 24 * 60 * 60 * 1000)
       } else if (selected.startsWith('date_')) {
         targetKey = selected.replace('date_', '')
       }
@@ -858,6 +874,7 @@ export default {
     },
 
     openDateFilter() {
+      this.refreshDateFilterAnchor()
       this.openFilterSelector({
         type: 'date',
         title: '日期',
