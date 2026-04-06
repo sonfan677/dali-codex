@@ -83,6 +83,7 @@
               <text class="arrow">›</text>
             </view>
           </picker>
+          <text v-if="marketDateLocked" class="hint">集市同行日期已锁定：{{ lockedDateLabel }}（可调整时分）</text>
         </view>
 
         <!-- 时长 -->
@@ -276,6 +277,9 @@ export default {
       formationWindowOptions: ['15分钟（极速成团）', '30分钟（标准成团）', '60分钟（预约成团）'],
       formationWindowValues: [15, 30, 60],
       formationWindowIndex: 1,
+      marketDateLocked: false,
+      lockedDateIndex: -1,
+      lockedDateLabel: '',
     }
   },
 
@@ -359,6 +363,7 @@ export default {
       const address = String(payload?.address || '').trim()
       const categoryId = String(payload?.categoryId || '').trim().toLowerCase()
       const startTimeText = String(payload?.startTime || '').trim()
+      const lockDate = payload?.lockDate === true || String(payload?.lockDate || '') === 'true'
       const lat = Number(payload?.lat)
       const lng = Number(payload?.lng)
 
@@ -393,6 +398,23 @@ export default {
       if (Number.isFinite(startMs) && startMs > Date.now()) {
         this.form.startTimeMs = startMs
         this.form.startTimeStr = this.formatStartTimeTextByMs(startMs)
+        const dateIdx = this.findDateIndexByMs(startMs)
+        const start = new Date(startMs)
+        const hh = `${start.getHours()}`.padStart(2, '0')
+        const mm = `${start.getMinutes()}`.padStart(2, '0')
+        const hourIdx = Math.max(0, this.timeRangeData.hours.findIndex((x) => x.startsWith(hh)))
+        let minuteIdx = this.timeRangeData.minutes.findIndex((x) => x === mm)
+        if (minuteIdx < 0) minuteIdx = 0
+        this.timeIndex = [
+          dateIdx >= 0 ? dateIdx : this.timeIndex[0],
+          hourIdx,
+          minuteIdx,
+        ]
+        if (lockDate && dateIdx >= 0) {
+          this.marketDateLocked = true
+          this.lockedDateIndex = dateIdx
+          this.lockedDateLabel = this.timeRangeData.dates[dateIdx] || ''
+        }
       }
 
       const hasAny = title || description || address || Number.isFinite(startMs)
@@ -525,13 +547,45 @@ _doChooseLocation() {
 
     onColumnChange(e) {
       const { column, value } = e.detail
+      if (this.marketDateLocked && column === 0 && Number(value) !== this.lockedDateIndex) {
+        this.timeIndex[0] = this.lockedDateIndex
+        this.timeIndex = [...this.timeIndex]
+        uni.showToast({ title: '集市同行日期已锁定', icon: 'none' })
+        return
+      }
       this.timeIndex[column] = value
       this.timeIndex = [...this.timeIndex]
     },
 
     onTimeChange(e) {
       this.timeIndex = e.detail.value
+      if (this.marketDateLocked && Number(this.timeIndex[0]) !== this.lockedDateIndex) {
+        this.timeIndex[0] = this.lockedDateIndex
+        this.timeIndex = [...this.timeIndex]
+        uni.showToast({ title: '集市同行日期不可更改', icon: 'none' })
+      }
       this._updateStartTime()
+    },
+
+    toLocalDayKey(input) {
+      const dt = new Date(input)
+      if (!Number.isFinite(dt.getTime())) return ''
+      const y = dt.getFullYear()
+      const m = `${dt.getMonth() + 1}`.padStart(2, '0')
+      const d = `${dt.getDate()}`.padStart(2, '0')
+      return `${y}-${m}-${d}`
+    },
+
+    findDateIndexByMs(ms) {
+      const targetKey = this.toLocalDayKey(ms)
+      if (!targetKey) return -1
+      const now = Date.now()
+      const total = Array.isArray(this.timeRangeData.dates) ? this.timeRangeData.dates.length : 0
+      for (let i = 0; i < total; i += 1) {
+        const dayMs = now + i * 24 * 60 * 60 * 1000
+        if (this.toLocalDayKey(dayMs) === targetKey) return i
+      }
+      return -1
     },
 
     _updateStartTime() {

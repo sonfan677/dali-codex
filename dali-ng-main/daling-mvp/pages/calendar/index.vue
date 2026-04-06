@@ -1,10 +1,5 @@
 <template>
   <view class="page">
-    <view class="hero">
-      <text class="hero-title">官方活动日历</text>
-      <text class="hero-sub">{{ monthTitle }} · 官方主办 / 官方推荐 / 官方预告 + 固定集市</text>
-    </view>
-
     <view class="market-board">
       <text class="market-board-title">固定集市（公开免费）</text>
       <view v-if="marketRules.length === 0" class="market-board-empty">暂无固定集市配置</view>
@@ -20,16 +15,15 @@
             {{ marketShortName(rule) }}
           </view>
         </view>
-        <view v-if="activeMarketRule" class="market-expand-card">
+        <view class="market-expand-card">
           <view class="market-expand-head">
             <text class="market-expand-title">{{ activeMarketRule.title }}</text>
-            <text class="market-expand-state">已高亮月历</text>
           </view>
           <text class="market-expand-line">频次：{{ activeMarketRule.scheduleText }}</text>
           <text class="market-expand-line">地点：{{ activeMarketRule.location?.address || '地点待定' }}</text>
           <text class="market-expand-line">说明：{{ activeMarketRule.note || '无需报名，可直接前往。' }}</text>
         </view>
-        <text class="market-mini-tip">点击集市名称可展开更多信息，并联动高亮月历中的对应标签</text>
+        <text class="market-mini-tip">可切换集市并联动月历标签；下方可一键发起同行或参与已有同行</text>
       </view>
     </view>
 
@@ -114,6 +108,12 @@
               size="mini"
               @tap="launchWithMarket(item)"
             >发起同行</button>
+            <button
+              v-if="item.source === 'market'"
+              class="action-btn action-btn--join"
+              size="mini"
+              @tap="joinExistingCompanion(item)"
+            >参与已有同行</button>
             <button
               v-if="item.activityId"
               class="action-btn"
@@ -214,7 +214,7 @@ export default {
       dayMap: {},
       selectedDayKey: '',
       marketRules: [],
-      selectedMarketId: '',
+      selectedMarketId: 'sanyuejie_market',
       serverTimestamp: Date.now(),
       weekLabels: WEEK_LABELS,
       touchStartX: 0,
@@ -284,8 +284,17 @@ export default {
     },
 
     activeMarketRule() {
-      if (!this.selectedMarketId) return null
-      return this.marketRules.find((rule) => rule.id === this.selectedMarketId) || null
+      if (!Array.isArray(this.marketRules) || this.marketRules.length === 0) {
+        return {
+          id: '',
+          title: '固定集市',
+          scheduleText: '按当地固定档期',
+          location: { address: '地点待定' },
+          note: '无需报名，可直接前往。',
+        }
+      }
+      if (!this.selectedMarketId) return this.marketRules[0]
+      return this.marketRules.find((rule) => rule.id === this.selectedMarketId) || this.marketRules[0]
     },
   },
 
@@ -450,6 +459,11 @@ export default {
         this.serverTimestamp = Number(res?.serverTimestamp || Date.now())
         this.calendarDays = Array.isArray(res.calendarDays) ? res.calendarDays : []
         this.marketRules = Array.isArray(res.marketRules) ? res.marketRules : []
+        const currentMarketExists = this.marketRules.some((rule) => String(rule?.id || '') === this.selectedMarketId)
+        if (!currentMarketExists) {
+          const sanyuejie = this.marketRules.find((rule) => String(rule?.id || '') === 'sanyuejie_market')
+          this.selectedMarketId = String(sanyuejie?.id || this.marketRules?.[0]?.id || '')
+        }
         const cloudMonthMeta = res?.monthMeta || {}
         if (Number.isFinite(Number(cloudMonthMeta.year)) && Number.isFinite(Number(cloudMonthMeta.month))) {
           this.monthYear = Number(cloudMonthMeta.year)
@@ -486,10 +500,11 @@ export default {
 
     cellTagClass(tag = {}) {
       const classes = []
-      if (tag.isRecommended) classes.push('cell-tag--recommended')
+      if (tag.source === 'official_recommended') classes.push('cell-tag--recommended')
       else if (tag.source === 'market') classes.push('cell-tag--market')
       else if (tag.source === 'official_activity') classes.push('cell-tag--official')
       else if (tag.source === 'official_preview') classes.push('cell-tag--preview')
+      else if (tag.isRecommended) classes.push('cell-tag--recommended')
       else classes.push('cell-tag--official')
 
       if (this.selectedMarketId && tag.source === 'market') {
@@ -501,7 +516,76 @@ export default {
     toggleMarketFocus(ruleId = '') {
       const next = String(ruleId || '')
       if (!next) return
-      this.selectedMarketId = this.selectedMarketId === next ? '' : next
+      this.selectedMarketId = next
+    },
+
+    async joinExistingCompanion(item = {}) {
+      const lat = Number(item?.location?.lat)
+      const lng = Number(item?.location?.lng)
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        uni.showToast({ title: '该集市暂无定位信息', icon: 'none' })
+        return
+      }
+      const targetDayKey = toChinaDayKey(item.startTime || Date.now())
+      uni.showLoading({ title: '查询同行中...', mask: true })
+      try {
+        const res = await callCloud('getActivityList', {
+          cityId: 'dali',
+          lat,
+          lng,
+          queryMode: 'all',
+          radius: 5000,
+          sortBy: 'distance_asc',
+          categoryId: 'all',
+          keyword: '',
+          limit: 200,
+        })
+        const list = Array.isArray(res?.activities) ? res.activities : []
+        const companions = list
+          .filter((act) => {
+            const dayKey = toChinaDayKey(act?.startTime || 0)
+            if (dayKey !== targetDayKey) return false
+            const status = String(act?.status || '').toUpperCase()
+            return status === 'OPEN' || status === 'FULL'
+          })
+          .slice(0, 12)
+
+        if (!companions.length) {
+          uni.hideLoading()
+          uni.showModal({
+            title: '暂未发现已有同行',
+            content: '该集市当天还没有可参与的同行活动，你可以先发起一个。',
+            confirmText: '去发起',
+            success: (modalRes) => {
+              if (modalRes?.confirm) this.launchWithMarket(item)
+            },
+          })
+          return
+        }
+
+        const itemList = companions.map((act) => {
+          const t = this.compactTitle(act?.title || '同行活动', 10)
+          const count = Number(act?.currentParticipants || 0)
+          const max = Number(act?.maxParticipants || 0)
+          return `${t}｜${count}${max > 0 ? `/${max}` : ''}人`
+        })
+
+        uni.hideLoading()
+        uni.showActionSheet({
+          itemList,
+          success: (sheetRes) => {
+            const idx = Number(sheetRes?.tapIndex || -1)
+            const target = companions[idx]
+            if (target?._id) {
+              uni.navigateTo({ url: `/pages/detail/index?id=${target._id}` })
+            }
+          },
+        })
+      } catch (err) {
+        uni.hideLoading()
+        console.error('查询集市同行失败', err)
+        uni.showToast({ title: '查询失败，请稍后重试', icon: 'none' })
+      }
     },
 
     detailTimeText(item = {}) {
@@ -529,6 +613,7 @@ export default {
         address,
         categoryId: item.categoryId || 'social',
         startTime: startIso,
+        lockDate: true,
         lat: Number.isFinite(lat) ? lat : '',
         lng: Number.isFinite(lng) ? lng : '',
       }
@@ -544,22 +629,6 @@ export default {
   min-height: 100vh;
   background: #f5f7fb;
   padding: 20rpx;
-}
-.hero {
-  background: linear-gradient(135deg, #1A3C5E, #335E84);
-  border-radius: 18rpx;
-  padding: 28rpx;
-  color: #fff;
-}
-.hero-title {
-  font-size: 36rpx;
-  font-weight: 700;
-  display: block;
-}
-.hero-sub {
-  margin-top: 8rpx;
-  font-size: 24rpx;
-  opacity: 0.92;
 }
 .month-tabs {
   display: flex;
@@ -582,7 +651,6 @@ export default {
 }
 
 .market-board {
-  margin-top: 12rpx;
   background: #fff;
   border-radius: 14rpx;
   padding: 14rpx;
@@ -625,24 +693,18 @@ export default {
   background: #F8FAFC;
   border-radius: 12rpx;
   padding: 12rpx;
+  min-height: 146rpx;
+  box-sizing: border-box;
 }
 .market-expand-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12rpx;
+  gap: 8rpx;
 }
 .market-expand-title {
   font-size: 23rpx;
   color: #101828;
   font-weight: 700;
-}
-.market-expand-state {
-  font-size: 20rpx;
-  color: #0369A1;
-  background: #E0F2FE;
-  border-radius: 999rpx;
-  padding: 2rpx 10rpx;
 }
 .market-expand-line {
   margin-top: 4rpx;
@@ -892,6 +954,10 @@ export default {
 .action-btn::after { border: none; }
 .action-btn--launch {
   background: #1A3C5E;
+  color: #fff;
+}
+.action-btn--join {
+  background: #16A34A;
   color: #fff;
 }
 .empty {
