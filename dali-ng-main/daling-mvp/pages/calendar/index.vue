@@ -304,11 +304,12 @@ export default {
       return sourceCount
     },
 
-    compactTitle(text = '', max = 8) {
+    compactTitle(text = '', max = 5) {
       const value = String(text || '').trim()
       if (!value) return '活动'
       if (value.length <= max) return value
-      return `${value.slice(0, max)}…`
+      if (max <= 1) return '…'
+      return `${value.slice(0, max - 1)}…`
     },
 
     buildCellPreviewTags(items = []) {
@@ -317,7 +318,7 @@ export default {
         key: `${item.source || 'x'}_${item._id || idx}_${idx}`,
         source: item.source || '',
         isRecommended: !!item.isRecommended,
-        text: this.compactTitle(item.title, 7),
+        text: this.compactTitle(item.title, 5),
       }))
     },
 
@@ -570,20 +571,22 @@ export default {
 .month-grid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
+  grid-template-rows: repeat(6, 168rpx);
+  grid-auto-rows: 168rpx;
   gap: 0;
   border-top: 1rpx solid #EEF2F6;
   border-left: 1rpx solid #EEF2F6;
 }
 .grid-cell {
-  min-height: 168rpx;
+  height: 168rpx;
 }
 .day-placeholder {
-  height: 168rpx;
+  height: 100%;
   border-right: 1rpx solid #EEF2F6;
   border-bottom: 1rpx solid #EEF2F6;
 }
 .day-cell {
-  height: 168rpx;
+  height: 100%;
   background: #fff;
   border-radius: 0;
   padding: 8rpx 6rpx 8rpx;
@@ -618,9 +621,11 @@ export default {
 }
 .day-labels {
   min-height: 120rpx;
+  max-height: 120rpx;
   display: flex;
   flex-direction: column;
   gap: 4rpx;
+  overflow: hidden;
 }
 .cell-tag {
   font-size: 18rpx;
