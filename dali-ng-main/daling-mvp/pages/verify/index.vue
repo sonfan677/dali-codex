@@ -200,20 +200,23 @@ export default {
 
     async syncVerifyState() {
       this.stateReady = false
-      const gd = getApp().globalData || {}
-      if (gd.isLoggedIn && (gd.openid || this.userStore.openid)) {
-        this.applyVerifyState(gd)
-        this.stateReady = true
-        return
-      }
       try {
-        const res = await callCloud('login', {})
-        if (res && res.success) {
-          this.applyVerifyStateToGlobal(res)
+        const res = await this.userStore.syncSession({ force: true, minIntervalMs: 0 })
+        if (res?.success) {
           this.applyVerifyState(res)
+          this.applyVerifyStateToGlobal(res)
+        } else {
+          const gd = getApp().globalData || {}
+          if (gd.isLoggedIn && (gd.openid || this.userStore.openid)) {
+            this.applyVerifyState(gd)
+          }
         }
       } catch (e) {
         console.error('同步核验状态失败', e)
+        const gd = getApp().globalData || {}
+        if (gd.isLoggedIn && (gd.openid || this.userStore.openid)) {
+          this.applyVerifyState(gd)
+        }
       } finally {
         this.stateReady = true
       }

@@ -193,7 +193,9 @@
     <view v-if="showPhoneBindDialog" class="phone-bind-mask" @tap="closePhoneBindDialog">
       <view class="phone-bind-dialog" @tap.stop>
         <text class="phone-bind-title">发布前先完成手机号绑定</text>
-        <text class="phone-bind-desc">仅用于账号安全与风险防护，不会向其他用户展示你的手机号。</text>
+        <text class="phone-bind-desc">
+          仅用于账号安全与风险防护，不会向其他用户展示你的手机号。部分设备/账号会触发微信短信二次校验，属于微信安全策略。
+        </text>
         <button
           class="phone-bind-confirm"
           open-type="getPhoneNumber"
@@ -312,6 +314,14 @@ export default {
       const key = this.normalizeCategoryText(value)
       if (!key) return ''
       return this.existingCategoryLabelMap[key] || ''
+    }
+  },
+
+  async onShow() {
+    try {
+      await this.userStore.syncSession({ force: false, minIntervalMs: 15000 })
+    } catch (e) {
+      console.error('发布页同步会话失败', e)
     }
   },
 
@@ -530,6 +540,11 @@ _doChooseLocation() {
     },
 
     async submit() {
+      try {
+        await this.userStore.syncSession({ force: true, minIntervalMs: 0 })
+      } catch (e) {
+        console.error('发布前同步登录态失败', e)
+      }
       const gd = getApp().globalData || {}
       const nickname = String(gd.nickname || this.userStore.nickname || '').trim()
       const avatarUrl = String(gd.avatarUrl || this.userStore.avatarUrl || '').trim()

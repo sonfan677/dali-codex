@@ -344,7 +344,9 @@
     <view v-if="showJoinPhoneBindDialog" class="phone-bind-mask" @tap="closeJoinPhoneBindDialog">
       <view class="phone-bind-dialog" @tap.stop>
         <text class="phone-bind-title">报名前先绑定手机号</text>
-        <text class="phone-bind-desc">用于账号安全与活动风控，不会向其他用户公开你的手机号。</text>
+        <text class="phone-bind-desc">
+          用于账号安全与活动风控，不会向其他用户公开你的手机号。部分设备/账号会触发微信短信二次校验，属于微信安全策略。
+        </text>
         <button
           class="phone-bind-confirm"
           open-type="getPhoneNumber"
