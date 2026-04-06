@@ -8,14 +8,28 @@
     <view class="market-board">
       <text class="market-board-title">固定集市（公开免费）</text>
       <view v-if="marketRules.length === 0" class="market-board-empty">暂无固定集市配置</view>
-      <view v-else class="market-rule-list">
-        <view v-for="rule in marketRules" :key="rule.id" class="market-rule-item">
-          <view class="market-rule-main">
-            <text class="market-rule-name">{{ rule.title }}</text>
-            <text class="market-rule-time">{{ rule.scheduleText }}</text>
+      <view v-else class="market-mini-wrap">
+        <view class="market-chip-row">
+          <view
+            v-for="rule in marketRules"
+            :key="rule.id"
+            class="market-chip"
+            :class="{ 'market-chip--active': selectedMarketId === rule.id }"
+            @tap="toggleMarketFocus(rule.id)"
+          >
+            {{ marketShortName(rule) }}
           </view>
-          <text class="market-rule-meta">{{ rule.location?.address || '地点待定' }}</text>
         </view>
+        <view v-if="activeMarketRule" class="market-expand-card">
+          <view class="market-expand-head">
+            <text class="market-expand-title">{{ activeMarketRule.title }}</text>
+            <text class="market-expand-state">已高亮月历</text>
+          </view>
+          <text class="market-expand-line">频次：{{ activeMarketRule.scheduleText }}</text>
+          <text class="market-expand-line">地点：{{ activeMarketRule.location?.address || '地点待定' }}</text>
+          <text class="market-expand-line">说明：{{ activeMarketRule.note || '无需报名，可直接前往。' }}</text>
+        </view>
+        <text class="market-mini-tip">点击集市名称可展开更多信息，并联动高亮月历中的对应标签</text>
       </view>
     </view>
 
@@ -117,6 +131,19 @@
 import { callCloud } from '@/utils/cloud.js'
 
 const WEEK_LABELS = ['日', '一', '二', '三', '四', '五', '六']
+const MARKET_SHORT_DICT = {
+  sanyuejie_market: '三月街',
+  chuangdanchang_market: '床单厂',
+  yinqiao_market: '银桥',
+}
+const TAG_SHORT_DICT = {
+  大理三月街集市: '三月街',
+  床单厂周末市集: '床单厂',
+  银桥集市: '银桥',
+  官方活动: '官主办',
+  官方推荐活动: '官推荐',
+  官方预告: '官预告',
+}
 
 function toChinaParts(input = Date.now()) {
   const ms = new Date(input).getTime()
@@ -187,6 +214,7 @@ export default {
       dayMap: {},
       selectedDayKey: '',
       marketRules: [],
+      selectedMarketId: '',
       serverTimestamp: Date.now(),
       weekLabels: WEEK_LABELS,
       touchStartX: 0,
@@ -254,6 +282,11 @@ export default {
       const day = this.dayMap[this.selectedDayKey]
       return Array.isArray(day?.items) ? day.items : []
     },
+
+    activeMarketRule() {
+      if (!this.selectedMarketId) return null
+      return this.marketRules.find((rule) => rule.id === this.selectedMarketId) || null
+    },
   },
 
   onShow() {
@@ -312,13 +345,50 @@ export default {
       return `${value.slice(0, max - 1)}…`
     },
 
+    marketShortName(rule = {}) {
+      const id = String(rule.id || '')
+      const title = String(rule.title || '')
+      const direct = MARKET_SHORT_DICT[id]
+      if (direct) return direct
+      const dict = TAG_SHORT_DICT[title]
+      if (dict) return dict
+      return this.compactTitle(title.replace(/(大理|集市|市集)/g, ''), 5)
+    },
+
+    shortTagText(item = {}) {
+      const source = String(item.source || '')
+      if (source === 'market') {
+        const m = MARKET_SHORT_DICT[String(item.marketId || '')]
+        if (m) return this.compactTitle(m, 5)
+      }
+      if (source === 'official_recommended') return '官推荐'
+      if (source === 'official_activity') return '官主办'
+      if (source === 'official_preview') return '官预告'
+      const title = String(item.title || '')
+      const hit = TAG_SHORT_DICT[title]
+      if (hit) return this.compactTitle(hit, 5)
+      return this.compactTitle(title, 5)
+    },
+
     buildCellPreviewTags(items = []) {
       const safe = Array.isArray(items) ? items : []
-      return safe.slice(0, 3).map((item, idx) => ({
+      const picked = safe.slice(0, 3)
+      if (this.selectedMarketId) {
+        const focused = safe.find((item) => item.source === 'market' && item.marketId === this.selectedMarketId)
+        if (focused) {
+          const exists = picked.some((item) => item._id === focused._id)
+          if (!exists) {
+            if (picked.length >= 3) picked[picked.length - 1] = focused
+            else picked.push(focused)
+          }
+        }
+      }
+      return picked.map((item, idx) => ({
         key: `${item.source || 'x'}_${item._id || idx}_${idx}`,
         source: item.source || '',
         isRecommended: !!item.isRecommended,
-        text: this.compactTitle(item.title, 5),
+        marketId: item.marketId || '',
+        text: this.shortTagText(item),
       }))
     },
 
@@ -415,11 +485,24 @@ export default {
     },
 
     cellTagClass(tag = {}) {
-      if (tag.isRecommended) return 'cell-tag--recommended'
-      if (tag.source === 'market') return 'cell-tag--market'
-      if (tag.source === 'official_activity') return 'cell-tag--official'
-      if (tag.source === 'official_preview') return 'cell-tag--preview'
-      return 'cell-tag--official'
+      const classes = []
+      if (tag.isRecommended) classes.push('cell-tag--recommended')
+      else if (tag.source === 'market') classes.push('cell-tag--market')
+      else if (tag.source === 'official_activity') classes.push('cell-tag--official')
+      else if (tag.source === 'official_preview') classes.push('cell-tag--preview')
+      else classes.push('cell-tag--official')
+
+      if (this.selectedMarketId && tag.source === 'market') {
+        if (String(tag.marketId || '') === this.selectedMarketId) classes.push('cell-tag--market-focus')
+        else classes.push('cell-tag--market-dim')
+      }
+      return classes.join(' ')
+    },
+
+    toggleMarketFocus(ruleId = '') {
+      const next = String(ruleId || '')
+      if (!next) return
+      this.selectedMarketId = this.selectedMarketId === next ? '' : next
     },
 
     detailTimeText(item = {}) {
@@ -516,40 +599,63 @@ export default {
   font-size: 22rpx;
   color: #667085;
 }
-.market-rule-list {
-  margin-top: 8rpx;
+.market-mini-wrap {
+  margin-top: 10rpx;
+}
+.market-chip-row {
   display: flex;
-  flex-direction: column;
-  gap: 8rpx;
+  align-items: center;
+  gap: 10rpx;
+  flex-wrap: wrap;
 }
-.market-rule-item {
+.market-chip {
+  font-size: 21rpx;
+  color: #1D4F7A;
+  background: #EAF2FB;
+  border: 1rpx solid #D6E5F6;
+  border-radius: 999rpx;
+  padding: 6rpx 16rpx;
+}
+.market-chip--active {
+  color: #fff;
+  background: #1D4F7A;
+  border-color: #1D4F7A;
+}
+.market-expand-card {
+  margin-top: 10rpx;
   background: #F8FAFC;
-  border-radius: 10rpx;
-  padding: 10rpx;
+  border-radius: 12rpx;
+  padding: 12rpx;
 }
-.market-rule-main {
+.market-expand-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10rpx;
+  gap: 12rpx;
 }
-.market-rule-name {
+.market-expand-title {
   font-size: 23rpx;
   color: #101828;
-  font-weight: 600;
+  font-weight: 700;
 }
-.market-rule-time {
+.market-expand-state {
   font-size: 20rpx;
-  color: #1D4F7A;
-  background: #E8F1FA;
-  border-radius: 10rpx;
-  padding: 4rpx 8rpx;
+  color: #0369A1;
+  background: #E0F2FE;
+  border-radius: 999rpx;
+  padding: 2rpx 10rpx;
 }
-.market-rule-meta {
-  margin-top: 2rpx;
+.market-expand-line {
+  margin-top: 4rpx;
   display: block;
   font-size: 20rpx;
   color: #667085;
+}
+.market-mini-tip {
+  margin-top: 8rpx;
+  display: block;
+  font-size: 20rpx;
+  color: #98A2B3;
 }
 
 .calendar-card {
@@ -648,6 +754,13 @@ export default {
 }
 .cell-tag--preview {
   background: #8B5CF6;
+}
+.cell-tag--market-focus {
+  box-shadow: inset 0 0 0 2rpx rgba(255, 255, 255, 0.9), 0 0 0 2rpx rgba(146, 64, 14, 0.35);
+  transform: translateZ(0);
+}
+.cell-tag--market-dim {
+  opacity: 0.6;
 }
 .day-more {
   font-size: 18rpx;
