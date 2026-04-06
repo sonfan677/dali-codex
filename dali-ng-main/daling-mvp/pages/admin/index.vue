@@ -1342,15 +1342,19 @@ const ACTIVITY_DISTANCE_BUCKETS = [
 
 const CATEGORY_LABEL_MAP = {
   sport: '运动',
-  music: '音乐',
-  reading: '读书',
-  game: '游戏',
-  social: '社交',
+  cycling: '骑行',
   outdoor: '户外',
+  music: '音乐',
+  game: '游戏',
+  culture: '文化',
   food: '美食',
-  movie: '观影',
-  travel: '旅行',
+  photo: '摄影',
+  wellness: '身心',
+  social: '交流',
   other: '其它',
+  reading: '文化',
+  movie: '文化',
+  travel: '户外',
 }
 
 export default {
@@ -2192,7 +2196,7 @@ export default {
       const categories = [
         { key: 'sport', label: '运动', fillClass: 'trend-mini-fill--sport' },
         { key: 'music', label: '音乐', fillClass: 'trend-mini-fill--music' },
-        { key: 'reading', label: '读书', fillClass: 'trend-mini-fill--reading' },
+        { key: 'culture', label: '文化', fillClass: 'trend-mini-fill--culture' },
       ]
 
       if (rows.length === 0) {
@@ -2206,7 +2210,7 @@ export default {
 
       const scaleMax = rows.reduce((max, row) => {
         const map = row.categoryPublishedMap || {}
-        return Math.max(max, map.sport || 0, map.music || 0, map.reading || 0)
+        return Math.max(max, map.sport || 0, map.music || 0, map.culture || 0)
       }, 1)
 
       const buildShortLabel = (label = '', key = '') => {
@@ -2602,10 +2606,11 @@ export default {
     },
 
     resolveActivityCategoryLabel(item = {}) {
+      const cid = this.normalizeTrendCategory(item.categoryId)
+      if (cid && CATEGORY_LABEL_MAP[cid]) return CATEGORY_LABEL_MAP[cid]
       const label = String(item.categoryLabel || '').trim()
       if (label) return label
-      const cid = String(item.categoryId || '').trim()
-      return CATEGORY_LABEL_MAP[cid] || '其它'
+      return '其它'
     },
 
     toRadians(value) {
@@ -4005,7 +4010,21 @@ export default {
 
     normalizeTrendCategory(categoryId = '') {
       const safe = String(categoryId || '').trim().toLowerCase()
-      if (['sport', 'music', 'reading', 'game', 'social', 'outdoor', 'other'].includes(safe)) {
+      if (safe === 'reading' || safe === 'movie') return 'culture'
+      if (safe === 'travel') return 'outdoor'
+      if ([
+        'sport',
+        'cycling',
+        'outdoor',
+        'music',
+        'game',
+        'culture',
+        'food',
+        'photo',
+        'wellness',
+        'social',
+        'other',
+      ].includes(safe)) {
         return safe
       }
       return 'other'
@@ -4029,11 +4048,15 @@ export default {
         const activeAdmins = new Set()
         const categoryPublishedMap = {
           sport: 0,
-          music: 0,
-          reading: 0,
-          game: 0,
-          social: 0,
+          cycling: 0,
           outdoor: 0,
+          music: 0,
+          game: 0,
+          culture: 0,
+          food: 0,
+          photo: 0,
+          wellness: 0,
+          social: 0,
           other: 0,
         }
         let publishedActivityCount = 0
@@ -4140,7 +4163,7 @@ export default {
       const categoryPairs = [
         ['运动', Number(latestCategoryMap.sport || 0)],
         ['音乐', Number(latestCategoryMap.music || 0)],
-        ['读书', Number(latestCategoryMap.reading || 0)],
+        ['文化', Number(latestCategoryMap.culture || 0)],
       ]
       const topCategory = categoryPairs.sort((a, b) => b[1] - a[1])[0]
 
@@ -4149,7 +4172,7 @@ export default {
         `口径：${modeText}`,
         `当前周期：${latest.label}`,
         `新发布活动：${latest.publishedActivityCount}（环比 ${latest.activityGrowthRate}）`,
-        `分类发布：运动 ${latestCategoryMap.sport || 0} / 音乐 ${latestCategoryMap.music || 0} / 读书 ${latestCategoryMap.reading || 0}`,
+        `分类发布：运动 ${latestCategoryMap.sport || 0} / 音乐 ${latestCategoryMap.music || 0} / 文化 ${latestCategoryMap.culture || 0}`,
         `分类主力：${topCategory?.[0] || '-'}（${topCategory?.[1] || 0}）`,
         `新增举报：${latest.newReportCount}（环比 ${latest.reportGrowthRate}）`,
         `管理动作：${latest.adminActionCount}（环比 ${latest.actionGrowthRate}）`,
@@ -4210,7 +4233,7 @@ export default {
         '新发布活动',
         '运动发布',
         '音乐发布',
-        '读书发布',
+        '文化发布',
         '新发布推荐活动',
         '新增举报',
         '已处理举报',
@@ -4234,7 +4257,7 @@ export default {
             row.publishedActivityCount,
             categoryMap.sport || 0,
             categoryMap.music || 0,
-            categoryMap.reading || 0,
+            categoryMap.culture || 0,
             row.publishedRecommendedCount,
             row.newReportCount,
             row.handledReportCount,
@@ -4258,7 +4281,7 @@ export default {
         '新发布活动',
         '运动发布',
         '音乐发布',
-        '读书发布',
+        '文化发布',
         '新发布推荐活动',
         '新增举报',
         '已处理举报',
@@ -4282,7 +4305,7 @@ export default {
             row.publishedActivityCount,
             categoryMap.sport || 0,
             categoryMap.music || 0,
-            categoryMap.reading || 0,
+            categoryMap.culture || 0,
             row.publishedRecommendedCount,
             row.newReportCount,
             row.handledReportCount,
@@ -5325,6 +5348,9 @@ export default {
 }
 .trend-mini-fill--music {
   background: #d97706;
+}
+.trend-mini-fill--culture {
+  background: #1A3C5E;
 }
 .trend-mini-fill--reading {
   background: #1A3C5E;

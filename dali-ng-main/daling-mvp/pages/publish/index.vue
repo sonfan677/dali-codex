@@ -28,7 +28,7 @@
 
         <!-- 分类 -->
         <view class="field">
-          <text class="label">活动分类 *</text>
+          <text class="label">适用场景 *</text>
           <picker
             mode="selector"
             :range="categoryPickerRange"
@@ -40,6 +40,7 @@
               <text class="arrow">›</text>
             </view>
           </picker>
+          <text class="hint">系统将自动归类为：{{ selectedCategoryLabel }}</text>
         </view>
 
         <view v-if="form.categoryId === 'other'" class="field">
@@ -278,7 +279,11 @@ export default {
 
   computed: {
     categoryPickerRange() {
-      return this.categoryOptions.map((item) => item.label)
+      return this.categoryOptions.map((item) => item.scene || item.label)
+    },
+
+    selectedCategoryLabel() {
+      return String(this.form.categoryLabel || '其他')
     },
 
     formationWindowHint() {

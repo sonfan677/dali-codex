@@ -24,15 +24,27 @@ const DEFAULT_CITY_CONFIG = {
 
 const CATEGORY_MAP = {
   sport: '运动',
-  music: '音乐',
-  reading: '读书',
-  game: '游戏',
-  social: '社交',
+  cycling: '骑行',
   outdoor: '户外',
+  music: '音乐',
+  game: '游戏',
+  culture: '文化',
   food: '美食',
-  movie: '电影',
-  travel: '旅行',
+  photo: '摄影',
+  wellness: '身心',
+  social: '交流',
   other: '其他',
+}
+
+const LEGACY_CATEGORY_ID_MAP = {
+  reading: 'culture',
+  movie: 'culture',
+  travel: 'outdoor',
+}
+
+function normalizeCategoryId(categoryId = '') {
+  const safe = String(categoryId || '').trim().toLowerCase()
+  return LEGACY_CATEGORY_ID_MAP[safe] || safe || 'other'
 }
 
 function normalizeNumber(value, fallback) {
@@ -258,7 +270,9 @@ exports.main = async (event, context) => {
   )
   const normalizedKeyword = normalizeKeyword(keyword)
   const keywordTokens = normalizedKeyword.split(/\s+/).filter(Boolean)
-  const normalizedCategoryId = String(categoryId || 'all')
+  const normalizedCategoryId = String(categoryId || 'all').toLowerCase() === 'all'
+    ? 'all'
+    : normalizeCategoryId(categoryId)
   const now = new Date()
   const safeLimit = Math.max(20, Math.min(1000, Number(limit) || 200))
 
@@ -301,7 +315,7 @@ exports.main = async (event, context) => {
       return Number.isFinite(Number(a._distance)) && Number(a._distance) <= safeRadius
     })
     .filter((a) => {
-      const itemCategoryId = a.categoryId || 'other'
+      const itemCategoryId = normalizeCategoryId(a.categoryId || 'other')
       if (isCategoryDirectMatch && itemCategoryId !== normalizedCategoryId) {
         return false
       }
@@ -361,8 +375,8 @@ exports.main = async (event, context) => {
       const trustProfile = buildTrustProfile(rest, userMap[rest.publisherId], nowMs)
       return {
         ...rest,
-        categoryId: rest.categoryId || 'other',
-        categoryLabel: rest.categoryLabel || CATEGORY_MAP[rest.categoryId] || '其他',
+        categoryId: normalizeCategoryId(rest.categoryId || 'other'),
+        categoryLabel: CATEGORY_MAP[normalizeCategoryId(rest.categoryId || 'other')] || '其他',
         trustProfile,
         timeStatus: _statusByTime,
         timeWeight: getTimeWeight(_statusByTime),

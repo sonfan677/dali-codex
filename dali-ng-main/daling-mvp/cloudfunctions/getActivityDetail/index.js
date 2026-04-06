@@ -4,15 +4,27 @@ const db = cloud.database()
 
 const CATEGORY_MAP = {
   sport: '运动',
-  music: '音乐',
-  reading: '读书',
-  game: '游戏',
-  social: '社交',
+  cycling: '骑行',
   outdoor: '户外',
+  music: '音乐',
+  game: '游戏',
+  culture: '文化',
   food: '美食',
-  movie: '电影',
-  travel: '旅行',
+  photo: '摄影',
+  wellness: '身心',
+  social: '交流',
   other: '其他',
+}
+
+const LEGACY_CATEGORY_ID_MAP = {
+  reading: 'culture',
+  movie: 'culture',
+  travel: 'outdoor',
+}
+
+function normalizeCategoryId(categoryId = '') {
+  const safe = String(categoryId || '').trim().toLowerCase()
+  return LEGACY_CATEGORY_ID_MAP[safe] || safe || 'other'
 }
 
 function parseAdminMeta(openid) {
@@ -131,11 +143,11 @@ exports.main = async (event) => {
     })
     .get()
   const publisher = users[0] || null
-  const categoryId = activity.categoryId || 'other'
+  const categoryId = normalizeCategoryId(activity.categoryId || 'other')
   const enrichedActivity = {
     ...activity,
     categoryId,
-    categoryLabel: activity.categoryLabel || CATEGORY_MAP[categoryId] || '其他',
+    categoryLabel: CATEGORY_MAP[categoryId] || '其他',
     trustProfile: buildTrustProfile(activity, publisher, nowMs),
   }
   const { data: joinedList } = await db.collection('participations')

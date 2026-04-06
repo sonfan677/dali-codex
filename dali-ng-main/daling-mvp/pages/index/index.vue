@@ -127,6 +127,7 @@ import {
   DISCOVERY_CATEGORY_FILTER_OPTIONS,
   DISTANCE_FILTER_OPTIONS,
   getCategoryLabel,
+  normalizeCategoryId,
 } from '@/utils/activityMeta.js'
 
 const DEFAULT_CENTER = {
@@ -136,14 +137,15 @@ const DEFAULT_CENTER = {
 const ONBOARDING_DEMO_SEEN_PREFIX = 'dali_onboarding_demo_seen_'
 const COMMON_CATEGORY_ID_SET = new Set([
   'sport',
-  'music',
-  'reading',
-  'game',
-  'social',
+  'cycling',
   'outdoor',
+  'music',
+  'game',
+  'culture',
   'food',
-  'movie',
-  'travel',
+  'photo',
+  'wellness',
+  'social',
 ])
 
 const MOCK_ACTIVITIES = [
@@ -152,7 +154,7 @@ const MOCK_ACTIVITIES = [
     title: '茶话会 · 下午茶时光',
     description: '大家一起喝茶聊天，欢迎来玩',
     categoryId: 'social',
-    categoryLabel: '社交',
+    categoryLabel: '交流',
     location: { address: '大理古城洱海边', lat: 25.6065, lng: 100.2679 },
     startTime: new Date(Date.now() + 30 * 60 * 1000),
     endTime: new Date(Date.now() + 4 * 60 * 60 * 1000),
@@ -169,8 +171,8 @@ const MOCK_ACTIVITIES = [
     _id: 'mock2',
     title: '环洱海骑行',
     description: '一起骑行环洱海，约需3小时',
-    categoryId: 'sport',
-    categoryLabel: '运动',
+    categoryId: 'cycling',
+    categoryLabel: '骑行',
     location: { address: '才村码头集合', lat: 25.62, lng: 100.21 },
     startTime: new Date(Date.now() + 2 * 60 * 60 * 1000),
     endTime: new Date(Date.now() + 6 * 60 * 60 * 1000),
@@ -592,7 +594,7 @@ export default {
     },
 
     normalizeActivityCategory(item) {
-      const categoryId = item?.categoryId || 'other'
+      const categoryId = normalizeCategoryId(item?.categoryId || 'other')
       return {
         ...item,
         categoryId,

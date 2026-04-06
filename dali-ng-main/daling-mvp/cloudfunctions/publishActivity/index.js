@@ -30,15 +30,27 @@ const DEFAULT_CITY_CONFIG = {
 
 const CATEGORY_MAP = {
   sport: '运动',
-  music: '音乐',
-  reading: '读书',
-  game: '游戏',
-  social: '社交',
+  cycling: '骑行',
   outdoor: '户外',
+  music: '音乐',
+  game: '游戏',
+  culture: '文化',
   food: '美食',
-  movie: '电影',
-  travel: '旅行',
+  photo: '摄影',
+  wellness: '身心',
+  social: '交流',
   other: '其他',
+}
+
+const LEGACY_CATEGORY_ID_MAP = {
+  reading: 'culture',
+  movie: 'culture',
+  travel: 'outdoor',
+}
+
+function normalizeCategoryId(categoryId = '') {
+  const safe = String(categoryId || '').trim().toLowerCase()
+  return LEGACY_CATEGORY_ID_MAP[safe] || safe || 'other'
 }
 
 // 大理白族自治州发布范围（近似地理围栏，后续可改为配置化 polygon）
@@ -77,7 +89,7 @@ function resolveDuplicateCategoryLabel(customLabel = '') {
   const normalized = normalizeCategoryText(customLabel)
   if (!normalized) return ''
   const builtinLabels = Object.values(CATEGORY_MAP || {})
-  const aliasLabels = ['其它']
+  const aliasLabels = ['其它', '读书', '旅行', '电影', '观影', '社交']
   const allLabels = [...builtinLabels, ...aliasLabels]
   const hit = allLabels.find((item) => normalizeCategoryText(item) === normalized)
   return hit || ''
@@ -426,7 +438,7 @@ exports.main = async (event, context) => {
   const finalCityId = cityConfig.cityId
   const latNum = Number(lat)
   const lngNum = Number(lng)
-  const finalCategoryId = String(categoryId || 'other')
+  const finalCategoryId = normalizeCategoryId(categoryId || 'other')
   const normalizedCustomCategoryLabel = normalizeCustomCategoryLabel(customCategoryLabel)
 
   // 2. 参数校验
@@ -491,7 +503,7 @@ exports.main = async (event, context) => {
 
   const finalCategoryLabel = finalCategoryId === 'other'
     ? '其他'
-    : (categoryLabel || CATEGORY_MAP[finalCategoryId] || '其他')
+    : (CATEGORY_MAP[finalCategoryId] || categoryLabel || '其他')
 
   // 3. 成团截止时间（发布后N分钟）
   const formationDeadline = isGroupFormation
