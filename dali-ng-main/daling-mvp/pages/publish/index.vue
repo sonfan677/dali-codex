@@ -319,9 +319,11 @@ export default {
 
   onLoad(options = {}) {
     this.applyPrefillFromQuery(options)
+    this.consumeMarketPrefillFromStorage({ showToast: false })
   },
 
   async onShow() {
+    this.consumeMarketPrefillFromStorage({ showToast: true })
     try {
       await this.userStore.syncSession({ force: false, minIntervalMs: 15000 })
     } catch (e) {
@@ -350,16 +352,15 @@ export default {
       return `${m}月${d}日 ${h}:${min}`
     },
 
-    applyPrefillFromQuery(options = {}) {
-      if (String(options.prefill || '') !== 'market') return
-
-      const title = this.safeDecodeURIComponent(options.title)
-      const description = this.safeDecodeURIComponent(options.description)
-      const address = this.safeDecodeURIComponent(options.address)
-      const categoryId = String(this.safeDecodeURIComponent(options.categoryId) || '').trim().toLowerCase()
-      const startTimeText = this.safeDecodeURIComponent(options.startTime)
-      const lat = Number(options.lat)
-      const lng = Number(options.lng)
+    applyMarketPrefill(payload = {}, options = {}) {
+      const showToast = options?.showToast !== false
+      const title = String(payload?.title || '').trim()
+      const description = String(payload?.description || '').trim()
+      const address = String(payload?.address || '').trim()
+      const categoryId = String(payload?.categoryId || '').trim().toLowerCase()
+      const startTimeText = String(payload?.startTime || '').trim()
+      const lat = Number(payload?.lat)
+      const lng = Number(payload?.lng)
 
       if (title && !String(this.form.title || '').trim()) {
         this.form.title = title
@@ -394,11 +395,45 @@ export default {
         this.form.startTimeStr = this.formatStartTimeTextByMs(startMs)
       }
 
-      if (title || description || address || Number.isFinite(startMs)) {
+      const hasAny = title || description || address || Number.isFinite(startMs)
+      if (hasAny && showToast) {
         setTimeout(() => {
           uni.showToast({ title: '已带入集市同行信息', icon: 'none', duration: 1800 })
         }, 100)
       }
+      return hasAny
+    },
+
+    consumeMarketPrefillFromStorage(options = {}) {
+      const key = 'dali_market_prefill_v1'
+      let payload = null
+      try {
+        payload = uni.getStorageSync(key)
+      } catch (e) {
+        payload = null
+      }
+      if (!payload || typeof payload !== 'object') return false
+      const hasUsefulField = ['title', 'description', 'address', 'categoryId', 'startTime', 'lat', 'lng']
+        .some((k) => typeof payload[k] !== 'undefined' && payload[k] !== '')
+      if (!hasUsefulField) return false
+      try {
+        uni.removeStorageSync(key)
+      } catch (e) {}
+      return this.applyMarketPrefill(payload, options)
+    },
+
+    applyPrefillFromQuery(options = {}) {
+      if (String(options.prefill || '') !== 'market') return
+
+      this.applyMarketPrefill({
+        title: this.safeDecodeURIComponent(options.title),
+        description: this.safeDecodeURIComponent(options.description),
+        address: this.safeDecodeURIComponent(options.address),
+        categoryId: this.safeDecodeURIComponent(options.categoryId),
+        startTime: this.safeDecodeURIComponent(options.startTime),
+        lat: options.lat,
+        lng: options.lng,
+      }, { showToast: true })
     },
 
     normalizeCategoryText(value = '') {

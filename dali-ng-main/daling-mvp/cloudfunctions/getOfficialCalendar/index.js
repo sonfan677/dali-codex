@@ -11,7 +11,8 @@ const FIXED_MARKET_RULES = {
     {
       id: 'sanyuejie_market',
       title: '大理三月街集市',
-      weekdays: [6],
+      ruleType: 'lunar_days',
+      lunarDays: [2, 9, 16, 23],
       timeStart: '08:30',
       timeEnd: '13:30',
       categoryId: 'culture',
@@ -28,7 +29,8 @@ const FIXED_MARKET_RULES = {
     {
       id: 'chuangdanchang_market',
       title: '床单厂周末市集',
-      weekdays: [6],
+      ruleType: 'weekdays',
+      weekdays: [6, 0],
       timeStart: '10:00',
       timeEnd: '18:00',
       categoryId: 'culture',
@@ -44,8 +46,9 @@ const FIXED_MARKET_RULES = {
     },
     {
       id: 'yinqiao_market',
-      title: '银桥周末集市',
-      weekdays: [0],
+      title: '银桥集市',
+      ruleType: 'lunar_days',
+      lunarDays: [5, 13, 20, 28],
       timeStart: '09:30',
       timeEnd: '15:30',
       categoryId: 'food',
@@ -61,6 +64,39 @@ const FIXED_MARKET_RULES = {
     },
   ],
 }
+
+const LUNAR_INFO = [
+  0x04bd8, 0x04ae0, 0x0a570, 0x054d5, 0x0d260,
+  0x0d950, 0x16554, 0x056a0, 0x09ad0, 0x055d2,
+  0x04ae0, 0x0a5b6, 0x0a4d0, 0x0d250, 0x1d255,
+  0x0b540, 0x0d6a0, 0x0ada2, 0x095b0, 0x14977,
+  0x04970, 0x0a4b0, 0x0b4b5, 0x06a50, 0x06d40,
+  0x1ab54, 0x02b60, 0x09570, 0x052f2, 0x04970,
+  0x06566, 0x0d4a0, 0x0ea50, 0x06e95, 0x05ad0,
+  0x02b60, 0x186e3, 0x092e0, 0x1c8d7, 0x0c950,
+  0x0d4a0, 0x1d8a6, 0x0b550, 0x056a0, 0x1a5b4,
+  0x025d0, 0x092d0, 0x0d2b2, 0x0a950, 0x0b557,
+  0x06ca0, 0x0b550, 0x15355, 0x04da0, 0x0a5d0,
+  0x14573, 0x052d0, 0x0a9a8, 0x0e950, 0x06aa0,
+  0x0aea6, 0x0ab50, 0x04b60, 0x0aae4, 0x0a570,
+  0x05260, 0x0f263, 0x0d950, 0x05b57, 0x056a0,
+  0x096d0, 0x04dd5, 0x04ad0, 0x0a4d0, 0x0d4d4,
+  0x0d250, 0x0d558, 0x0b540, 0x0b6a0, 0x195a6,
+  0x095b0, 0x049b0, 0x0a974, 0x0a4b0, 0x0b27a,
+  0x06a50, 0x06d40, 0x0af46, 0x0ab60, 0x09570,
+  0x04af5, 0x04970, 0x064b0, 0x074a3, 0x0ea50,
+  0x06b58, 0x05ac0, 0x0ab60, 0x096d5, 0x092e0,
+  0x0c960, 0x0d954, 0x0d4a0, 0x0da50, 0x07552,
+  0x056a0, 0x0abb7, 0x025d0, 0x092d0, 0x0cab5,
+  0x0a950, 0x0b4a0, 0x0baa4, 0x0ad50, 0x055d9,
+  0x04ba0, 0x0a5b0, 0x15176, 0x052b0, 0x0a930,
+  0x07954, 0x06aa0, 0x0ad50, 0x05b52, 0x04b60,
+  0x0a6e6, 0x0a4e0, 0x0d260, 0x0ea65, 0x0d530,
+  0x05aa0, 0x076a3, 0x096d0, 0x04bd7, 0x04ad0,
+  0x0a4d0, 0x1d0b6, 0x0d250, 0x0d520, 0x0dd45,
+  0x0b5a0, 0x056d0, 0x055b2, 0x049b0, 0x0a577,
+  0x0a4b0, 0x0aa50, 0x1b255, 0x06d20, 0x0ada0,
+]
 
 function toChinaParts(input) {
   const ms = new Date(input).getTime()
@@ -98,6 +134,71 @@ function toTimeText(input) {
   const hh = `${parts.hour}`.padStart(2, '0')
   const mm = `${parts.minute}`.padStart(2, '0')
   return `${hh}:${mm}`
+}
+
+function lYearDays(y) {
+  let sum = 348
+  const info = LUNAR_INFO[y - 1900]
+  for (let i = 0x8000; i > 0x8; i >>= 1) {
+    sum += (info & i) ? 1 : 0
+  }
+  return sum + leapDays(y)
+}
+
+function leapMonth(y) {
+  return LUNAR_INFO[y - 1900] & 0xf
+}
+
+function leapDays(y) {
+  const lm = leapMonth(y)
+  if (lm) return (LUNAR_INFO[y - 1900] & 0x10000) ? 30 : 29
+  return 0
+}
+
+function monthDays(y, m) {
+  return (LUNAR_INFO[y - 1900] & (0x10000 >> m)) ? 30 : 29
+}
+
+function solarToLunarByChinaDate(year, month, day) {
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null
+  const base = Date.UTC(1900, 0, 31)
+  const target = Date.UTC(year, month - 1, day)
+  let offset = Math.floor((target - base) / DAY_MS)
+  if (!Number.isFinite(offset) || offset < 0) return null
+
+  let lunarYear = 1900
+  let temp = 0
+  while (lunarYear < 2101 && offset > 0) {
+    temp = lYearDays(lunarYear)
+    if (offset < temp) break
+    offset -= temp
+    lunarYear += 1
+  }
+
+  let leap = leapMonth(lunarYear)
+  let isLeap = false
+  let lunarMonth = 1
+  while (lunarMonth <= 12 && offset >= 0) {
+    if (leap > 0 && lunarMonth === leap + 1 && !isLeap) {
+      lunarMonth -= 1
+      isLeap = true
+      temp = leapDays(lunarYear)
+    } else {
+      temp = monthDays(lunarYear, lunarMonth)
+    }
+    if (offset < temp) break
+    offset -= temp
+    if (isLeap && lunarMonth === leap) isLeap = false
+    lunarMonth += 1
+  }
+
+  const lunarDay = offset + 1
+  return {
+    lunarYear,
+    lunarMonth,
+    lunarDay,
+    isLeap,
+  }
 }
 
 function buildChinaDate(y, m, d, hh = 0, mm = 0) {
@@ -160,11 +261,60 @@ function formatWeekdayText(weekdays = []) {
   return list.map((idx) => WEEK_LABELS[idx]).join(' / ')
 }
 
+function formatLunarDayNumber(day) {
+  const n = Number(day)
+  if (!Number.isFinite(n) || n < 1 || n > 30) return ''
+  const map = {
+    1: '初一',
+    2: '初二',
+    3: '初三',
+    4: '初四',
+    5: '初五',
+    6: '初六',
+    7: '初七',
+    8: '初八',
+    9: '初九',
+    10: '初十',
+    11: '十一',
+    12: '十二',
+    13: '十三',
+    14: '十四',
+    15: '十五',
+    16: '十六',
+    17: '十七',
+    18: '十八',
+    19: '十九',
+    20: '二十',
+    21: '廿一',
+    22: '廿二',
+    23: '廿三',
+    24: '廿四',
+    25: '廿五',
+    26: '廿六',
+    27: '廿七',
+    28: '廿八',
+    29: '廿九',
+    30: '三十',
+  }
+  return map[n] || ''
+}
+
+function formatLunarDaysText(days = []) {
+  const list = (Array.isArray(days) ? days : [])
+    .map((d) => Number(d))
+    .filter((n) => Number.isFinite(n) && n >= 1 && n <= 30)
+    .sort((a, b) => a - b)
+  if (!list.length) return '农历（按公告执行）'
+  return `农历${list.map((n) => formatLunarDayNumber(n)).filter(Boolean).join(' / ')}`
+}
+
 function buildMarketRules(cityId = 'dali') {
   const rules = FIXED_MARKET_RULES[cityId] || []
   return rules.map((rule) => ({
     ...rule,
-    scheduleText: `${formatWeekdayText(rule.weekdays)} ${rule.timeStart || '--:--'}-${rule.timeEnd || '--:--'}`,
+    scheduleText: rule.ruleType === 'lunar_days'
+      ? `${formatLunarDaysText(rule.lunarDays)} ${rule.timeStart || '--:--'}-${rule.timeEnd || '--:--'}`
+      : `${formatWeekdayText(rule.weekdays)} ${rule.timeStart || '--:--'}-${rule.timeEnd || '--:--'}`,
   }))
 }
 
@@ -173,14 +323,27 @@ function expandMarketEvents({ cityId = 'dali', startMs, endMs }) {
   const result = []
   if (!rules.length) return result
 
-  const cursorStart = new Date(startMs)
   for (let cursor = startMs; cursor < endMs; cursor += DAY_MS) {
     const dayKey = toChinaDayKey(cursor)
-    const weekday = toChinaParts(cursor)?.weekday
+    const chinaParts = toChinaParts(cursor)
+    const weekday = chinaParts?.weekday
+    const lunar = chinaParts
+      ? solarToLunarByChinaDate(chinaParts.year, chinaParts.month, chinaParts.day)
+      : null
     if (!dayKey || !Number.isInteger(weekday)) continue
 
     rules.forEach((rule) => {
-      if (!Array.isArray(rule.weekdays) || !rule.weekdays.includes(weekday)) return
+      const isWeekdayRule = String(rule.ruleType || 'weekdays') === 'weekdays'
+      const isLunarRule = String(rule.ruleType || '') === 'lunar_days'
+      if (isWeekdayRule) {
+        if (!Array.isArray(rule.weekdays) || !rule.weekdays.includes(weekday)) return
+      } else if (isLunarRule) {
+        const lunarDay = Number(lunar?.lunarDay || 0)
+        if (!Number.isFinite(lunarDay) || !Array.isArray(rule.lunarDays) || !rule.lunarDays.includes(lunarDay)) return
+      } else {
+        return
+      }
+
       const startTime = buildDateFromDayKey(dayKey, rule.timeStart || '09:00')
       const endTime = buildDateFromDayKey(dayKey, rule.timeEnd || '17:00')
       const startTs = startTime.getTime()
@@ -194,39 +357,6 @@ function expandMarketEvents({ cityId = 'dali', startMs, endMs }) {
         categoryLabel: rule.categoryLabel || '文化',
         startTime,
         endTime,
-        location: rule.location || {},
-        quota: 0,
-        joined: null,
-        organizer: rule.organizer || '公开集市',
-        note: rule.note || '无需报名，可直接前往',
-        scheduleText: rule.scheduleText || '',
-        isSignupRequired: false,
-        activityId: '',
-        launchHint: rule.launchHint || '一起去逛逛',
-      })
-    })
-  }
-
-  // 防止极端情况下游标起点不在整日边界时漏首日
-  if (cursorStart.getMinutes() || cursorStart.getHours()) {
-    const firstDayKey = toChinaDayKey(startMs)
-    const firstWeekday = toChinaWeekdayFromDayKey(firstDayKey)
-    rules.forEach((rule) => {
-      if (!Array.isArray(rule.weekdays) || !rule.weekdays.includes(firstWeekday)) return
-      const startTime = buildDateFromDayKey(firstDayKey, rule.timeStart || '09:00')
-      const startTs = startTime.getTime()
-      if (!Number.isFinite(startTs) || startTs < startMs || startTs >= endMs) return
-      const already = result.find((item) => item._id === `${rule.id}_${firstDayKey}`)
-      if (already) return
-      result.push({
-        source: 'market',
-        _id: `${rule.id}_${firstDayKey}`,
-        marketId: rule.id,
-        title: rule.title || '固定集市',
-        categoryId: rule.categoryId || 'culture',
-        categoryLabel: rule.categoryLabel || '文化',
-        startTime,
-        endTime: buildDateFromDayKey(firstDayKey, rule.timeEnd || '17:00'),
         location: rule.location || {},
         quota: 0,
         joined: null,

@@ -12,19 +12,33 @@
       <button class="refresh-btn" size="mini" :loading="loading" @tap="loadCalendar">刷新</button>
     </view>
 
+    <view class="month-tabs">
+      <view
+        v-for="(item, idx) in monthOptions"
+        :key="item.key"
+        class="month-tab"
+        :class="{ 'month-tab--active': idx === monthIndex }"
+        @tap="switchMonth(idx)"
+      >
+        {{ item.shortLabel }}
+      </view>
+    </view>
+
     <view class="market-board">
-      <text class="market-board-title">固定集市（公开免费，无需报名）</text>
+      <text class="market-board-title">固定集市（公开免费）</text>
       <view v-if="marketRules.length === 0" class="market-board-empty">暂无固定集市配置</view>
       <view v-else class="market-rule-list">
         <view v-for="rule in marketRules" :key="rule.id" class="market-rule-item">
-          <text class="market-rule-name">{{ rule.title }}</text>
-          <text class="market-rule-meta">{{ rule.scheduleText }}</text>
+          <view class="market-rule-main">
+            <text class="market-rule-name">{{ rule.title }}</text>
+            <text class="market-rule-time">{{ rule.scheduleText }}</text>
+          </view>
           <text class="market-rule-meta">{{ rule.location?.address || '地点待定' }}</text>
         </view>
       </view>
     </view>
 
-    <view class="calendar-card">
+    <view class="calendar-card" @touchstart="onCalendarTouchStart" @touchend="onCalendarTouchEnd">
       <view class="week-head">
         <text v-for="wk in weekLabels" :key="wk" class="week-item">{{ wk }}</text>
       </view>
@@ -41,7 +55,7 @@
             <view class="day-dots">
               <text v-if="cell.sourceCount.market > 0" class="dot dot-market" />
               <text v-if="cell.sourceCount.activity > 0" class="dot dot-activity" />
-              <text v-if="cell.sourceCount.calendarEvent > 0" class="dot dot-calendar" />
+              <text v-if="cell.sourceCount.calendarEvent > 0" class="dot dot-plan" />
             </view>
             <text v-if="cell.count > 0" class="day-count">{{ cell.count }}</text>
           </view>
@@ -50,7 +64,7 @@
       <view class="legend-row">
         <view class="legend-item"><text class="dot dot-market" />集市</view>
         <view class="legend-item"><text class="dot dot-activity" />官方活动</view>
-        <view class="legend-item"><text class="dot dot-calendar" />官方日历</view>
+        <view class="legend-item"><text class="dot dot-plan" />官方排期</view>
       </view>
     </view>
 
@@ -133,7 +147,7 @@ function getChinaMonthDays(year, month) {
 function buildMonthOptions() {
   const now = toChinaParts(Date.now())
   const list = []
-  for (let offset = 0; offset <= 2; offset += 1) {
+  for (let offset = -1; offset <= 2; offset += 1) {
     const monthBase = now.month + offset
     const year = now.year + Math.floor((monthBase - 1) / 12)
     const month = ((monthBase - 1) % 12) + 1
@@ -142,6 +156,7 @@ function buildMonthOptions() {
       year,
       month,
       label: formatMonthTitle(year, month),
+      shortLabel: `${month}月`,
     })
   }
   return list
@@ -150,11 +165,14 @@ function buildMonthOptions() {
 export default {
   data() {
     const options = buildMonthOptions()
-    const current = options[0] || { year: 0, month: 0, key: '' }
+    const now = toChinaParts(Date.now())
+    const currentKey = `${now.year}-${`${now.month}`.padStart(2, '0')}`
+    const currentIndex = Math.max(0, options.findIndex((item) => item.key === currentKey))
+    const current = options[currentIndex] || options[0] || { year: 0, month: 0, key: '' }
     return {
       loading: false,
       monthOptions: options,
-      monthIndex: 0,
+      monthIndex: currentIndex,
       monthYear: current.year,
       month: current.month,
       monthKey: current.key,
@@ -164,6 +182,8 @@ export default {
       marketRules: [],
       serverTimestamp: Date.now(),
       weekLabels: WEEK_LABELS,
+      touchStartX: 0,
+      touchStartY: 0,
     }
   },
 
@@ -229,6 +249,38 @@ export default {
       this.month = selected.month
       this.monthKey = selected.key
       this.loadCalendar()
+    },
+
+    switchMonth(idx) {
+      const target = Number(idx)
+      if (!Number.isInteger(target) || target < 0 || target >= this.monthOptions.length) return
+      if (target === this.monthIndex) return
+      this.monthIndex = target
+      const selected = this.monthOptions[this.monthIndex]
+      if (!selected) return
+      this.monthYear = selected.year
+      this.month = selected.month
+      this.monthKey = selected.key
+      this.loadCalendar()
+    },
+
+    onCalendarTouchStart(e) {
+      const touch = e?.changedTouches?.[0] || e?.touches?.[0]
+      if (!touch) return
+      this.touchStartX = Number(touch.clientX || 0)
+      this.touchStartY = Number(touch.clientY || 0)
+    },
+
+    onCalendarTouchEnd(e) {
+      const touch = e?.changedTouches?.[0] || e?.touches?.[0]
+      if (!touch) return
+      const endX = Number(touch.clientX || 0)
+      const endY = Number(touch.clientY || 0)
+      const dx = endX - this.touchStartX
+      const dy = endY - this.touchStartY
+      if (Math.abs(dx) < 36 || Math.abs(dx) <= Math.abs(dy)) return
+      if (dx < 0) this.switchMonth(this.monthIndex + 1)
+      else this.switchMonth(this.monthIndex - 1)
     },
 
     summarizeDayItems(items = []) {
@@ -315,13 +367,13 @@ export default {
     sourceLabel(source = '') {
       if (source === 'market') return '固定集市'
       if (source === 'activity') return '官方活动'
-      return '官方日历'
+      return '官方排期'
     },
 
     badgeClass(source = '') {
       if (source === 'market') return 'detail-badge--market'
       if (source === 'activity') return 'detail-badge--activity'
-      return 'detail-badge--calendar'
+      return 'detail-badge--plan'
     },
 
     goDetail(activityId) {
@@ -336,17 +388,17 @@ export default {
       const lat = Number(item.location?.lat)
       const lng = Number(item.location?.lng)
       const startIso = new Date(item.startTime).toISOString()
-      const params = [
-        'prefill=market',
-        `title=${encodeURIComponent(title)}`,
-        `description=${encodeURIComponent(description)}`,
-        `address=${encodeURIComponent(address)}`,
-        `categoryId=${encodeURIComponent(item.categoryId || 'social')}`,
-        `startTime=${encodeURIComponent(startIso)}`,
-      ]
-      if (Number.isFinite(lat)) params.push(`lat=${lat}`)
-      if (Number.isFinite(lng)) params.push(`lng=${lng}`)
-      uni.navigateTo({ url: `/pages/publish/index?${params.join('&')}` })
+      const payload = {
+        title,
+        description,
+        address,
+        categoryId: item.categoryId || 'social',
+        startTime: startIso,
+        lat: Number.isFinite(lat) ? lat : '',
+        lng: Number.isFinite(lng) ? lng : '',
+      }
+      uni.setStorageSync('dali_market_prefill_v1', payload)
+      uni.switchTab({ url: '/pages/publish/index' })
     },
   },
 }
@@ -396,49 +448,81 @@ export default {
 }
 .refresh-btn::after { border: none; }
 
+.month-tabs {
+  margin-top: 12rpx;
+  display: flex;
+  gap: 10rpx;
+}
+.month-tab {
+  flex: 1;
+  text-align: center;
+  background: #EEF3F8;
+  color: #475467;
+  border-radius: 18rpx;
+  padding: 8rpx 0;
+  font-size: 22rpx;
+}
+.month-tab--active {
+  background: #1A3C5E;
+  color: #fff;
+  font-weight: 700;
+}
+
 .market-board {
-  margin-top: 14rpx;
+  margin-top: 10rpx;
   background: #fff;
   border-radius: 14rpx;
-  padding: 18rpx;
+  padding: 14rpx;
 }
 .market-board-title {
   display: block;
-  font-size: 24rpx;
+  font-size: 22rpx;
   color: #1A3C5E;
   font-weight: 700;
 }
 .market-board-empty {
-  margin-top: 10rpx;
+  margin-top: 8rpx;
   font-size: 22rpx;
   color: #667085;
 }
 .market-rule-list {
-  margin-top: 10rpx;
+  margin-top: 8rpx;
   display: flex;
   flex-direction: column;
-  gap: 10rpx;
+  gap: 8rpx;
 }
 .market-rule-item {
   background: #F8FAFC;
   border-radius: 10rpx;
-  padding: 12rpx;
+  padding: 10rpx;
+}
+.market-rule-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10rpx;
 }
 .market-rule-name {
-  font-size: 24rpx;
+  font-size: 23rpx;
   color: #101828;
   font-weight: 600;
-  display: block;
+}
+.market-rule-time {
+  font-size: 20rpx;
+  color: #1D4F7A;
+  background: #E8F1FA;
+  border-radius: 10rpx;
+  padding: 4rpx 8rpx;
 }
 .market-rule-meta {
-  margin-top: 4rpx;
+  margin-top: 2rpx;
   display: block;
-  font-size: 22rpx;
+  font-size: 20rpx;
   color: #667085;
 }
 
 .calendar-card {
-  margin-top: 14rpx;
+  margin-top: 10rpx;
   background: #fff;
   border-radius: 14rpx;
   padding: 16rpx;
@@ -495,14 +579,16 @@ export default {
   gap: 4rpx;
 }
 .dot {
-  width: 8rpx;
-  height: 8rpx;
-  border-radius: 4rpx;
+  width: 12rpx;
+  height: 12rpx;
+  border-radius: 6rpx;
   display: inline-block;
+  border: 1rpx solid rgba(255, 255, 255, 0.95);
+  box-shadow: 0 0 0 1rpx rgba(16, 24, 40, 0.08);
 }
 .dot-market { background: #F59E0B; }
 .dot-activity { background: #0EA5E9; }
-.dot-calendar { background: #10B981; }
+.dot-plan { background: #10B981; }
 .day-count {
   margin-top: 4rpx;
   font-size: 18rpx;
@@ -572,7 +658,7 @@ export default {
   color: #075985;
   background: #E0F2FE;
 }
-.detail-badge--calendar {
+.detail-badge--plan {
   color: #065F46;
   background: #DCFCE7;
 }
