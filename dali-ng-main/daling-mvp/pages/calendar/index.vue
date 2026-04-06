@@ -2,7 +2,7 @@
   <view class="page">
     <view class="hero">
       <text class="hero-title">官方活动日历</text>
-      <text class="hero-sub">{{ monthTitle }} · 官方推荐 + 固定集市（免报名）</text>
+      <text class="hero-sub">{{ monthTitle }} · 官方主办 / 官方推荐 / 官方预告 + 固定集市</text>
     </view>
 
     <view class="market-board">
@@ -43,20 +43,29 @@
             :class="{ 'day-cell--active': cell.dayKey === selectedDayKey, 'day-cell--today': cell.isToday }"
             @tap="selectDay(cell.dayKey)"
           >
-            <text class="day-num">{{ cell.day }}</text>
-            <view class="day-dots">
-              <text v-if="cell.sourceCount.market > 0" class="dot dot-market" />
-              <text v-if="cell.sourceCount.activity > 0" class="dot dot-activity" />
-              <text v-if="cell.sourceCount.calendarEvent > 0" class="dot dot-plan" />
+            <view class="day-head">
+              <text class="day-num">{{ cell.day }}</text>
+              <text v-if="cell.count > 0" class="day-count">{{ cell.count }}</text>
             </view>
-            <text v-if="cell.count > 0" class="day-count">{{ cell.count }}</text>
+            <view class="day-labels">
+              <view
+                v-for="tag in cell.previewTags"
+                :key="`${cell.dayKey}_${tag.key}`"
+                class="cell-tag"
+                :class="cellTagClass(tag)"
+              >
+                {{ tag.text }}
+              </view>
+              <text v-if="cell.moreCount > 0" class="day-more">+{{ cell.moreCount }}</text>
+            </view>
           </view>
         </view>
       </view>
       <view class="legend-row">
-        <view class="legend-item"><text class="dot dot-market" />集市</view>
-        <view class="legend-item"><text class="dot dot-activity" />官方活动</view>
-        <view class="legend-item"><text class="dot dot-plan" />官方排期</view>
+        <view class="legend-item"><text class="legend-pill legend-pill--official">官方主办</text></view>
+        <view class="legend-item"><text class="legend-pill legend-pill--recommended">官方推荐</text></view>
+        <view class="legend-item"><text class="legend-pill legend-pill--preview">官方预告</text></view>
+        <view class="legend-item"><text class="legend-pill legend-pill--market">固定集市</text></view>
       </view>
     </view>
 
@@ -71,7 +80,13 @@
       <view v-else class="detail-list">
         <view v-for="item in selectedDayItems" :key="`${item.source}-${item._id}`" class="detail-item">
           <view class="detail-main">
-            <text class="detail-badge" :class="badgeClass(item.source)">{{ sourceLabel(item.source) }}</text>
+            <view class="detail-badges">
+              <text class="detail-badge" :class="badgeClass(item.source)">{{ sourceLabel(item.source) }}</text>
+              <text
+                v-if="item.isRecommended && item.source !== 'official_recommended'"
+                class="detail-badge detail-badge--recommend-extra"
+              >官方推荐</text>
+            </view>
             <text class="detail-item-title">{{ item.title }}</text>
             <text class="detail-meta">{{ detailTimeText(item) }} · {{ item.categoryLabel || '其他' }}</text>
             <text class="detail-meta">地点：{{ item.location?.address || '地点待定' }}</text>
@@ -196,16 +211,34 @@ export default {
       const todayKey = toChinaDayKey(this.serverTimestamp || Date.now())
       for (let day = 1; day <= totalDays; day += 1) {
         const dayKey = toDayKey(this.monthYear, this.month, day)
-        const dayData = this.dayMap[dayKey] || { count: 0, sourceCount: { market: 0, activity: 0, calendarEvent: 0 } }
+        const dayData = this.dayMap[dayKey] || {
+          count: 0,
+          sourceCount: { market: 0, officialActivity: 0, officialRecommended: 0, officialPreview: 0 },
+          items: [],
+        }
+        const previewTags = this.buildCellPreviewTags(dayData.items || [])
         cells.push({
           key: dayKey,
           isPlaceholder: false,
           day,
           dayKey,
           count: Number(dayData.count || 0),
-          sourceCount: dayData.sourceCount || { market: 0, activity: 0, calendarEvent: 0 },
+          sourceCount: dayData.sourceCount || {
+            market: 0,
+            officialActivity: 0,
+            officialRecommended: 0,
+            officialPreview: 0,
+          },
+          previewTags,
+          moreCount: Math.max(0, Number(dayData.count || 0) - previewTags.length),
           isToday: dayKey === todayKey,
         })
+      }
+      while (cells.length % 7 !== 0) {
+        cells.push({ key: `tail_empty_${cells.length}`, isPlaceholder: true })
+      }
+      while (cells.length < 42) {
+        cells.push({ key: `full_empty_${cells.length}`, isPlaceholder: true })
       }
       return cells
     },
@@ -261,22 +294,47 @@ export default {
     },
 
     summarizeDayItems(items = []) {
-      const sourceCount = { market: 0, activity: 0, calendarEvent: 0 }
+      const sourceCount = { market: 0, officialActivity: 0, officialRecommended: 0, officialPreview: 0 }
       items.forEach((item) => {
         if (item.source === 'market') sourceCount.market += 1
-        else if (item.source === 'activity') sourceCount.activity += 1
-        else sourceCount.calendarEvent += 1
+        else if (item.source === 'official_activity') sourceCount.officialActivity += 1
+        else if (item.source === 'official_recommended') sourceCount.officialRecommended += 1
+        else if (item.source === 'official_preview') sourceCount.officialPreview += 1
       })
       return sourceCount
+    },
+
+    compactTitle(text = '', max = 8) {
+      const value = String(text || '').trim()
+      if (!value) return '活动'
+      if (value.length <= max) return value
+      return `${value.slice(0, max)}…`
+    },
+
+    buildCellPreviewTags(items = []) {
+      const safe = Array.isArray(items) ? items : []
+      return safe.slice(0, 3).map((item, idx) => ({
+        key: `${item.source || 'x'}_${item._id || idx}_${idx}`,
+        source: item.source || '',
+        isRecommended: !!item.isRecommended,
+        text: this.compactTitle(item.title, 7),
+      }))
     },
 
     rebuildDayMap() {
       const map = {}
       ;(this.calendarDays || []).forEach((day) => {
+        const safeItems = Array.isArray(day.items) ? [...day.items] : []
+        safeItems.sort((a, b) => {
+          const wa = Number(a?.sortWeight || 99)
+          const wb = Number(b?.sortWeight || 99)
+          if (wa !== wb) return wa - wb
+          return new Date(a?.startTime || 0).getTime() - new Date(b?.startTime || 0).getTime()
+        })
         map[day.dayKey] = {
           ...day,
-          sourceCount: day.sourceCount || this.summarizeDayItems(day.items || []),
-          items: Array.isArray(day.items) ? day.items : [],
+          sourceCount: day.sourceCount || this.summarizeDayItems(safeItems),
+          items: safeItems,
         }
       })
       this.dayMap = map
@@ -343,14 +401,24 @@ export default {
 
     sourceLabel(source = '') {
       if (source === 'market') return '固定集市'
-      if (source === 'activity') return '官方活动'
-      return '官方排期'
+      if (source === 'official_recommended') return '官方推荐'
+      if (source === 'official_activity') return '官方主办'
+      return '官方预告'
     },
 
     badgeClass(source = '') {
       if (source === 'market') return 'detail-badge--market'
-      if (source === 'activity') return 'detail-badge--activity'
-      return 'detail-badge--plan'
+      if (source === 'official_recommended') return 'detail-badge--recommended'
+      if (source === 'official_activity') return 'detail-badge--official'
+      return 'detail-badge--preview'
+    },
+
+    cellTagClass(tag = {}) {
+      if (tag.isRecommended) return 'cell-tag--recommended'
+      if (tag.source === 'market') return 'cell-tag--market'
+      if (tag.source === 'official_activity') return 'cell-tag--official'
+      if (tag.source === 'official_preview') return 'cell-tag--preview'
+      return 'cell-tag--official'
     },
 
     detailTimeText(item = {}) {
@@ -502,72 +570,113 @@ export default {
 .month-grid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  gap: 8rpx;
+  gap: 0;
+  border-top: 1rpx solid #EEF2F6;
+  border-left: 1rpx solid #EEF2F6;
 }
 .grid-cell {
-  min-height: 82rpx;
+  min-height: 168rpx;
 }
 .day-placeholder {
-  height: 82rpx;
+  height: 168rpx;
+  border-right: 1rpx solid #EEF2F6;
+  border-bottom: 1rpx solid #EEF2F6;
 }
 .day-cell {
-  height: 82rpx;
-  background: #F8FAFC;
-  border-radius: 10rpx;
-  padding: 8rpx 6rpx 6rpx;
+  height: 168rpx;
+  background: #fff;
+  border-radius: 0;
+  padding: 8rpx 6rpx 8rpx;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: flex-start;
+  align-items: stretch;
+  justify-content: space-between;
   position: relative;
+  border-right: 1rpx solid #EEF2F6;
+  border-bottom: 1rpx solid #EEF2F6;
 }
 .day-cell--active {
-  background: #E9F2FB;
-  border: 1rpx solid #7FAED7;
+  background: #EEF6FF;
 }
 .day-cell--today .day-num {
   color: #1A3C5E;
   font-weight: 700;
 }
+.day-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
 .day-num {
   font-size: 22rpx;
   color: #344054;
 }
-.day-dots {
-  margin-top: 4rpx;
-  min-height: 10rpx;
-  display: flex;
-  gap: 4rpx;
-}
-.dot {
-  width: 12rpx;
-  height: 12rpx;
-  border-radius: 6rpx;
-  display: inline-block;
-  border: 1rpx solid rgba(255, 255, 255, 0.95);
-  box-shadow: 0 0 0 1rpx rgba(16, 24, 40, 0.08);
-}
-.dot-market { background: #F59E0B; }
-.dot-activity { background: #0EA5E9; }
-.dot-plan { background: #10B981; }
 .day-count {
-  margin-top: 4rpx;
   font-size: 18rpx;
   color: #667085;
+}
+.day-labels {
+  min-height: 120rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+}
+.cell-tag {
+  font-size: 18rpx;
+  color: #fff;
+  border-radius: 8rpx;
+  padding: 2rpx 8rpx;
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cell-tag--market {
+  background: #F59E0B;
+}
+.cell-tag--recommended {
+  background: #E11D48;
+}
+.cell-tag--official {
+  background: #3B82F6;
+}
+.cell-tag--preview {
+  background: #8B5CF6;
+}
+.day-more {
+  font-size: 18rpx;
+  color: #667085;
+  line-height: 1.4;
 }
 .legend-row {
   margin-top: 12rpx;
   display: flex;
   align-items: center;
-  gap: 16rpx;
+  flex-wrap: wrap;
+  gap: 10rpx;
 }
 .legend-item {
-  font-size: 20rpx;
-  color: #667085;
   display: flex;
   align-items: center;
-  gap: 6rpx;
+}
+.legend-pill {
+  font-size: 19rpx;
+  border-radius: 999rpx;
+  padding: 3rpx 12rpx;
+  color: #fff;
+}
+.legend-pill--official {
+  background: #3B82F6;
+}
+.legend-pill--recommended {
+  background: #E11D48;
+}
+.legend-pill--preview {
+  background: #8B5CF6;
+}
+.legend-pill--market {
+  background: #F59E0B;
 }
 
 .detail-panel {
@@ -606,6 +715,11 @@ export default {
   flex-direction: column;
   gap: 4rpx;
 }
+.detail-badges {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+}
 .detail-badge {
   align-self: flex-start;
   font-size: 20rpx;
@@ -616,13 +730,21 @@ export default {
   color: #92400E;
   background: #FEF3C7;
 }
-.detail-badge--activity {
-  color: #075985;
-  background: #E0F2FE;
+.detail-badge--official {
+  color: #1E40AF;
+  background: #DBEAFE;
 }
-.detail-badge--plan {
-  color: #065F46;
-  background: #DCFCE7;
+.detail-badge--recommended {
+  color: #9F1239;
+  background: #FFE4E6;
+}
+.detail-badge--preview {
+  color: #5B21B6;
+  background: #EDE9FE;
+}
+.detail-badge--recommend-extra {
+  color: #9F1239;
+  background: #FFE4E6;
 }
 .detail-item-title {
   font-size: 28rpx;

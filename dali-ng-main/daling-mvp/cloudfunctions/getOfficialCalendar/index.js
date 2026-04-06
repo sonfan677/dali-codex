@@ -5,6 +5,8 @@ const _ = db.command
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const WEEK_LABELS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+const OFFICIAL_ROLE_SET = new Set(['official', 'city_operator', 'cityoperator', 'super_admin', 'superadmin'])
+const OFFICIAL_TYPE_SET = new Set(['official', 'cohost', 'co_host', 'brand_partner', 'copublish', 'co_publish'])
 
 const FIXED_MARKET_RULES = {
   dali: [
@@ -128,6 +130,56 @@ function toTimeText(input) {
   const hh = `${parts.hour}`.padStart(2, '0')
   const mm = `${parts.minute}`.padStart(2, '0')
   return `${hh}:${mm}`
+}
+
+function parseCsvToSet(input = '') {
+  return new Set(
+    String(input || '')
+      .split(',')
+      .map((v) => String(v || '').trim())
+      .filter(Boolean),
+  )
+}
+
+function normalizeText(v = '') {
+  return String(v || '').trim().toLowerCase()
+}
+
+function buildOfficialPublisherSet() {
+  return parseCsvToSet(process.env.OFFICIAL_PUBLISHER_OPENIDS || '')
+}
+
+function isOfficialActivityItem(item = {}, officialPublisherSet = new Set()) {
+  if (item?.isOfficialActivity === true) return true
+  if (item?.officialActivity === true) return true
+  if (item?.isPlatformOfficial === true) return true
+  if (item?.isOfficial === true) return true
+
+  const publisherRole = normalizeText(item?.publisherRole)
+  if (OFFICIAL_ROLE_SET.has(publisherRole)) return true
+
+  const publisherType = normalizeText(item?.publisherType)
+  const hostType = normalizeText(item?.hostType)
+  const officialType = normalizeText(item?.officialType)
+  if (OFFICIAL_TYPE_SET.has(publisherType) || OFFICIAL_TYPE_SET.has(hostType) || OFFICIAL_TYPE_SET.has(officialType)) {
+    return true
+  }
+
+  const publisherOpenid = String(item?._openid || item?.publisherId || item?.publisherOpenid || '').trim()
+  if (publisherOpenid && officialPublisherSet.has(publisherOpenid)) return true
+
+  const nickname = String(item?.publisherNickname || '').trim()
+  if (nickname.startsWith('搭里官方') || nickname.startsWith('搭里')) return true
+
+  return false
+}
+
+function calendarPriority(item = {}) {
+  if (item?.isRecommended) return 10
+  if (item?.source === 'official_activity') return 20
+  if (item?.source === 'market') return 30
+  if (item?.source === 'official_preview') return 40
+  return 99
 }
 
 function lYearDays(y) {
@@ -360,6 +412,7 @@ function expandMarketEvents({ cityId = 'dali', startMs, endMs }) {
         isSignupRequired: false,
         activityId: '',
         launchHint: rule.launchHint || '一起去逛逛',
+        isRecommended: false,
       })
     })
   }
@@ -368,11 +421,12 @@ function expandMarketEvents({ cityId = 'dali', startMs, endMs }) {
 }
 
 function summarizeDayItems(items = []) {
-  const summary = { market: 0, activity: 0, calendarEvent: 0 }
+  const summary = { market: 0, officialActivity: 0, officialRecommended: 0, officialPreview: 0 }
   items.forEach((item) => {
     if (item.source === 'market') summary.market += 1
-    else if (item.source === 'activity') summary.activity += 1
-    else summary.calendarEvent += 1
+    else if (item.source === 'official_activity') summary.officialActivity += 1
+    else if (item.source === 'official_recommended') summary.officialRecommended += 1
+    else if (item.source === 'official_preview') summary.officialPreview += 1
   })
   return summary
 }
@@ -384,17 +438,19 @@ exports.main = async (event = {}) => {
   const startMs = range.startMs
   const endMs = range.endMs
 
-  const { data: activities } = await db.collection('activities')
+  const officialPublisherSet = buildOfficialPublisherSet()
+
+  const { data: activitiesRaw } = await db.collection('activities')
     .where({
       cityId,
-      isRecommended: true,
       status: _.in(['OPEN', 'FULL']),
       startTime: _.gte(new Date(startMs)).and(_.lt(new Date(endMs))),
     })
     .orderBy('startTime', 'asc')
-    .limit(200)
+    .limit(500)
     .field({
       _id: true,
+      _openid: true,
       title: true,
       categoryId: true,
       categoryLabel: true,
@@ -403,11 +459,44 @@ exports.main = async (event = {}) => {
       location: true,
       currentParticipants: true,
       maxParticipants: true,
+      publisherId: true,
       publisherNickname: true,
+      publisherRole: true,
+      publisherType: true,
+      publisherOpenid: true,
+      hostType: true,
+      officialType: true,
+      isOfficial: true,
+      isOfficialActivity: true,
+      officialActivity: true,
+      isPlatformOfficial: true,
       isRecommended: true,
     })
     .get()
     .catch(() => ({ data: [] }))
+
+  const activities = (activitiesRaw || [])
+    .map((item) => {
+      const isRecommended = !!item?.isRecommended
+      const isOfficialActivity = isOfficialActivityItem(item, officialPublisherSet)
+      if (!isRecommended && !isOfficialActivity) return null
+      return {
+        source: isOfficialActivity ? 'official_activity' : 'official_recommended',
+        _id: item._id,
+        title: item.title || (isOfficialActivity ? '官方活动' : '官方推荐活动'),
+        categoryId: item.categoryId || 'other',
+        categoryLabel: item.categoryLabel || '其他',
+        startTime: item.startTime,
+        endTime: item.endTime,
+        location: item.location || {},
+        quota: item.maxParticipants || 0,
+        joined: item.currentParticipants || 0,
+        organizer: item.publisherNickname || '官方运营',
+        activityId: item._id,
+        isRecommended,
+      }
+    })
+    .filter(Boolean)
 
   const { data: extraEvents } = await db.collection('officialCalendarEvents')
     .where({
@@ -434,24 +523,11 @@ exports.main = async (event = {}) => {
   const marketEvents = expandMarketEvents({ cityId, startMs, endMs })
 
   const merged = [
-    ...(activities || []).map((item) => ({
-      source: 'activity',
-      _id: item._id,
-      title: item.title || '官方活动',
-      categoryId: item.categoryId || 'other',
-      categoryLabel: item.categoryLabel || '其他',
-      startTime: item.startTime,
-      endTime: item.endTime,
-      location: item.location || {},
-      quota: item.maxParticipants || 0,
-      joined: item.currentParticipants || 0,
-      organizer: item.publisherNickname || '官方运营',
-      activityId: item._id,
-    })),
+    ...(activities || []),
     ...(extraEvents || []).map((item) => ({
-      source: 'calendar_event',
+      source: 'official_preview',
       _id: item._id,
-      title: item.title || '官方日历活动',
+      title: item.title || '官方预告',
       categoryId: item.categoryId || 'other',
       categoryLabel: item.categoryLabel || '其他',
       startTime: item.startTime,
@@ -461,6 +537,7 @@ exports.main = async (event = {}) => {
       joined: null,
       organizer: item.organizer || '官方运营',
       activityId: '',
+      isRecommended: false,
     })),
     ...marketEvents,
   ]
@@ -480,6 +557,7 @@ exports.main = async (event = {}) => {
     dayMap[dayKey].count += 1
     dayMap[dayKey].items.push({
       ...item,
+      sortWeight: calendarPriority(item),
       startText: item.source === 'market' ? '全天' : toTimeText(item.startTime),
       endText: item.source === 'market' ? '' : toTimeText(item.endTime),
     })
@@ -490,7 +568,12 @@ exports.main = async (event = {}) => {
     .map((day) => ({
       ...day,
       sourceCount: summarizeDayItems(day.items),
-      items: day.items.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()),
+      items: day.items.sort((a, b) => {
+        const wa = Number(a?.sortWeight || 99)
+        const wb = Number(b?.sortWeight || 99)
+        if (wa !== wb) return wa - wb
+        return new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
+      }),
     }))
 
   const monthMeta = range.mode === 'month'
