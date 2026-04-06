@@ -13,8 +13,6 @@ const FIXED_MARKET_RULES = {
       title: '大理三月街集市',
       ruleType: 'lunar_days',
       lunarDays: [2, 9, 16, 23],
-      timeStart: '08:30',
-      timeEnd: '13:30',
       categoryId: 'culture',
       categoryLabel: '文化',
       organizer: '公开集市',
@@ -31,8 +29,6 @@ const FIXED_MARKET_RULES = {
       title: '床单厂周末市集',
       ruleType: 'weekdays',
       weekdays: [6, 0],
-      timeStart: '10:00',
-      timeEnd: '18:00',
       categoryId: 'culture',
       categoryLabel: '文化',
       organizer: '公开集市',
@@ -49,8 +45,6 @@ const FIXED_MARKET_RULES = {
       title: '银桥集市',
       ruleType: 'lunar_days',
       lunarDays: [5, 13, 20, 28],
-      timeStart: '09:30',
-      timeEnd: '15:30',
       categoryId: 'food',
       categoryLabel: '美食',
       organizer: '公开集市',
@@ -313,8 +307,8 @@ function buildMarketRules(cityId = 'dali') {
   return rules.map((rule) => ({
     ...rule,
     scheduleText: rule.ruleType === 'lunar_days'
-      ? `${formatLunarDaysText(rule.lunarDays)} ${rule.timeStart || '--:--'}-${rule.timeEnd || '--:--'}`
-      : `${formatWeekdayText(rule.weekdays)} ${rule.timeStart || '--:--'}-${rule.timeEnd || '--:--'}`,
+      ? `${formatLunarDaysText(rule.lunarDays)}`
+      : `${formatWeekdayText(rule.weekdays)}`,
   }))
 }
 
@@ -344,8 +338,8 @@ function expandMarketEvents({ cityId = 'dali', startMs, endMs }) {
         return
       }
 
-      const startTime = buildDateFromDayKey(dayKey, rule.timeStart || '09:00')
-      const endTime = buildDateFromDayKey(dayKey, rule.timeEnd || '17:00')
+      const startTime = buildDateFromDayKey(dayKey, '00:00')
+      const endTime = buildDateFromDayKey(dayKey, '23:59')
       const startTs = startTime.getTime()
       if (!Number.isFinite(startTs) || startTs < startMs || startTs >= endMs) return
       result.push({
@@ -486,8 +480,8 @@ exports.main = async (event = {}) => {
     dayMap[dayKey].count += 1
     dayMap[dayKey].items.push({
       ...item,
-      startText: toTimeText(item.startTime),
-      endText: toTimeText(item.endTime),
+      startText: item.source === 'market' ? '全天' : toTimeText(item.startTime),
+      endText: item.source === 'market' ? '' : toTimeText(item.endTime),
     })
   })
 

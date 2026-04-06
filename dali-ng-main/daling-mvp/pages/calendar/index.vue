@@ -5,25 +5,6 @@
       <text class="hero-sub">{{ monthTitle }} · 官方推荐 + 固定集市（免报名）</text>
     </view>
 
-    <view class="toolbar">
-      <picker mode="selector" :range="monthPickerRange" :value="monthIndex" @change="onMonthChange">
-        <view class="picker">月份：{{ monthPickerRange[monthIndex] || monthTitle }} <text class="arrow">›</text></view>
-      </picker>
-      <button class="refresh-btn" size="mini" :loading="loading" @tap="loadCalendar">刷新</button>
-    </view>
-
-    <view class="month-tabs">
-      <view
-        v-for="(item, idx) in monthOptions"
-        :key="item.key"
-        class="month-tab"
-        :class="{ 'month-tab--active': idx === monthIndex }"
-        @tap="switchMonth(idx)"
-      >
-        {{ item.shortLabel }}
-      </view>
-    </view>
-
     <view class="market-board">
       <text class="market-board-title">固定集市（公开免费）</text>
       <view v-if="marketRules.length === 0" class="market-board-empty">暂无固定集市配置</view>
@@ -39,6 +20,17 @@
     </view>
 
     <view class="calendar-card" @touchstart="onCalendarTouchStart" @touchend="onCalendarTouchEnd">
+      <view class="month-tabs">
+        <view
+          v-for="(item, idx) in monthOptions"
+          :key="item.key"
+          class="month-tab"
+          :class="{ 'month-tab--active': idx === monthIndex }"
+          @tap="switchMonth(idx)"
+        >
+          {{ item.shortLabel }}
+        </view>
+      </view>
       <view class="week-head">
         <text v-for="wk in weekLabels" :key="wk" class="week-item">{{ wk }}</text>
       </view>
@@ -81,7 +73,7 @@
           <view class="detail-main">
             <text class="detail-badge" :class="badgeClass(item.source)">{{ sourceLabel(item.source) }}</text>
             <text class="detail-item-title">{{ item.title }}</text>
-            <text class="detail-meta">{{ item.startText }} - {{ item.endText }} · {{ item.categoryLabel || '其他' }}</text>
+            <text class="detail-meta">{{ detailTimeText(item) }} · {{ item.categoryLabel || '其他' }}</text>
             <text class="detail-meta">地点：{{ item.location?.address || '地点待定' }}</text>
             <text class="detail-meta">主理：{{ item.organizer || '官方运营' }}</text>
             <text v-if="item.source === 'market'" class="detail-note">无需报名，可直接前往；如要结伴，可发起同行活动。</text>
@@ -147,7 +139,7 @@ function getChinaMonthDays(year, month) {
 function buildMonthOptions() {
   const now = toChinaParts(Date.now())
   const list = []
-  for (let offset = -1; offset <= 2; offset += 1) {
+  for (let offset = 0; offset <= 2; offset += 1) {
     const monthBase = now.month + offset
     const year = now.year + Math.floor((monthBase - 1) / 12)
     const month = ((monthBase - 1) % 12) + 1
@@ -188,10 +180,6 @@ export default {
   },
 
   computed: {
-    monthPickerRange() {
-      return this.monthOptions.map((item) => item.label)
-    },
-
     monthTitle() {
       if (this.monthYear && this.month) return formatMonthTitle(this.monthYear, this.month)
       return '当月'
@@ -240,17 +228,6 @@ export default {
   },
 
   methods: {
-    onMonthChange(e) {
-      const idx = Number(e?.detail?.value || 0)
-      this.monthIndex = Number.isFinite(idx) ? idx : 0
-      const selected = this.monthOptions[this.monthIndex] || this.monthOptions[0]
-      if (!selected) return
-      this.monthYear = selected.year
-      this.month = selected.month
-      this.monthKey = selected.key
-      this.loadCalendar()
-    },
-
     switchMonth(idx) {
       const target = Number(idx)
       if (!Number.isInteger(target) || target < 0 || target >= this.monthOptions.length) return
@@ -376,6 +353,13 @@ export default {
       return 'detail-badge--plan'
     },
 
+    detailTimeText(item = {}) {
+      if (item.source === 'market') return '全天'
+      const startText = String(item.startText || '--:--')
+      const endText = String(item.endText || '--:--')
+      return `${startText} - ${endText}`
+    },
+
     goDetail(activityId) {
       if (!activityId) return
       uni.navigateTo({ url: `/pages/detail/index?id=${activityId}` })
@@ -426,32 +410,10 @@ export default {
   font-size: 24rpx;
   opacity: 0.92;
 }
-.toolbar {
-  margin-top: 16rpx;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12rpx;
-}
-.picker {
-  background: #fff;
-  border-radius: 26rpx;
-  padding: 12rpx 20rpx;
-  font-size: 24rpx;
-  color: #344054;
-}
-.arrow { color: #98A2B3; margin-left: 8rpx; }
-.refresh-btn {
-  border: none;
-  background: #E8EFF8;
-  color: #1A3C5E;
-}
-.refresh-btn::after { border: none; }
-
 .month-tabs {
-  margin-top: 12rpx;
   display: flex;
   gap: 10rpx;
+  margin-bottom: 12rpx;
 }
 .month-tab {
   flex: 1;
@@ -469,7 +431,7 @@ export default {
 }
 
 .market-board {
-  margin-top: 10rpx;
+  margin-top: 12rpx;
   background: #fff;
   border-radius: 14rpx;
   padding: 14rpx;
