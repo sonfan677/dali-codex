@@ -50,7 +50,10 @@
             placeholder="请填写具体分类（如：摄影、桌游教学）"
             maxlength="20"
           />
-          <text class="hint">发现页统一展示为“其它”，用于后台统计优化分类</text>
+          <text v-if="customCategoryDuplicateLabel" class="hint hint-error">
+            该分类与现有分类“{{ customCategoryDuplicateLabel }}”重复，请直接选择已有分类
+          </text>
+          <text v-else class="hint">发现页统一展示为“其它”，用于后台统计优化分类</text>
         </view>
 
         <!-- 地点 -->
@@ -281,10 +284,41 @@ export default {
     formationWindowHint() {
       const mins = this.formationWindowValues[this.formationWindowIndex]
       return `发布后${mins}分钟内未成团，会通知你决定是否继续`
+    },
+
+    existingCategoryLabelMap() {
+      const map = {}
+      ;(this.categoryOptions || []).forEach((item) => {
+        const label = String(item?.label || '').trim()
+        if (!label) return
+        const key = this.normalizeCategoryText(label)
+        if (!key) return
+        if (!map[key]) map[key] = label
+      })
+      const otherKey = this.normalizeCategoryText('其它')
+      if (otherKey && !map[otherKey]) map[otherKey] = '其他'
+      return map
+    },
+
+    customCategoryDuplicateLabel() {
+      if (this.form.categoryId !== 'other') return ''
+      const value = String(this.form.customCategoryLabel || '').trim()
+      if (!value) return ''
+      const key = this.normalizeCategoryText(value)
+      if (!key) return ''
+      return this.existingCategoryLabelMap[key] || ''
     }
   },
 
   methods: {
+    normalizeCategoryText(value = '') {
+      return String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, '')
+        .replace(/[·•・,，。!！?？:：;；、'"`~～\-—_（）()【】\[\]\/\\]/g, '')
+    },
+
     // 成团开关切换时重置输入
     onFormationToggle(e) {
       this.form.isGroupFormation = e.detail.value
@@ -546,6 +580,10 @@ _doChooseLocation() {
         uni.showToast({ title: '请选择“其它”时请填写具体分类', icon: 'none' })
         return
       }
+      if (this.form.categoryId === 'other' && this.customCategoryDuplicateLabel) {
+        uni.showToast({ title: `分类已存在：${this.customCategoryDuplicateLabel}`, icon: 'none' })
+        return
+      }
       if (this.form.startTimeMs <= Date.now()) {
         uni.showToast({ title: '开始时间不能早于现在', icon: 'none' })
         return
@@ -598,6 +636,7 @@ _doChooseLocation() {
             INVALID_TITLE: '标题格式有误',
             INVALID_CATEGORY: '请选择有效活动分类',
             INVALID_CUSTOM_CATEGORY: '请选择“其它”时请填写具体分类',
+            DUPLICATE_CUSTOM_CATEGORY: '你填写的“其它分类”与现有分类重复，请直接选择已有分类',
             START_PASSED:  '开始时间不能早于现在',
             INVALID_MIN:   '成团人数至少2人',
             INVALID_WINDOW:'成团时间窗口不合法',
@@ -643,6 +682,7 @@ _doChooseLocation() {
 }
 .mb0 { margin-bottom: 4rpx; }
 .hint { font-size: 22rpx; color: #bbb; display: block; margin-top: 8rpx; }
+.hint-error { color: #C00000; }
 .input {
   font-size: 30rpx;
   color: #333;

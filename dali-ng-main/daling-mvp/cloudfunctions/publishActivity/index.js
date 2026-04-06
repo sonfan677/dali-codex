@@ -65,6 +65,24 @@ function normalizeCustomCategoryLabel(value = '') {
   return String(value || '').trim().replace(/\s+/g, ' ')
 }
 
+function normalizeCategoryText(value = '') {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '')
+    .replace(/[·•・,，。!！?？:：;；、'"`~～\-—_（）()【】\[\]\/\\]/g, '')
+}
+
+function resolveDuplicateCategoryLabel(customLabel = '') {
+  const normalized = normalizeCategoryText(customLabel)
+  if (!normalized) return ''
+  const builtinLabels = Object.values(CATEGORY_MAP || {})
+  const aliasLabels = ['其它']
+  const allLabels = [...builtinLabels, ...aliasLabels]
+  const hit = allLabels.find((item) => normalizeCategoryText(item) === normalized)
+  return hit || ''
+}
+
 async function recordCustomCategoryStat({
   cityId = 'dali',
   customCategoryLabel = '',
@@ -432,6 +450,16 @@ exports.main = async (event, context) => {
   }
   if (finalCategoryId === 'other' && !normalizedCustomCategoryLabel) {
     return { success: false, error: 'INVALID_CUSTOM_CATEGORY', message: '选择“其它”时请填写具体分类' }
+  }
+  if (finalCategoryId === 'other') {
+    const duplicateLabel = resolveDuplicateCategoryLabel(normalizedCustomCategoryLabel)
+    if (duplicateLabel) {
+      return {
+        success: false,
+        error: 'DUPLICATE_CUSTOM_CATEGORY',
+        message: `自定义分类与现有分类“${duplicateLabel}”重复，请直接选择已有分类`,
+      }
+    }
   }
   if (!startTime || !endTime) {
     return { success: false, error: 'INVALID_TIME', message: '请选择活动时间' }
