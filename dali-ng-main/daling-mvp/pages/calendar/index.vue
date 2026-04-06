@@ -140,9 +140,9 @@ const TAG_SHORT_DICT = {
   大理三月街集市: '三月街',
   床单厂周末市集: '床单厂',
   银桥集市: '银桥',
-  官方活动: '官主办',
-  官方推荐活动: '官推荐',
-  官方预告: '官预告',
+  官方活动: '官方主办',
+  官方推荐活动: '官方推荐',
+  官方预告: '官方预告',
 }
 
 function toChinaParts(input = Date.now()) {
@@ -265,7 +265,7 @@ export default {
       while (cells.length % 7 !== 0) {
         cells.push({ key: `tail_empty_${cells.length}`, isPlaceholder: true })
       }
-      while (cells.length < 42) {
+      while (cells.length < 35) {
         cells.push({ key: `full_empty_${cells.length}`, isPlaceholder: true })
       }
       return cells
@@ -361,9 +361,9 @@ export default {
         const m = MARKET_SHORT_DICT[String(item.marketId || '')]
         if (m) return this.compactTitle(m, 5)
       }
-      if (source === 'official_recommended') return '官推荐'
-      if (source === 'official_activity') return '官主办'
-      if (source === 'official_preview') return '官预告'
+      if (source === 'official_recommended') return '官方推荐'
+      if (source === 'official_activity') return '官方主办'
+      if (source === 'official_preview') return '官方预告'
       const title = String(item.title || '')
       const hit = TAG_SHORT_DICT[title]
       if (hit) return this.compactTitle(hit, 5)
@@ -494,7 +494,6 @@ export default {
 
       if (this.selectedMarketId && tag.source === 'market') {
         if (String(tag.marketId || '') === this.selectedMarketId) classes.push('cell-tag--market-focus')
-        else classes.push('cell-tag--market-dim')
       }
       return classes.join(' ')
     },
@@ -618,8 +617,8 @@ export default {
 }
 .market-chip--active {
   color: #fff;
-  background: #1D4F7A;
-  border-color: #1D4F7A;
+  background: #16A34A;
+  border-color: #16A34A;
 }
 .market-expand-card {
   margin-top: 10rpx;
@@ -677,7 +676,7 @@ export default {
 .month-grid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  grid-template-rows: repeat(6, 168rpx);
+  grid-template-rows: repeat(5, 168rpx);
   grid-auto-rows: 168rpx;
   gap: 0;
   border-top: 1rpx solid #EEF2F6;
@@ -756,11 +755,9 @@ export default {
   background: #8B5CF6;
 }
 .cell-tag--market-focus {
-  box-shadow: inset 0 0 0 2rpx rgba(255, 255, 255, 0.9), 0 0 0 2rpx rgba(146, 64, 14, 0.35);
+  background: #16A34A;
+  box-shadow: inset 0 0 0 2rpx rgba(255, 255, 255, 0.88), 0 0 0 2rpx rgba(22, 163, 74, 0.28);
   transform: translateZ(0);
-}
-.cell-tag--market-dim {
-  opacity: 0.6;
 }
 .day-more {
   font-size: 18rpx;
