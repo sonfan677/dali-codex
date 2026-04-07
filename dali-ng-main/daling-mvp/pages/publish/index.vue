@@ -280,6 +280,7 @@ export default {
       marketDateLocked: false,
       lockedDateIndex: -1,
       lockedDateLabel: '',
+      marketLinkDraft: null,
     }
   },
 
@@ -364,8 +365,18 @@ export default {
       const categoryId = String(payload?.categoryId || '').trim().toLowerCase()
       const startTimeText = String(payload?.startTime || '').trim()
       const lockDate = payload?.lockDate === true || String(payload?.lockDate || '') === 'true'
+      const marketId = String(payload?.marketId || '').trim()
+      const marketTitle = String(payload?.marketTitle || '').trim()
       const lat = Number(payload?.lat)
       const lng = Number(payload?.lng)
+
+      // 每次消费预填都先重置“集市关联态”，避免跨场景残留
+      this.marketLinkDraft = null
+      if (!lockDate) {
+        this.marketDateLocked = false
+        this.lockedDateIndex = -1
+        this.lockedDateLabel = ''
+      }
 
       if (title && !String(this.form.title || '').trim()) {
         this.form.title = title
@@ -417,6 +428,13 @@ export default {
         }
       }
 
+      if (marketId) {
+        this.marketLinkDraft = {
+          marketId,
+          marketTitle: marketTitle || title || '固定集市',
+        }
+      }
+
       const hasAny = title || description || address || Number.isFinite(startMs)
       if (hasAny && showToast) {
         setTimeout(() => {
@@ -453,6 +471,8 @@ export default {
         address: this.safeDecodeURIComponent(options.address),
         categoryId: this.safeDecodeURIComponent(options.categoryId),
         startTime: this.safeDecodeURIComponent(options.startTime),
+        marketId: this.safeDecodeURIComponent(options.marketId),
+        marketTitle: this.safeDecodeURIComponent(options.marketTitle),
         lat: options.lat,
         lng: options.lng,
       }, { showToast: true })
@@ -797,6 +817,13 @@ _doChooseLocation() {
           minParticipants:  this.form.isGroupFormation ? this.form.minParticipants : 0,
           formationWindow:  this.form.isGroupFormation ? this.formationWindowValues[this.formationWindowIndex] : 30,
           cityId:           'dali',
+          marketLink: this.marketLinkDraft
+            ? {
+              marketId: String(this.marketLinkDraft.marketId || ''),
+              marketTitle: String(this.marketLinkDraft.marketTitle || ''),
+              marketDayKey: this.toLocalDayKey(this.form.startTimeMs),
+            }
+            : null,
         })
         if (res.success) {
           uni.showToast({ title: '发布成功！', icon: 'success' })

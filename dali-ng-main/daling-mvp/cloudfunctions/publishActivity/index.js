@@ -234,6 +234,29 @@ function toTimestamp(value) {
   return Number.isFinite(ms) ? ms : NaN
 }
 
+function toChinaDayKeyByMs(input) {
+  const ms = Number(input)
+  if (!Number.isFinite(ms)) return ''
+  const date = new Date(ms + 8 * 60 * 60 * 1000)
+  const y = date.getUTCFullYear()
+  const m = `${date.getUTCMonth() + 1}`.padStart(2, '0')
+  const d = `${date.getUTCDate()}`.padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+function normalizeMarketLink(raw = null, startMs = NaN) {
+  if (!raw || typeof raw !== 'object') return null
+  const marketId = String(raw.marketId || '').trim()
+  if (!marketId) return null
+  const marketTitle = String(raw.marketTitle || '').trim()
+  const inputDayKey = String(raw.marketDayKey || '').trim()
+  return {
+    marketId,
+    marketTitle: marketTitle || '固定集市',
+    marketDayKey: inputDayKey || toChinaDayKeyByMs(startMs),
+  }
+}
+
 function resolveVerifyAutoApproveMinutes() {
   const mins = Number(process.env.VERIFY_AUTO_APPROVE_MINUTES || VERIFY_AUTO_APPROVE_DEFAULT_MINUTES)
   if (!Number.isFinite(mins) || mins <= 0) return VERIFY_AUTO_APPROVE_DEFAULT_MINUTES
@@ -432,6 +455,7 @@ exports.main = async (event, context) => {
     minParticipants = 0,
     formationWindow,
     cityId,
+    marketLink = null,
   } = event
 
   const cityConfig = await loadCityConfig(cityId || DEFAULT_CITY_CONFIG.cityId)
@@ -480,6 +504,7 @@ exports.main = async (event, context) => {
   const now = Date.now()
   const startMs = new Date(startTime).getTime()
   const endMs   = new Date(endTime).getTime()
+  const normalizedMarketLink = normalizeMarketLink(marketLink, startMs)
 
   if (startMs <= now) {
     return { success: false, error: 'START_PASSED', message: '开始时间不能早于现在' }
@@ -592,6 +617,15 @@ exports.main = async (event, context) => {
       publisherAvatar: user.avatarUrl,
       isVerified: true,
       isRecommended: false,
+      isMarketCompanion: !!normalizedMarketLink,
+      marketLink: normalizedMarketLink
+        ? {
+          marketId: normalizedMarketLink.marketId,
+          marketTitle: normalizedMarketLink.marketTitle,
+          marketDayKey: normalizedMarketLink.marketDayKey,
+          linkedAt: db.serverDate(),
+        }
+        : null,
       createdAt: db.serverDate(),
       updatedAt: db.serverDate(),
     }

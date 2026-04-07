@@ -522,8 +522,13 @@ export default {
     async joinExistingCompanion(item = {}) {
       const lat = Number(item?.location?.lat)
       const lng = Number(item?.location?.lng)
+      const marketId = String(item?.marketId || '')
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
         uni.showToast({ title: '该集市暂无定位信息', icon: 'none' })
+        return
+      }
+      if (!marketId) {
+        uni.showToast({ title: '集市标识缺失，暂不可关联', icon: 'none' })
         return
       }
       const targetDayKey = toChinaDayKey(item.startTime || Date.now())
@@ -543,7 +548,9 @@ export default {
         const list = Array.isArray(res?.activities) ? res.activities : []
         const companions = list
           .filter((act) => {
-            const dayKey = toChinaDayKey(act?.startTime || 0)
+            const linkedMarketId = String(act?.marketLink?.marketId || '')
+            if (!linkedMarketId || linkedMarketId !== marketId) return false
+            const dayKey = String(act?.marketLink?.marketDayKey || toChinaDayKey(act?.startTime || 0))
             if (dayKey !== targetDayKey) return false
             const status = String(act?.status || '').toUpperCase()
             return status === 'OPEN' || status === 'FULL'
@@ -554,7 +561,7 @@ export default {
           uni.hideLoading()
           uni.showModal({
             title: '暂未发现已有同行',
-            content: '该集市当天还没有可参与的同行活动，你可以先发起一个。',
+            content: '该集市当天还没有可参与的同行活动（仅展示关联该集市的活动），你可以先发起一个。',
             confirmText: '去发起',
             success: (modalRes) => {
               if (modalRes?.confirm) this.launchWithMarket(item)
@@ -614,6 +621,8 @@ export default {
         categoryId: item.categoryId || 'social',
         startTime: startIso,
         lockDate: true,
+        marketId: String(item.marketId || ''),
+        marketTitle: String(item.title || ''),
         lat: Number.isFinite(lat) ? lat : '',
         lng: Number.isFinite(lng) ? lng : '',
       }
