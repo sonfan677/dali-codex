@@ -7,6 +7,8 @@ const DAY_MS = 24 * 60 * 60 * 1000
 const WEEK_LABELS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 const OFFICIAL_ROLE_SET = new Set(['official', 'city_operator', 'cityoperator', 'super_admin', 'superadmin'])
 const OFFICIAL_TYPE_SET = new Set(['official', 'cohost', 'co_host', 'brand_partner', 'copublish', 'co_publish'])
+const RECURRING_RULE_COLLECTION_CANDIDATES = ['officialCalendarRules', 'officialRecurringRules']
+const RECURRING_EXCEPTION_COLLECTION_CANDIDATES = ['officialCalendarExceptions', 'officialRecurringExceptions']
 
 const FIXED_MARKET_RULES = {
   dali: [
@@ -143,6 +145,39 @@ function parseCsvToSet(input = '') {
 
 function normalizeText(v = '') {
   return String(v || '').trim().toLowerCase()
+}
+
+function normalizeHm(input = '', fallback = '09:00') {
+  const raw = String(input || '').trim()
+  const m = raw.match(/^(\d{1,2}):(\d{1,2})$/)
+  if (!m) return fallback
+  const hh = Number(m[1])
+  const mm = Number(m[2])
+  if (!Number.isInteger(hh) || !Number.isInteger(mm)) return fallback
+  if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return fallback
+  return `${`${hh}`.padStart(2, '0')}:${`${mm}`.padStart(2, '0')}`
+}
+
+function normalizeIntList(list = [], min = 0, max = 999) {
+  if (!Array.isArray(list)) return []
+  return [...new Set(
+    list
+      .map((v) => Number(v))
+      .filter((n) => Number.isInteger(n) && n >= min && n <= max),
+  )].sort((a, b) => a - b)
+}
+
+async function readCollectionFirstAvailable(candidates = [], runner, fallback = []) {
+  const list = Array.isArray(candidates) ? candidates : []
+  for (let i = 0; i < list.length; i += 1) {
+    const name = String(list[i] || '').trim()
+    if (!name) continue
+    try {
+      const data = await runner(name)
+      return Array.isArray(data) ? data : fallback
+    } catch (e) {}
+  }
+  return fallback
 }
 
 function buildOfficialPublisherSet() {
@@ -354,6 +389,12 @@ function formatLunarDaysText(days = []) {
   return `农历${list.map((n) => formatLunarDayNumber(n)).filter(Boolean).join(' / ')}`
 }
 
+function formatMonthDaysText(days = []) {
+  const list = normalizeIntList(days, 1, 31)
+  if (!list.length) return '每月（按公告执行）'
+  return `每月${list.map((n) => `${n}日`).join(' / ')}`
+}
+
 function buildMarketRules(cityId = 'dali') {
   const rules = FIXED_MARKET_RULES[cityId] || []
   return rules.map((rule) => ({
@@ -362,6 +403,292 @@ function buildMarketRules(cityId = 'dali') {
       ? `${formatLunarDaysText(rule.lunarDays)}`
       : `${formatWeekdayText(rule.weekdays)}`,
   }))
+}
+
+async function loadRecurringRules(cityId = 'dali') {
+  const envName = String(process.env.OFFICIAL_RECURRING_RULE_COLLECTION || '').trim()
+  const candidates = envName
+    ? [envName, ...RECURRING_RULE_COLLECTION_CANDIDATES]
+    : RECURRING_RULE_COLLECTION_CANDIDATES
+  return readCollectionFirstAvailable(candidates, async (collectionName) => {
+    const { data } = await db.collection(collectionName)
+      .where({
+        cityId,
+        isActive: _.neq(false),
+      })
+      .limit(200)
+      .field({
+        _id: true,
+        ruleId: true,
+        cityId: true,
+        sourceType: true,
+        title: true,
+        ruleType: true,
+        weekdays: true,
+        lunarDays: true,
+        monthDays: true,
+        startHm: true,
+        endHm: true,
+        allDay: true,
+        categoryId: true,
+        categoryLabel: true,
+        organizer: true,
+        location: true,
+        note: true,
+        launchHint: true,
+        isSignupRequired: true,
+        isRecommended: true,
+      })
+      .get()
+    return data || []
+  }, [])
+}
+
+async function loadRecurringExceptions(cityId = 'dali', startMs, endMs) {
+  const startDayKey = toChinaDayKey(startMs)
+  const endDayKey = toChinaDayKey(Math.max(startMs, endMs - 1))
+  const envName = String(process.env.OFFICIAL_RECURRING_EXCEPTION_COLLECTION || '').trim()
+  const candidates = envName
+    ? [envName, ...RECURRING_EXCEPTION_COLLECTION_CANDIDATES]
+    : RECURRING_EXCEPTION_COLLECTION_CANDIDATES
+  return readCollectionFirstAvailable(candidates, async (collectionName) => {
+    const { data } = await db.collection(collectionName)
+      .where({
+        cityId,
+        isActive: _.neq(false),
+        dateKey: _.gte(startDayKey).and(_.lte(endDayKey)),
+      })
+      .limit(500)
+      .field({
+        _id: true,
+        ruleId: true,
+        dateKey: true,
+        action: true, // skip | reschedule
+        reason: true,
+        newDateKey: true,
+        newStartHm: true,
+        newEndHm: true,
+        titleOverride: true,
+        noteOverride: true,
+        locationOverride: true,
+      })
+      .get()
+    return data || []
+  }, [])
+}
+
+function normalizeRecurringRule(raw = {}, index = 0) {
+  const id = String(raw.ruleId || raw._id || `rec_rule_${index}`).trim()
+  if (!id) return null
+  const ruleType = normalizeText(raw.ruleType || 'weekdays')
+  const sourceType = normalizeText(raw.sourceType || 'official_preview')
+  const normalizedRuleType = ['weekdays', 'lunar_days', 'month_days'].includes(ruleType) ? ruleType : 'weekdays'
+  const weekdays = normalizeIntList(raw.weekdays, 0, 6)
+  const lunarDays = normalizeIntList(raw.lunarDays, 1, 30)
+  const monthDays = normalizeIntList(raw.monthDays, 1, 31)
+  const allDay = !!raw.allDay
+  const startHm = allDay ? '00:00' : normalizeHm(raw.startHm || raw.startTime || '10:00', '10:00')
+  const endHm = allDay ? '23:59' : normalizeHm(raw.endHm || raw.endTime || '12:00', '12:00')
+  const scheduleText = normalizedRuleType === 'lunar_days'
+    ? formatLunarDaysText(lunarDays)
+    : normalizedRuleType === 'month_days'
+      ? formatMonthDaysText(monthDays)
+      : formatWeekdayText(weekdays)
+  return {
+    id,
+    sourceType: sourceType === 'market' ? 'market' : 'official_preview',
+    title: String(raw.title || '官方预告').trim() || '官方预告',
+    ruleType: normalizedRuleType,
+    weekdays,
+    lunarDays,
+    monthDays,
+    startHm,
+    endHm,
+    allDay,
+    scheduleText,
+    categoryId: String(raw.categoryId || 'other').trim() || 'other',
+    categoryLabel: String(raw.categoryLabel || '其他').trim() || '其他',
+    organizer: String(raw.organizer || '官方运营').trim() || '官方运营',
+    location: raw.location && typeof raw.location === 'object' ? raw.location : {},
+    note: String(raw.note || '').trim(),
+    launchHint: String(raw.launchHint || '').trim(),
+    isSignupRequired: !!raw.isSignupRequired,
+    isRecommended: !!raw.isRecommended,
+  }
+}
+
+function buildExceptionMap(list = []) {
+  const map = {}
+  ;(Array.isArray(list) ? list : []).forEach((item) => {
+    const rid = String(item?.ruleId || '').trim()
+    const dateKey = String(item?.dateKey || '').trim()
+    if (!rid || !dateKey) return
+    map[`${rid}__${dateKey}`] = item
+  })
+  return map
+}
+
+function recurringRuleMatched(rule = {}, dayKey = '', chinaParts = null, lunar = null) {
+  if (!rule || !dayKey || !chinaParts) return false
+  if (rule.ruleType === 'weekdays') {
+    return Array.isArray(rule.weekdays) && rule.weekdays.includes(chinaParts.weekday)
+  }
+  if (rule.ruleType === 'lunar_days') {
+    const lunarDay = Number(lunar?.lunarDay || 0)
+    return Number.isFinite(lunarDay) && Array.isArray(rule.lunarDays) && rule.lunarDays.includes(lunarDay)
+  }
+  if (rule.ruleType === 'month_days') {
+    const dayNum = Number(chinaParts.day || 0)
+    return Number.isFinite(dayNum) && Array.isArray(rule.monthDays) && rule.monthDays.includes(dayNum)
+  }
+  return false
+}
+
+function applyRecurringException(base = {}, exception = null) {
+  if (!exception || typeof exception !== 'object') return base
+  const action = normalizeText(exception.action || '')
+  if (['skip', 'cancel', 'off', 'stop'].includes(action)) return null
+  const merged = { ...base }
+  if (['reschedule', 'move', 'postpone'].includes(action)) {
+    const newDateKey = String(exception.newDateKey || '').trim()
+    if (newDateKey) merged.dayKey = newDateKey
+  }
+  const newStartHm = normalizeHm(exception.newStartHm || '', '')
+  const newEndHm = normalizeHm(exception.newEndHm || '', '')
+  if (newStartHm) merged.startHm = newStartHm
+  if (newEndHm) merged.endHm = newEndHm
+  const titleOverride = String(exception.titleOverride || '').trim()
+  if (titleOverride) merged.title = titleOverride
+  const noteOverride = String(exception.noteOverride || '').trim()
+  if (noteOverride) merged.note = noteOverride
+  if (exception.locationOverride && typeof exception.locationOverride === 'object') {
+    merged.location = exception.locationOverride
+  }
+  return merged
+}
+
+function expandRecurringEvents({ rules = [], exceptions = [], startMs, endMs }) {
+  const normalizedRules = (Array.isArray(rules) ? rules : [])
+    .map((rule, idx) => normalizeRecurringRule(rule, idx))
+    .filter(Boolean)
+  if (!normalizedRules.length) return []
+  const exceptionMap = buildExceptionMap(exceptions)
+  const result = []
+
+  for (let cursor = startMs; cursor < endMs; cursor += DAY_MS) {
+    const baseDayKey = toChinaDayKey(cursor)
+    const chinaParts = toChinaParts(cursor)
+    const lunar = chinaParts
+      ? solarToLunarByChinaDate(chinaParts.year, chinaParts.month, chinaParts.day)
+      : null
+    if (!baseDayKey || !chinaParts) continue
+
+    normalizedRules.forEach((rule) => {
+      if (!recurringRuleMatched(rule, baseDayKey, chinaParts, lunar)) return
+      let materialized = {
+        ...rule,
+        dayKey: baseDayKey,
+      }
+      const exp = exceptionMap[`${rule.id}__${baseDayKey}`]
+      materialized = applyRecurringException(materialized, exp)
+      if (!materialized) return
+
+      const startTime = buildDateFromDayKey(materialized.dayKey, materialized.startHm || '10:00')
+      const endTime = buildDateFromDayKey(materialized.dayKey, materialized.endHm || '12:00')
+      const startTs = startTime.getTime()
+      if (!Number.isFinite(startTs) || startTs < startMs || startTs >= endMs) return
+
+      const source = materialized.sourceType === 'market' ? 'market' : 'official_preview'
+      const recIdPrefix = source === 'market' ? `${materialized.id}_rec_market` : `${materialized.id}_rec_preview`
+      result.push({
+        source,
+        _id: `${recIdPrefix}_${materialized.dayKey}`,
+        marketId: source === 'market' ? materialized.id : '',
+        title: materialized.title,
+        categoryId: materialized.categoryId,
+        categoryLabel: materialized.categoryLabel,
+        startTime,
+        endTime,
+        location: materialized.location || {},
+        quota: 0,
+        joined: null,
+        organizer: materialized.organizer || '官方运营',
+        note: materialized.note || '',
+        scheduleText: materialized.scheduleText || '',
+        isSignupRequired: !!materialized.isSignupRequired,
+        activityId: '',
+        launchHint: materialized.launchHint || '一起去逛逛',
+        isRecommended: !!materialized.isRecommended,
+      })
+    })
+  }
+
+  return result
+}
+
+function mergeCalendarItemsDedup(items = []) {
+  const map = new Map()
+  ;(Array.isArray(items) ? items : []).forEach((item) => {
+    const id = String(item?._id || '').trim()
+    const key = id || `${item?.source || ''}__${item?.marketId || ''}__${toChinaDayKey(item?.startTime)}__${item?.title || ''}`
+    if (!key) return
+    if (!map.has(key)) {
+      map.set(key, item)
+      return
+    }
+    const existed = map.get(key)
+    if (calendarPriority(item) < calendarPriority(existed)) {
+      map.set(key, item)
+    }
+  })
+  return Array.from(map.values())
+}
+
+function buildMarketRulesResponse(cityId = 'dali', recurringRules = []) {
+  const fixedRules = buildMarketRules(cityId).map((rule) => ({
+    id: rule.id,
+    title: rule.title,
+    scheduleText: rule.scheduleText,
+    location: rule.location || {},
+    note: rule.note || '无需报名，可直接前往',
+    launchHint: rule.launchHint || '一起去逛逛',
+    categoryId: rule.categoryId || 'culture',
+    categoryLabel: rule.categoryLabel || '文化',
+  }))
+
+  const recurringMarketRules = (Array.isArray(recurringRules) ? recurringRules : [])
+    .map((rule, idx) => normalizeRecurringRule(rule, idx))
+    .filter((rule) => rule && rule.sourceType === 'market')
+    .map((rule) => ({
+      id: rule.id,
+      title: rule.title || '固定集市',
+      scheduleText: rule.scheduleText || '按公告执行',
+      location: rule.location || {},
+      note: rule.note || '无需报名，可直接前往',
+      launchHint: rule.launchHint || '一起去逛逛',
+      categoryId: rule.categoryId || 'culture',
+      categoryLabel: rule.categoryLabel || '文化',
+    }))
+
+  const byId = {}
+  const order = []
+  fixedRules.forEach((rule) => {
+    byId[rule.id] = { ...rule }
+    order.push(rule.id)
+  })
+  recurringMarketRules.forEach((rule) => {
+    if (!byId[rule.id]) {
+      order.push(rule.id)
+      byId[rule.id] = { ...rule }
+      return
+    }
+    byId[rule.id] = {
+      ...byId[rule.id],
+      ...rule,
+    }
+  })
+
+  return order.map((id) => byId[id]).filter(Boolean)
 }
 
 function expandMarketEvents({ cityId = 'dali', startMs, endMs }) {
@@ -521,8 +848,16 @@ exports.main = async (event = {}) => {
     .catch(() => ({ data: [] }))
 
   const marketEvents = expandMarketEvents({ cityId, startMs, endMs })
+  const recurringRules = await loadRecurringRules(cityId)
+  const recurringExceptions = await loadRecurringExceptions(cityId, startMs, endMs)
+  const recurringEvents = expandRecurringEvents({
+    rules: recurringRules,
+    exceptions: recurringExceptions,
+    startMs,
+    endMs,
+  })
 
-  const merged = [
+  const merged = mergeCalendarItemsDedup([
     ...(activities || []),
     ...(extraEvents || []).map((item) => ({
       source: 'official_preview',
@@ -540,7 +875,8 @@ exports.main = async (event = {}) => {
       isRecommended: false,
     })),
     ...marketEvents,
-  ]
+    ...recurringEvents,
+  ])
 
   const dayMap = {}
   merged.forEach((item) => {
@@ -590,18 +926,14 @@ exports.main = async (event = {}) => {
     days: range.days,
     mode: range.mode,
     monthMeta,
-    marketRules: buildMarketRules(cityId).map((rule) => ({
-      id: rule.id,
-      title: rule.title,
-      scheduleText: rule.scheduleText,
-      location: rule.location || {},
-      note: rule.note || '无需报名，可直接前往',
-      launchHint: rule.launchHint || '一起去逛逛',
-      categoryId: rule.categoryId || 'culture',
-      categoryLabel: rule.categoryLabel || '文化',
-    })),
+    marketRules: buildMarketRulesResponse(cityId, recurringRules),
     calendarDays,
     totalItems: merged.length,
+    recurringMeta: {
+      ruleCount: Array.isArray(recurringRules) ? recurringRules.length : 0,
+      exceptionCount: Array.isArray(recurringExceptions) ? recurringExceptions.length : 0,
+      generatedCount: Array.isArray(recurringEvents) ? recurringEvents.length : 0,
+    },
     serverTimestamp: nowMs,
     range: {
       startTime: new Date(startMs).toISOString(),
