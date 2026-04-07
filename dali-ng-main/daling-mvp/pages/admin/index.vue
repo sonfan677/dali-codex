@@ -285,6 +285,41 @@
 
         <view class="card">
           <view class="title-row">
+            <text class="card-title">日历规则维护（第2期）</text>
+            <text class="status-pill status-pill--log">{{ calendarOps.monthKey || '--' }}</text>
+          </view>
+          <text class="card-openid">
+            周期规则与例外日期统一在后台维护（默认 cityId={{ cityId || 'dali' }}）。
+          </text>
+          <view class="logs-overview">
+            <view class="logs-overview-card">
+              <text class="logs-overview-value">{{ calendarOps.ruleCount || 0 }}</text>
+              <text class="logs-overview-label">规则数</text>
+            </view>
+            <view class="logs-overview-card">
+              <text class="logs-overview-value">{{ calendarOps.exceptionCount || 0 }}</text>
+              <text class="logs-overview-label">例外数</text>
+            </view>
+            <view class="logs-overview-card">
+              <text class="logs-overview-value">{{ calendarOps.generatedCount || 0 }}</text>
+              <text class="logs-overview-label">本月生成</text>
+            </view>
+          </view>
+          <view class="card-actions card-actions--single">
+            <button
+              class="action-btn action-btn--detail"
+              :disabled="calendarOpsLoading"
+              @tap="loadCalendarOpsSummary"
+            >{{ calendarOpsLoading ? '刷新中...' : '刷新统计' }}</button>
+            <button class="action-btn action-btn--detail" @tap="copyCalendarRuleTemplate">复制规则模板</button>
+            <button class="action-btn action-btn--detail" @tap="copyCalendarExceptionTemplate">复制例外模板</button>
+            <button class="action-btn action-btn--detail" @tap="copyCalendarMaintenanceGuide">复制维护步骤</button>
+          </view>
+          <text v-if="calendarOps.loadedAt" class="card-openid">最近刷新：{{ formatTime(calendarOps.loadedAt) }}</text>
+        </view>
+
+        <view class="card">
+          <view class="title-row">
             <text class="card-title">方案2触发队列（按需核验）</text>
             <text class="status-pill status-pill--pending">{{ scheme2TriggeredUserList.length }}</text>
           </view>
@@ -1423,6 +1458,7 @@ export default {
       },
       autoVerifyReminderToken: '',
       opsPatrolRunning: false,
+      calendarOpsLoading: false,
       opsPatrol: {
         summary: {
           level: 'normal',
@@ -1441,6 +1477,13 @@ export default {
         latestChecks: [],
         alerts: [],
         runs: [],
+      },
+      calendarOps: {
+        ruleCount: 0,
+        exceptionCount: 0,
+        generatedCount: 0,
+        monthKey: '',
+        loadedAt: null,
       },
       reportList: [],
       activityList: [],
@@ -2589,6 +2632,158 @@ export default {
   },
 
   methods: {
+    getChinaYearMonth(ts = Date.now()) {
+      const ms = new Date(ts).getTime()
+      const d = new Date(ms + 8 * 60 * 60 * 1000)
+      return {
+        year: d.getUTCFullYear(),
+        month: d.getUTCMonth() + 1,
+      }
+    },
+
+    buildCalendarRuleTemplateJsonl() {
+      const city = this.cityId || 'dali'
+      const now = this.getChinaYearMonth()
+      const lines = [
+        JSON.stringify({
+          ruleId: 'rule_weekly_music_demo',
+          cityId: city,
+          isActive: true,
+          sourceType: 'official_preview',
+          title: '周三音乐快闪（预告）',
+          ruleType: 'weekdays',
+          weekdays: [3],
+          startHm: '19:30',
+          endHm: '21:00',
+          allDay: false,
+          categoryId: 'music',
+          categoryLabel: '音乐',
+          organizer: '搭里运营',
+          location: { address: '大理古城人民路', lat: 25.6935, lng: 100.1604 },
+          note: `后台维护模板（${now.year}-${`${now.month}`.padStart(2, '0')}）`,
+          launchHint: '一起去听歌',
+          isSignupRequired: true,
+          isRecommended: false,
+        }),
+        JSON.stringify({
+          ruleId: 'rule_month_15_reading',
+          cityId: city,
+          isActive: true,
+          sourceType: 'official_preview',
+          title: '每月15日读书夜（预告）',
+          ruleType: 'month_days',
+          monthDays: [15],
+          startHm: '20:00',
+          endHm: '21:30',
+          allDay: false,
+          categoryId: 'culture',
+          categoryLabel: '文化',
+          organizer: '搭里运营',
+          location: { address: '大理古城文献楼', lat: 25.7001, lng: 100.1632 },
+          note: '后台维护模板：每月固定活动',
+          launchHint: '一起读书',
+          isSignupRequired: true,
+          isRecommended: true,
+        }),
+      ]
+      return lines.join('\n')
+    },
+
+    buildCalendarExceptionTemplateJsonl() {
+      const city = this.cityId || 'dali'
+      const now = this.getChinaYearMonth()
+      const month = `${now.month}`.padStart(2, '0')
+      return [
+        JSON.stringify({
+          ruleId: 'rule_weekly_music_demo',
+          cityId: city,
+          dateKey: `${now.year}-${month}-08`,
+          isActive: true,
+          action: 'skip',
+          reason: '天气原因停办',
+        }),
+        JSON.stringify({
+          ruleId: 'rule_weekly_music_demo',
+          cityId: city,
+          dateKey: `${now.year}-${month}-15`,
+          isActive: true,
+          action: 'reschedule',
+          newDateKey: `${now.year}-${month}-16`,
+          newStartHm: '20:00',
+          newEndHm: '21:30',
+          titleOverride: '周三音乐快闪（改期）',
+          noteOverride: '由周三改到周四',
+          locationOverride: { address: '大理古城红龙井', lat: 25.6962, lng: 100.1621 },
+        }),
+      ].join('\n')
+    },
+
+    buildCalendarMaintenanceGuideText() {
+      const city = this.cityId || 'dali'
+      return [
+        '【日历规则维护步骤】',
+        `1) 集合 officialCalendarRules：维护周期规则（cityId=${city}）`,
+        '2) 集合 officialCalendarExceptions：维护例外日期（skip/reschedule）',
+        '3) 修改后在管理后台点“刷新统计”复核 rule/exception/generated',
+        '4) 真机进入“官方活动日历”复核对应日期',
+        '说明：固定集市（三月街/床单厂/银桥）由系统内置，不在周期规则里重复维护。',
+      ].join('\n')
+    },
+
+    async copyCalendarRuleTemplate() {
+      try {
+        await this.saveCsvToClipboard(this.buildCalendarRuleTemplateJsonl())
+        uni.showToast({ title: '规则模板已复制', icon: 'success' })
+      } catch (e) {
+        uni.showToast({ title: '复制失败，请重试', icon: 'none' })
+      }
+    },
+
+    async copyCalendarExceptionTemplate() {
+      try {
+        await this.saveCsvToClipboard(this.buildCalendarExceptionTemplateJsonl())
+        uni.showToast({ title: '例外模板已复制', icon: 'success' })
+      } catch (e) {
+        uni.showToast({ title: '复制失败，请重试', icon: 'none' })
+      }
+    },
+
+    async copyCalendarMaintenanceGuide() {
+      try {
+        await this.saveCsvToClipboard(this.buildCalendarMaintenanceGuideText())
+        uni.showToast({ title: '维护步骤已复制', icon: 'success' })
+      } catch (e) {
+        uni.showToast({ title: '复制失败，请重试', icon: 'none' })
+      }
+    },
+
+    async loadCalendarOpsSummary({ silent = false } = {}) {
+      if (this.calendarOpsLoading) return
+      this.calendarOpsLoading = true
+      try {
+        const now = this.getChinaYearMonth()
+        const res = await callCloud('getOfficialCalendar', {
+          mode: 'month',
+          cityId: this.cityId || 'dali',
+          year: now.year,
+          month: now.month,
+        })
+        if (!res?.success) throw new Error(res?.message || 'LOAD_CALENDAR_OPS_FAILED')
+        this.calendarOps = {
+          ruleCount: Number(res?.recurringMeta?.ruleCount || 0),
+          exceptionCount: Number(res?.recurringMeta?.exceptionCount || 0),
+          generatedCount: Number(res?.recurringMeta?.generatedCount || 0),
+          monthKey: String(res?.monthMeta?.monthKey || `${now.year}-${`${now.month}`.padStart(2, '0')}`),
+          loadedAt: Date.now(),
+        }
+        if (!silent) uni.showToast({ title: '统计已刷新', icon: 'success' })
+      } catch (e) {
+        if (!silent) uni.showToast({ title: '刷新失败，请重试', icon: 'none' })
+      } finally {
+        this.calendarOpsLoading = false
+      }
+    },
+
     getTodayDateToken() {
       const now = new Date()
       const y = now.getFullYear()
@@ -3392,6 +3587,7 @@ export default {
         this.selectedReportTodoIds = this.selectedReportTodoIds.filter((id) => pendingReportIdSet.has(id))
         const pendingVerifyOpenidSet = new Set((this.pendingVerifyList || []).map((item) => item._openid).filter(Boolean))
         this.selectedVerifyOpenids = this.selectedVerifyOpenids.filter((id) => pendingVerifyOpenidSet.has(id))
+        await this.loadCalendarOpsSummary({ silent: true })
         this.autoArchiveDailyReport()
       } catch(e) {
         console.error('加载管理数据失败', e)

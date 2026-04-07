@@ -298,7 +298,7 @@ function buildDateFromDayKey(dayKey = '', hm = '09:00') {
 function toChinaWeekdayFromDayKey(dayKey = '') {
   const [y, m, d] = String(dayKey).split('-').map((v) => Number(v))
   if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return -1
-  return buildChinaDate(y, m, d, 0, 0).getUTCDay()
+  return new Date(Date.UTC(y, m - 1, d, 0, 0, 0, 0)).getUTCDay()
 }
 
 function normalizeMonthRange(event = {}, nowMs = Date.now()) {
@@ -482,6 +482,8 @@ function normalizeRecurringRule(raw = {}, index = 0) {
   if (!id) return null
   const ruleType = normalizeText(raw.ruleType || 'weekdays')
   const sourceType = normalizeText(raw.sourceType || 'official_preview')
+  // 固定集市由内置规则维护，避免和周期规则重复叠加
+  if (sourceType === 'market') return null
   const normalizedRuleType = ['weekdays', 'lunar_days', 'month_days'].includes(ruleType) ? ruleType : 'weekdays'
   const weekdays = normalizeIntList(raw.weekdays, 0, 6)
   const lunarDays = normalizeIntList(raw.lunarDays, 1, 30)
@@ -496,7 +498,7 @@ function normalizeRecurringRule(raw = {}, index = 0) {
       : formatWeekdayText(weekdays)
   return {
     id,
-    sourceType: sourceType === 'market' ? 'market' : 'official_preview',
+    sourceType: 'official_preview',
     title: String(raw.title || '官方预告').trim() || '官方预告',
     ruleType: normalizedRuleType,
     weekdays,
@@ -598,12 +600,12 @@ function expandRecurringEvents({ rules = [], exceptions = [], startMs, endMs }) 
       const startTs = startTime.getTime()
       if (!Number.isFinite(startTs) || startTs < startMs || startTs >= endMs) return
 
-      const source = materialized.sourceType === 'market' ? 'market' : 'official_preview'
-      const recIdPrefix = source === 'market' ? `${materialized.id}_rec_market` : `${materialized.id}_rec_preview`
+      const source = 'official_preview'
+      const recIdPrefix = `${materialized.id}_rec_preview`
       result.push({
         source,
         _id: `${recIdPrefix}_${materialized.dayKey}`,
-        marketId: source === 'market' ? materialized.id : '',
+        marketId: '',
         title: materialized.title,
         categoryId: materialized.categoryId,
         categoryLabel: materialized.categoryLabel,
@@ -644,8 +646,8 @@ function mergeCalendarItemsDedup(items = []) {
   return Array.from(map.values())
 }
 
-function buildMarketRulesResponse(cityId = 'dali', recurringRules = []) {
-  const fixedRules = buildMarketRules(cityId).map((rule) => ({
+function buildMarketRulesResponse(cityId = 'dali') {
+  return buildMarketRules(cityId).map((rule) => ({
     id: rule.id,
     title: rule.title,
     scheduleText: rule.scheduleText,
@@ -655,40 +657,6 @@ function buildMarketRulesResponse(cityId = 'dali', recurringRules = []) {
     categoryId: rule.categoryId || 'culture',
     categoryLabel: rule.categoryLabel || '文化',
   }))
-
-  const recurringMarketRules = (Array.isArray(recurringRules) ? recurringRules : [])
-    .map((rule, idx) => normalizeRecurringRule(rule, idx))
-    .filter((rule) => rule && rule.sourceType === 'market')
-    .map((rule) => ({
-      id: rule.id,
-      title: rule.title || '固定集市',
-      scheduleText: rule.scheduleText || '按公告执行',
-      location: rule.location || {},
-      note: rule.note || '无需报名，可直接前往',
-      launchHint: rule.launchHint || '一起去逛逛',
-      categoryId: rule.categoryId || 'culture',
-      categoryLabel: rule.categoryLabel || '文化',
-    }))
-
-  const byId = {}
-  const order = []
-  fixedRules.forEach((rule) => {
-    byId[rule.id] = { ...rule }
-    order.push(rule.id)
-  })
-  recurringMarketRules.forEach((rule) => {
-    if (!byId[rule.id]) {
-      order.push(rule.id)
-      byId[rule.id] = { ...rule }
-      return
-    }
-    byId[rule.id] = {
-      ...byId[rule.id],
-      ...rule,
-    }
-  })
-
-  return order.map((id) => byId[id]).filter(Boolean)
 }
 
 function expandMarketEvents({ cityId = 'dali', startMs, endMs }) {
@@ -926,7 +894,7 @@ exports.main = async (event = {}) => {
     days: range.days,
     mode: range.mode,
     monthMeta,
-    marketRules: buildMarketRulesResponse(cityId, recurringRules),
+    marketRules: buildMarketRulesResponse(cityId),
     calendarDays,
     totalItems: merged.length,
     recurringMeta: {

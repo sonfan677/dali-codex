@@ -231,7 +231,7 @@ export default {
     monthGrid() {
       if (!this.monthYear || !this.month) return []
       const totalDays = getChinaMonthDays(this.monthYear, this.month)
-      const firstWeekday = new Date(chinaDateToMs(this.monthYear, this.month, 1, 0, 0)).getUTCDay()
+      const firstWeekday = new Date(Date.UTC(this.monthYear, this.month - 1, 1, 0, 0, 0, 0)).getUTCDay()
       const cells = []
       for (let i = 0; i < firstWeekday; i += 1) {
         cells.push({ key: `empty_${i}`, isPlaceholder: true })
