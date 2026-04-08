@@ -48,9 +48,199 @@ const LEGACY_CATEGORY_ID_MAP = {
   travel: 'outdoor',
 }
 
+const SCENE_LABEL_MAP = {
+  local_explore: '在地探索',
+  casual_gathering: '轻松聚会',
+  social_networking: '交友社交',
+  learning_sharing: '学习分享',
+  workshop_experience: '体验工作坊',
+  music_performance: '音乐演出',
+  market_popups: '市集摆摊',
+  outdoor_nature: '户外活动',
+  family_pet: '亲子宠物',
+  festival_theme: '节庆主题',
+}
+
+const TYPE_OPTIONS_BY_SCENE = {
+  local_explore: [
+    { id: 'hotspot_checkin', name: '热门点位打卡', categoryId: 'photo' },
+    { id: 'city_walk', name: '城市漫游', categoryId: 'culture' },
+    { id: 'village_walk', name: '村落探索', categoryId: 'culture' },
+    { id: 'erhai_route', name: '洱海路线活动', categoryId: 'outdoor' },
+    { id: 'cafe_hopping', name: '探店串联', categoryId: 'food' },
+    { id: 'photo_walk', name: '旅拍互拍', categoryId: 'photo' },
+    { id: 'museum_gallery', name: '展馆打卡', categoryId: 'culture' },
+    { id: 'market_tour', name: '市集逛游', categoryId: 'culture' },
+  ],
+  casual_gathering: [
+    { id: 'movie_night', name: '观影会', categoryId: 'culture' },
+    { id: 'board_game', name: '桌游局', categoryId: 'game' },
+    { id: 'party_game', name: '游戏局', categoryId: 'game' },
+    { id: 'meal_gathering', name: '饭局聚会', categoryId: 'food' },
+    { id: 'bar_chat', name: '夜聊小聚', categoryId: 'social' },
+    { id: 'coffee_chat', name: '咖啡闲聊', categoryId: 'social' },
+    { id: 'newcomer_mixer', name: '新人破冰局', categoryId: 'social' },
+    { id: 'free_talk', name: '主题闲聊局', categoryId: 'social' },
+  ],
+  social_networking: [
+    { id: 'friend_making', name: '交友局', categoryId: 'social' },
+    { id: 'dating_event', name: '单身交友', categoryId: 'social' },
+    { id: 'entrepreneur_meetup', name: '创业者交流会', categoryId: 'social' },
+    { id: 'industry_mixer', name: '行业交流会', categoryId: 'social' },
+    { id: 'social_wine', name: '社交酒会', categoryId: 'social' },
+    { id: 'resource_matching', name: '资源对接会', categoryId: 'social' },
+    { id: 'private_circle', name: '圈层私享会', categoryId: 'social' },
+    { id: 'host_meetup', name: '主理人交流会', categoryId: 'social' },
+  ],
+  learning_sharing: [
+    { id: 'public_class', name: '公开课', categoryId: 'culture' },
+    { id: 'lecture', name: '讲座', categoryId: 'culture' },
+    { id: 'industry_sharing', name: '行业分享会', categoryId: 'culture' },
+    { id: 'salon', name: '主题沙龙', categoryId: 'culture' },
+    { id: 'roundtable', name: '圆桌对谈', categoryId: 'culture' },
+    { id: 'book_club', name: '读书会', categoryId: 'culture' },
+    { id: 'language_exchange', name: '语言交换', categoryId: 'social' },
+    { id: 'career_growth', name: '职业成长分享', categoryId: 'culture' },
+  ],
+  workshop_experience: [
+    { id: 'trial_class', name: '免费体验课', categoryId: 'culture' },
+    { id: 'craft_workshop', name: '手作工作坊', categoryId: 'culture' },
+    { id: 'coffee_workshop', name: '咖啡体验', categoryId: 'food' },
+    { id: 'tea_workshop', name: '茶体验', categoryId: 'food' },
+    { id: 'art_workshop', name: '绘画/写作/摄影', categoryId: 'photo' },
+    { id: 'healing_session', name: '疗愈体验', categoryId: 'wellness' },
+    { id: 'movement_session', name: '瑜伽/冥想/身心活动', categoryId: 'wellness' },
+    { id: 'heritage_workshop', name: '非遗体验', categoryId: 'culture' },
+  ],
+  music_performance: [
+    { id: 'live_music', name: '音乐演出', categoryId: 'music' },
+    { id: 'open_mic', name: '开放麦', categoryId: 'music' },
+    { id: 'dj_party', name: 'DJ/派对活动', categoryId: 'music' },
+    { id: 'standup_show', name: '脱口秀', categoryId: 'culture' },
+    { id: 'improv_theater', name: '即兴戏剧', categoryId: 'culture' },
+    { id: 'poetry_night', name: '诗歌夜', categoryId: 'culture' },
+    { id: 'screening_event', name: '影像放映', categoryId: 'culture' },
+    { id: 'art_showcase', name: '艺术展演', categoryId: 'culture' },
+  ],
+  market_popups: [
+    { id: 'creative_market', name: '文创市集', categoryId: 'culture' },
+    { id: 'food_market', name: '美食市集', categoryId: 'food' },
+    { id: 'coffee_market', name: '咖啡市集', categoryId: 'food' },
+    { id: 'flea_market', name: '二手闲置', categoryId: 'culture' },
+    { id: 'swap_market', name: '交换活动', categoryId: 'culture' },
+    { id: 'brand_popup', name: '品牌快闪', categoryId: 'culture' },
+    { id: 'trial_tasting', name: '试吃试用', categoryId: 'food' },
+    { id: 'cohost_market', name: '联名市集', categoryId: 'culture' },
+  ],
+  outdoor_nature: [
+    { id: 'hiking', name: '徒步', categoryId: 'outdoor' },
+    { id: 'cycling', name: '骑行', categoryId: 'cycling' },
+    { id: 'camping', name: '露营', categoryId: 'outdoor' },
+    { id: 'water_sport', name: '水上活动', categoryId: 'outdoor' },
+    { id: 'farm_experience', name: '农场体验', categoryId: 'outdoor' },
+    { id: 'stargazing', name: '观星活动', categoryId: 'outdoor' },
+    { id: 'trail_walk', name: '自然轻徒步', categoryId: 'outdoor' },
+    { id: 'outdoor_photo', name: '户外摄影', categoryId: 'photo' },
+  ],
+  family_pet: [
+    { id: 'parent_child', name: '亲子活动', categoryId: 'social' },
+    { id: 'family_day', name: '家庭活动', categoryId: 'social' },
+    { id: 'children_workshop', name: '儿童手作', categoryId: 'culture' },
+    { id: 'nature_education', name: '自然教育', categoryId: 'outdoor' },
+    { id: 'pet_meetup', name: '宠物社交', categoryId: 'social' },
+    { id: 'pet_walk', name: '遛宠活动', categoryId: 'outdoor' },
+    { id: 'pet_friendly_market', name: '宠物友好市集', categoryId: 'culture' },
+  ],
+  festival_theme: [
+    { id: 'march_street_theme', name: '三月街主题', categoryId: 'culture' },
+    { id: 'torch_festival_theme', name: '火把节主题', categoryId: 'culture' },
+    { id: 'bai_folk_theme', name: '白族民俗主题', categoryId: 'culture' },
+    { id: 'festival_holiday', name: '节日限定活动', categoryId: 'culture' },
+    { id: 'seasonal_theme', name: '季节主题活动', categoryId: 'culture' },
+    { id: 'new_year_theme', name: '跨年主题', categoryId: 'culture' },
+    { id: 'valentine_theme', name: '七夕/情人节主题', categoryId: 'social' },
+    { id: 'heritage_theme', name: '非遗文化主题', categoryId: 'culture' },
+  ],
+}
+
+const CATEGORY_TO_SCENE_TYPE = {
+  sport: { sceneId: 'outdoor_nature', typeId: 'trail_walk' },
+  cycling: { sceneId: 'outdoor_nature', typeId: 'cycling' },
+  outdoor: { sceneId: 'outdoor_nature', typeId: 'hiking' },
+  music: { sceneId: 'music_performance', typeId: 'live_music' },
+  game: { sceneId: 'casual_gathering', typeId: 'board_game' },
+  culture: { sceneId: 'learning_sharing', typeId: 'salon' },
+  food: { sceneId: 'casual_gathering', typeId: 'meal_gathering' },
+  photo: { sceneId: 'local_explore', typeId: 'photo_walk' },
+  wellness: { sceneId: 'workshop_experience', typeId: 'movement_session' },
+  social: { sceneId: 'social_networking', typeId: 'friend_making' },
+  other: { sceneId: 'casual_gathering', typeId: 'free_talk' },
+}
+
+const THEME_ID_SET = new Set([
+  'dali_local_life', 'erhai_sunset', 'newcomer_dali', 'digital_nomad',
+  'march_street', 'torch_festival', 'bai_culture', 'intangible_heritage',
+  'coffee_lifestyle', 'healing_retreat', 'summer_holiday', 'national_day',
+  'new_year', 'valentine',
+])
+
 function normalizeCategoryId(categoryId = '') {
   const safe = String(categoryId || '').trim().toLowerCase()
   return LEGACY_CATEGORY_ID_MAP[safe] || safe || 'other'
+}
+
+function normalizeSceneId(sceneId = '') {
+  const safe = String(sceneId || '').trim()
+  return SCENE_LABEL_MAP[safe] ? safe : ''
+}
+
+function getTypeDef(sceneId = '', typeId = '') {
+  const list = TYPE_OPTIONS_BY_SCENE[sceneId] || []
+  const safeTypeId = String(typeId || '').trim()
+  if (!safeTypeId) return list[0] || null
+  return list.find((item) => item.id === safeTypeId) || null
+}
+
+function resolveSceneTypeForPublish({ sceneId = '', typeId = '', categoryId = '' } = {}) {
+  const rawSceneId = String(sceneId || '').trim()
+  const safeSceneId = normalizeSceneId(rawSceneId)
+  if (rawSceneId && !safeSceneId) {
+    return { error: 'INVALID_SCENE' }
+  }
+
+  if (safeSceneId) {
+    const typeDef = getTypeDef(safeSceneId, typeId)
+    if (!typeDef || !String(typeId || '').trim()) return { error: 'INVALID_TYPE' }
+    return {
+      sceneId: safeSceneId,
+      sceneName: SCENE_LABEL_MAP[safeSceneId] || '未分类场景',
+      typeId: typeDef.id,
+      typeName: typeDef.name || '未分类',
+      categoryId: normalizeCategoryId(typeDef.categoryId || 'other'),
+    }
+  }
+
+  const normalizedCategoryId = normalizeCategoryId(categoryId || 'other')
+  const fallback = CATEGORY_TO_SCENE_TYPE[normalizedCategoryId] || CATEGORY_TO_SCENE_TYPE.other
+  const fallbackSceneId = fallback.sceneId
+  const fallbackTypeDef = getTypeDef(fallbackSceneId, fallback.typeId)
+  return {
+    sceneId: fallbackSceneId,
+    sceneName: SCENE_LABEL_MAP[fallbackSceneId] || '未分类场景',
+    typeId: fallbackTypeDef?.id || fallback.typeId,
+    typeName: fallbackTypeDef?.name || '未分类',
+    categoryId: normalizeCategoryId(fallbackTypeDef?.categoryId || normalizedCategoryId || 'other'),
+  }
+}
+
+function normalizeThemeIds(themeIds = [], max = 3) {
+  const unique = []
+  ;(Array.isArray(themeIds) ? themeIds : []).forEach((item) => {
+    const id = String(item || '').trim()
+    if (!id || !THEME_ID_SET.has(id) || unique.includes(id)) return
+    unique.push(id)
+  })
+  return unique.slice(0, Math.max(0, Number(max) || 3))
 }
 
 // 大理白族自治州发布范围（近似地理围栏，后续可改为配置化 polygon）
@@ -445,6 +635,11 @@ exports.main = async (event, context) => {
     categoryId = 'other',
     categoryLabel = '',
     customCategoryLabel = '',
+    sceneId = '',
+    sceneName = '',
+    typeId = '',
+    typeName = '',
+    themeIds = [],
     lat,
     lng,
     address = '',
@@ -462,8 +657,31 @@ exports.main = async (event, context) => {
   const finalCityId = cityConfig.cityId
   const latNum = Number(lat)
   const lngNum = Number(lng)
-  const finalCategoryId = normalizeCategoryId(categoryId || 'other')
+  const sceneType = resolveSceneTypeForPublish({ sceneId, typeId, categoryId })
+  if (sceneType?.error === 'INVALID_SCENE') {
+    return { success: false, error: 'INVALID_SCENE', message: '活动场景不合法' }
+  }
+  if (sceneType?.error === 'INVALID_TYPE') {
+    return { success: false, error: 'INVALID_TYPE', message: '活动形式不合法' }
+  }
+  const finalSceneId = String(sceneType?.sceneId || '').trim()
+  const finalSceneName = String(sceneType?.sceneName || sceneName || '').trim()
+  const finalTypeId = String(sceneType?.typeId || '').trim()
+  const finalTypeName = String(sceneType?.typeName || typeName || '').trim()
+  const finalCategoryId = normalizeCategoryId(sceneType?.categoryId || categoryId || 'other')
   const normalizedCustomCategoryLabel = normalizeCustomCategoryLabel(customCategoryLabel)
+  const rawThemeIds = Array.isArray(themeIds) ? themeIds : []
+  const hasInvalidTheme = rawThemeIds.some((item) => {
+    const id = String(item || '').trim()
+    return !!id && !THEME_ID_SET.has(id)
+  })
+  if (hasInvalidTheme) {
+    return { success: false, error: 'INVALID_THEME', message: '活动主题不合法' }
+  }
+  const finalThemeIds = normalizeThemeIds(rawThemeIds, 3)
+  if (finalSceneId === 'festival_theme' && finalThemeIds.length === 0) {
+    return { success: false, error: 'THEME_REQUIRED', message: '节庆主题活动至少选择1个主题' }
+  }
 
   // 2. 参数校验
   if (!title || title.trim().length === 0) {
@@ -544,6 +762,11 @@ exports.main = async (event, context) => {
       _openid: OPENID,
       title: title.trim(),
       description: description.trim(),
+      sceneId: finalSceneId,
+      sceneName: finalSceneName,
+      typeId: finalTypeId,
+      typeName: finalTypeName,
+      themeIds: finalThemeIds,
       categoryId: finalCategoryId,
       categoryLabel: finalCategoryLabel,
       categoryCustomLabel: finalCategoryId === 'other' ? normalizedCustomCategoryLabel : '',
@@ -652,6 +875,10 @@ exports.main = async (event, context) => {
     success: true,
     activityId: result._id,
     cityId: finalCityId,
+    sceneId: finalSceneId,
+    sceneName: finalSceneName,
+    typeId: finalTypeId,
+    typeName: finalTypeName,
     cityConfigVersion: cityConfig.version,
     serverTimestamp: Date.now(),
   }

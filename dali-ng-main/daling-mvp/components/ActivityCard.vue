@@ -40,7 +40,7 @@
 
 <script>
 import { getDistance, distanceToText, getTimeStatus, formationTimeLeft } from '@/utils/distance.js'
-import { getCategoryLabel } from '@/utils/activityMeta.js'
+import { getCategoryLabel, getSceneLabel } from '@/utils/activityMeta.js'
 
 export default {
   name: 'ActivityCard',
@@ -127,6 +127,9 @@ export default {
     },
 
     categoryLabel() {
+      if (this.activity?.typeName) return this.activity.typeName
+      if (this.activity?.sceneName) return this.activity.sceneName
+      if (this.activity?.sceneId) return getSceneLabel(this.activity.sceneId)
       if (this.activity?.categoryLabel) return this.activity.categoryLabel
       return getCategoryLabel(this.activity?.categoryId || 'other')
     },

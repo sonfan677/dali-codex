@@ -42,9 +42,164 @@ const LEGACY_CATEGORY_ID_MAP = {
   travel: 'outdoor',
 }
 
+const SCENE_LABEL_MAP = {
+  local_explore: '在地探索',
+  casual_gathering: '轻松聚会',
+  social_networking: '交友社交',
+  learning_sharing: '学习分享',
+  workshop_experience: '体验工作坊',
+  music_performance: '音乐演出',
+  market_popups: '市集摆摊',
+  outdoor_nature: '户外活动',
+  family_pet: '亲子宠物',
+  festival_theme: '节庆主题',
+}
+
+const TYPE_OPTIONS_BY_SCENE = {
+  local_explore: [
+    { id: 'hotspot_checkin', name: '热门点位打卡' },
+    { id: 'city_walk', name: '城市漫游' },
+    { id: 'village_walk', name: '村落探索' },
+    { id: 'erhai_route', name: '洱海路线活动' },
+    { id: 'cafe_hopping', name: '探店串联' },
+    { id: 'photo_walk', name: '旅拍互拍' },
+    { id: 'museum_gallery', name: '展馆打卡' },
+    { id: 'market_tour', name: '市集逛游' },
+  ],
+  casual_gathering: [
+    { id: 'movie_night', name: '观影会' },
+    { id: 'board_game', name: '桌游局' },
+    { id: 'party_game', name: '游戏局' },
+    { id: 'meal_gathering', name: '饭局聚会' },
+    { id: 'bar_chat', name: '夜聊小聚' },
+    { id: 'coffee_chat', name: '咖啡闲聊' },
+    { id: 'newcomer_mixer', name: '新人破冰局' },
+    { id: 'free_talk', name: '主题闲聊局' },
+  ],
+  social_networking: [
+    { id: 'friend_making', name: '交友局' },
+    { id: 'dating_event', name: '单身交友' },
+    { id: 'entrepreneur_meetup', name: '创业者交流会' },
+    { id: 'industry_mixer', name: '行业交流会' },
+    { id: 'social_wine', name: '社交酒会' },
+    { id: 'resource_matching', name: '资源对接会' },
+    { id: 'private_circle', name: '圈层私享会' },
+    { id: 'host_meetup', name: '主理人交流会' },
+  ],
+  learning_sharing: [
+    { id: 'public_class', name: '公开课' },
+    { id: 'lecture', name: '讲座' },
+    { id: 'industry_sharing', name: '行业分享会' },
+    { id: 'salon', name: '主题沙龙' },
+    { id: 'roundtable', name: '圆桌对谈' },
+    { id: 'book_club', name: '读书会' },
+    { id: 'language_exchange', name: '语言交换' },
+    { id: 'career_growth', name: '职业成长分享' },
+  ],
+  workshop_experience: [
+    { id: 'trial_class', name: '免费体验课' },
+    { id: 'craft_workshop', name: '手作工作坊' },
+    { id: 'coffee_workshop', name: '咖啡体验' },
+    { id: 'tea_workshop', name: '茶体验' },
+    { id: 'art_workshop', name: '绘画/写作/摄影' },
+    { id: 'healing_session', name: '疗愈体验' },
+    { id: 'movement_session', name: '瑜伽/冥想/身心活动' },
+    { id: 'heritage_workshop', name: '非遗体验' },
+  ],
+  music_performance: [
+    { id: 'live_music', name: '音乐演出' },
+    { id: 'open_mic', name: '开放麦' },
+    { id: 'dj_party', name: 'DJ/派对活动' },
+    { id: 'standup_show', name: '脱口秀' },
+    { id: 'improv_theater', name: '即兴戏剧' },
+    { id: 'poetry_night', name: '诗歌夜' },
+    { id: 'screening_event', name: '影像放映' },
+    { id: 'art_showcase', name: '艺术展演' },
+  ],
+  market_popups: [
+    { id: 'creative_market', name: '文创市集' },
+    { id: 'food_market', name: '美食市集' },
+    { id: 'coffee_market', name: '咖啡市集' },
+    { id: 'flea_market', name: '二手闲置' },
+    { id: 'swap_market', name: '交换活动' },
+    { id: 'brand_popup', name: '品牌快闪' },
+    { id: 'trial_tasting', name: '试吃试用' },
+    { id: 'cohost_market', name: '联名市集' },
+  ],
+  outdoor_nature: [
+    { id: 'hiking', name: '徒步' },
+    { id: 'cycling', name: '骑行' },
+    { id: 'camping', name: '露营' },
+    { id: 'water_sport', name: '水上活动' },
+    { id: 'farm_experience', name: '农场体验' },
+    { id: 'stargazing', name: '观星活动' },
+    { id: 'trail_walk', name: '自然轻徒步' },
+    { id: 'outdoor_photo', name: '户外摄影' },
+  ],
+  family_pet: [
+    { id: 'parent_child', name: '亲子活动' },
+    { id: 'family_day', name: '家庭活动' },
+    { id: 'children_workshop', name: '儿童手作' },
+    { id: 'nature_education', name: '自然教育' },
+    { id: 'pet_meetup', name: '宠物社交' },
+    { id: 'pet_walk', name: '遛宠活动' },
+    { id: 'pet_friendly_market', name: '宠物友好市集' },
+  ],
+  festival_theme: [
+    { id: 'march_street_theme', name: '三月街主题' },
+    { id: 'torch_festival_theme', name: '火把节主题' },
+    { id: 'bai_folk_theme', name: '白族民俗主题' },
+    { id: 'festival_holiday', name: '节日限定活动' },
+    { id: 'seasonal_theme', name: '季节主题活动' },
+    { id: 'new_year_theme', name: '跨年主题' },
+    { id: 'valentine_theme', name: '七夕/情人节主题' },
+    { id: 'heritage_theme', name: '非遗文化主题' },
+  ],
+}
+
+const CATEGORY_TO_SCENE_TYPE = {
+  sport: { sceneId: 'outdoor_nature', typeId: 'trail_walk' },
+  cycling: { sceneId: 'outdoor_nature', typeId: 'cycling' },
+  outdoor: { sceneId: 'outdoor_nature', typeId: 'hiking' },
+  music: { sceneId: 'music_performance', typeId: 'live_music' },
+  game: { sceneId: 'casual_gathering', typeId: 'board_game' },
+  culture: { sceneId: 'learning_sharing', typeId: 'salon' },
+  food: { sceneId: 'casual_gathering', typeId: 'meal_gathering' },
+  photo: { sceneId: 'local_explore', typeId: 'photo_walk' },
+  wellness: { sceneId: 'workshop_experience', typeId: 'movement_session' },
+  social: { sceneId: 'social_networking', typeId: 'friend_making' },
+  other: { sceneId: 'casual_gathering', typeId: 'free_talk' },
+}
+
 function normalizeCategoryId(categoryId = '') {
   const safe = String(categoryId || '').trim().toLowerCase()
   return LEGACY_CATEGORY_ID_MAP[safe] || safe || 'other'
+}
+
+function normalizeSceneId(sceneId = '') {
+  const safe = String(sceneId || '').trim()
+  return SCENE_LABEL_MAP[safe] ? safe : ''
+}
+
+function resolveTypeForScene(sceneId = '', typeId = '') {
+  const list = TYPE_OPTIONS_BY_SCENE[sceneId] || []
+  const safeTypeId = String(typeId || '').trim()
+  if (!safeTypeId) return list[0] || null
+  return list.find((item) => item.id === safeTypeId) || null
+}
+
+function resolveSceneTypeFromLegacyFields(input = {}) {
+  const sceneIdFromInput = normalizeSceneId(input?.sceneId)
+  const normalizedCategoryId = normalizeCategoryId(input?.categoryId || 'other')
+  const fallback = CATEGORY_TO_SCENE_TYPE[normalizedCategoryId] || CATEGORY_TO_SCENE_TYPE.other
+  const finalSceneId = sceneIdFromInput || fallback.sceneId
+  const resolvedType = resolveTypeForScene(finalSceneId, input?.typeId) || resolveTypeForScene(finalSceneId, fallback.typeId)
+  return {
+    sceneId: finalSceneId,
+    sceneName: SCENE_LABEL_MAP[finalSceneId] || '未分类场景',
+    typeId: String(resolvedType?.id || ''),
+    typeName: String(resolvedType?.name || '未分类'),
+  }
 }
 
 function normalizeNumber(value, fallback) {
@@ -254,6 +409,7 @@ exports.main = async (event, context) => {
   const {
     radius,
     keyword = '',
+    sceneId = 'all',
     categoryId = 'all',
     queryMode = 'nearby',
     sortBy = 'default',
@@ -273,6 +429,9 @@ exports.main = async (event, context) => {
   const normalizedCategoryId = String(categoryId || 'all').toLowerCase() === 'all'
     ? 'all'
     : normalizeCategoryId(categoryId)
+  const normalizedSceneId = String(sceneId || 'all').toLowerCase() === 'all'
+    ? 'all'
+    : (normalizeSceneId(sceneId) || 'all')
   const now = new Date()
   const safeLimit = Math.max(20, Math.min(1000, Number(limit) || 200))
 
@@ -295,19 +454,36 @@ exports.main = async (event, context) => {
     .get()
 
   const nowMs = now.getTime()
+  const isSceneDirectMatch = normalizedSceneId !== 'all'
   const isCategoryDirectMatch = normalizedCategoryId !== 'all' && !!CATEGORY_MAP[normalizedCategoryId]
 
   // 在应用层过滤时间（兼容 Date对象、时间戳数字、字符串 三种格式）
   const mappedList = data
-    .map(a => ({
-      ...a,
-      _distance: Number.isFinite(Number(a?.location?.lat)) && Number.isFinite(Number(a?.location?.lng))
-        ? getDistance(centerLat, centerLng, Number(a.location.lat), Number(a.location.lng))
-        : null,
-      _endMs: new Date(a.endTime).getTime(),   // 统一转成毫秒
-      _startMs: new Date(a.startTime).getTime(),
-      _statusByTime: getTimeStatus(new Date(a.startTime).getTime(), new Date(a.endTime).getTime(), nowMs, cityConfig),
-    }))
+    .map((a) => {
+      const normalizedItemCategoryId = normalizeCategoryId(a.categoryId || 'other')
+      const sceneType = resolveSceneTypeFromLegacyFields({
+        sceneId: a.sceneId,
+        typeId: a.typeId,
+        categoryId: normalizedItemCategoryId,
+      })
+      const finalSceneId = sceneType.sceneId
+      const finalTypeId = sceneType.typeId
+      return {
+        ...a,
+        categoryId: normalizedItemCategoryId,
+        categoryLabel: CATEGORY_MAP[normalizedItemCategoryId] || '其他',
+        sceneId: finalSceneId,
+        sceneName: a.sceneName || sceneType.sceneName || '未分类场景',
+        typeId: finalTypeId,
+        typeName: a.typeName || sceneType.typeName || '未分类',
+        _distance: Number.isFinite(Number(a?.location?.lat)) && Number.isFinite(Number(a?.location?.lng))
+          ? getDistance(centerLat, centerLng, Number(a.location.lat), Number(a.location.lng))
+          : null,
+        _endMs: new Date(a.endTime).getTime(),
+        _startMs: new Date(a.startTime).getTime(),
+        _statusByTime: getTimeStatus(new Date(a.startTime).getTime(), new Date(a.endTime).getTime(), nowMs, cityConfig),
+      }
+    })
     .filter(a => {
       // 过滤：未结束 + 在用户选择半径内
       if (a._endMs <= nowMs) return false
@@ -315,8 +491,10 @@ exports.main = async (event, context) => {
       return Number.isFinite(Number(a._distance)) && Number(a._distance) <= safeRadius
     })
     .filter((a) => {
-      const itemCategoryId = normalizeCategoryId(a.categoryId || 'other')
-      if (isCategoryDirectMatch && itemCategoryId !== normalizedCategoryId) {
+      if (isSceneDirectMatch && String(a.sceneId || '') !== normalizedSceneId) {
+        return false
+      }
+      if (!isSceneDirectMatch && isCategoryDirectMatch && normalizeCategoryId(a.categoryId || 'other') !== normalizedCategoryId) {
         return false
       }
       if (!keywordTokens.length) return true
@@ -325,6 +503,8 @@ exports.main = async (event, context) => {
         a.description,
         a.location?.address,
         a.publisherNickname,
+        a.sceneName,
+        a.typeName,
         a.categoryLabel,
       ]
         .filter(Boolean)
@@ -377,6 +557,10 @@ exports.main = async (event, context) => {
         ...rest,
         categoryId: normalizeCategoryId(rest.categoryId || 'other'),
         categoryLabel: CATEGORY_MAP[normalizeCategoryId(rest.categoryId || 'other')] || '其他',
+        sceneId: rest.sceneId,
+        sceneName: rest.sceneName,
+        typeId: rest.typeId,
+        typeName: rest.typeName,
         trustProfile,
         timeStatus: _statusByTime,
         timeWeight: getTimeWeight(_statusByTime),
@@ -390,6 +574,7 @@ exports.main = async (event, context) => {
     query: {
       mode: normalizedQueryMode,
       radius: safeRadius,
+      sceneId: normalizedSceneId,
       categoryId: normalizedCategoryId,
       keyword: normalizedKeyword,
       sortBy: normalizedSortBy,

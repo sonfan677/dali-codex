@@ -124,10 +124,13 @@ import { callCloud } from '@/utils/cloud.js'
 import ActivityCard from '@/components/ActivityCard.vue'
 import PrivacyPopup from '@/components/PrivacyPopup.vue'
 import {
-  DISCOVERY_CATEGORY_FILTER_OPTIONS,
+  DISCOVERY_SCENE_FILTER_OPTIONS,
   DISTANCE_FILTER_OPTIONS,
   getCategoryLabel,
+  getSceneLabel,
   normalizeCategoryId,
+  normalizeSceneId,
+  resolveSceneTypeFromLegacyFields,
 } from '@/utils/activityMeta.js'
 
 const DEFAULT_CENTER = {
@@ -135,17 +138,17 @@ const DEFAULT_CENTER = {
   lng: 100.2679,
 }
 const ONBOARDING_DEMO_SEEN_PREFIX = 'dali_onboarding_demo_seen_'
-const COMMON_CATEGORY_ID_SET = new Set([
-  'sport',
-  'cycling',
-  'outdoor',
-  'music',
-  'game',
-  'culture',
-  'food',
-  'photo',
-  'wellness',
-  'social',
+const COMMON_SCENE_ID_SET = new Set([
+  'local_explore',
+  'casual_gathering',
+  'social_networking',
+  'learning_sharing',
+  'workshop_experience',
+  'music_performance',
+  'market_popups',
+  'outdoor_nature',
+  'family_pet',
+  'festival_theme',
 ])
 
 const MOCK_ACTIVITIES = [
@@ -229,7 +232,7 @@ export default {
       adminCheckedAt: 0,
       lastQueryMode: 'all', // all | nearby | mock
       onboardingMockActive: false,
-      categoryFilterOptions: DISCOVERY_CATEGORY_FILTER_OPTIONS,
+      categoryFilterOptions: DISCOVERY_SCENE_FILTER_OPTIONS,
       distanceFilterOptions: DISTANCE_FILTER_OPTIONS,
       searchKeyword: '',
       appliedKeyword: '',
@@ -327,9 +330,9 @@ export default {
     },
 
     categoryFilterLabel() {
-      if (this.categoryFilterId === 'all') return '分类'
+      if (this.categoryFilterId === 'all') return '场景'
       const item = this.categoryFilterOptions.find((opt) => opt.id === this.categoryFilterId)
-      return item?.label || '分类'
+      return item?.label || '场景'
     },
 
     distanceFilterLabel() {
@@ -584,13 +587,13 @@ export default {
     },
 
     isRealCategoryFilter(categoryId = '') {
-      return !!COMMON_CATEGORY_ID_SET.has(String(categoryId || ''))
+      return !!COMMON_SCENE_ID_SET.has(String(categoryId || ''))
     },
 
     buildQueryParams({ mode, lat, lng }) {
       const scope = this.getDistanceScopeConfig(mode)
       const useSearch = !!this.appliedKeyword
-      const queryCategoryId = (!useSearch && this.isRealCategoryFilter(this.categoryFilterId))
+      const querySceneId = (!useSearch && this.isRealCategoryFilter(this.categoryFilterId))
         ? this.categoryFilterId
         : 'all'
       const queryKeyword = useSearch ? this.appliedKeyword : ''
@@ -602,7 +605,8 @@ export default {
         queryMode: 'all',
         radius: Number(scope.radius || 5000),
         sortBy: scope.sortBy || 'default',
-        categoryId: queryCategoryId,
+        sceneId: querySceneId,
+        categoryId: 'all',
         keyword: queryKeyword,
         limit: 500,
       }
@@ -610,10 +614,20 @@ export default {
 
     normalizeActivityCategory(item) {
       const categoryId = normalizeCategoryId(item?.categoryId || 'other')
+      const sceneType = resolveSceneTypeFromLegacyFields({
+        sceneId: item?.sceneId,
+        typeId: item?.typeId,
+        categoryId,
+        title: item?.title,
+      })
       return {
         ...item,
         categoryId,
         categoryLabel: item?.categoryLabel || getCategoryLabel(categoryId),
+        sceneId: sceneType.sceneId,
+        sceneName: item?.sceneName || sceneType.sceneName || getSceneLabel(sceneType.sceneId),
+        typeId: item?.typeId || sceneType.typeId,
+        typeName: item?.typeName || sceneType.typeName || '未分类',
       }
     },
 
@@ -660,11 +674,11 @@ export default {
       }
       if (selected === 'other') {
         return list.filter((item) => {
-          const cid = String(item.categoryId || 'other')
-          return cid === 'other' || !COMMON_CATEGORY_ID_SET.has(cid)
+          const sid = String(item.sceneId || '')
+          return !sid || !COMMON_SCENE_ID_SET.has(sid)
         })
       }
-      return list.filter((item) => String(item.categoryId || 'other') === selected)
+      return list.filter((item) => String(item.sceneId || '') === selected)
     },
 
     applyDistanceFilter(list = []) {
@@ -838,7 +852,7 @@ export default {
     openCategoryFilter() {
       this.openFilterSelector({
         type: 'category',
-        title: '分类',
+        title: '场景',
         value: this.categoryFilterId,
         options: this.categoryFilterOptions,
       })

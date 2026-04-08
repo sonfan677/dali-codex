@@ -26,35 +26,55 @@
           />
         </view>
 
-        <!-- 分类 -->
+        <!-- 场景 -->
         <view class="field">
-          <text class="label">适用场景 *</text>
+          <text class="label">活动场景 *</text>
           <picker
             mode="selector"
-            :range="categoryPickerRange"
-            :value="categoryIndex"
-            @change="onCategoryChange"
+            :range="scenePickerRange"
+            :value="sceneIndex"
+            @change="onSceneChange"
           >
             <view class="picker-row">
-              <text class="picker-value">{{ categoryPickerRange[categoryIndex] }}</text>
+              <text class="picker-value">{{ scenePickerRange[sceneIndex] }}</text>
               <text class="arrow">›</text>
             </view>
           </picker>
-          <text class="hint">系统将自动归类为：{{ selectedCategoryLabel }}</text>
+          <text class="hint">你选择的是：{{ selectedSceneLabel }}</text>
         </view>
 
-        <view v-if="form.categoryId === 'other'" class="field">
-          <text class="label">其它分类说明 *</text>
-          <input
-            class="input"
-            v-model="form.customCategoryLabel"
-            placeholder="请填写具体分类（如：摄影、桌游教学）"
-            maxlength="20"
-          />
-          <text v-if="customCategoryDuplicateLabel" class="hint hint-error">
-            该分类与现有分类“{{ customCategoryDuplicateLabel }}”重复，请直接选择已有分类
-          </text>
-          <text v-else class="hint">发现页统一展示为“其它”，用于后台统计优化分类</text>
+        <!-- 类型 -->
+        <view class="field">
+          <text class="label">活动形式 *</text>
+          <picker
+            mode="selector"
+            :range="typePickerRange"
+            :value="typeIndex"
+            @change="onTypeChange"
+          >
+            <view class="picker-row">
+              <text class="picker-value">{{ typePickerRange[typeIndex] }}</text>
+              <text class="arrow">›</text>
+            </view>
+          </picker>
+          <text class="hint">系统标签映射：{{ selectedCategoryLabel }}</text>
+        </view>
+
+        <!-- 主题 -->
+        <view class="field">
+          <text class="label">活动主题（最多3个）</text>
+          <view class="theme-tags">
+            <view
+              v-for="theme in themeOptions"
+              :key="theme.id"
+              class="theme-tag"
+              :class="{ 'theme-tag--active': form.themeIds.includes(theme.id) }"
+              @tap="toggleTheme(theme.id)"
+            >
+              {{ theme.label }}
+            </view>
+          </view>
+          <text class="hint" v-if="form.sceneId === 'festival_theme'">节庆主题场景至少选择1个主题</text>
         </view>
 
         <!-- 地点 -->
@@ -212,7 +232,15 @@
 <script>
 import { callCloud } from '@/utils/cloud.js'
 import { useUserStore } from '@/stores/user.js'
-import { PUBLISH_CATEGORY_OPTIONS } from '@/utils/activityMeta.js'
+import {
+  ACTIVITY_THEME_OPTIONS,
+  PUBLISH_SCENE_OPTIONS,
+  getCategoryLabel,
+  getTypesByScene,
+  normalizeThemeIds,
+  resolveCategoryBySceneType,
+  resolveSceneTypeFromLegacyFields,
+} from '@/utils/activityMeta.js'
 
 function buildTimeRange() {
   const dates = []
@@ -244,6 +272,10 @@ export default {
     const { dates, hours, minutes } = buildTimeRange()
     const now = new Date()
     const defaultHour = now.getHours() + 1 >= 24 ? 0 : now.getHours() + 1
+    const defaultSceneId = PUBLISH_SCENE_OPTIONS[0].id
+    const defaultSceneLabel = PUBLISH_SCENE_OPTIONS[0].label
+    const defaultTypeOptions = getTypesByScene(defaultSceneId)
+    const defaultType = defaultTypeOptions[0] || { id: '', name: '' }
     return {
       submitting: false,
       showProfileDialog: false,
@@ -260,15 +292,20 @@ export default {
         address: '',
         startTimeStr: '',
         startTimeMs: 0,
-        categoryId: PUBLISH_CATEGORY_OPTIONS[0].id,
-        categoryLabel: PUBLISH_CATEGORY_OPTIONS[0].label,
-        customCategoryLabel: '',
+        sceneId: defaultSceneId,
+        sceneName: defaultSceneLabel,
+        typeId: defaultType.id,
+        typeName: defaultType.name,
+        themeIds: [],
         maxParticipants: null,
         isGroupFormation: false,
         minParticipants: 2,
       },
-      categoryOptions: PUBLISH_CATEGORY_OPTIONS,
-      categoryIndex: 0,
+      sceneOptions: PUBLISH_SCENE_OPTIONS,
+      sceneIndex: 0,
+      typeOptions: defaultTypeOptions,
+      typeIndex: 0,
+      themeOptions: ACTIVITY_THEME_OPTIONS,
       timeRangeData: { dates, hours, minutes },
       timeRange: [dates, hours, ['00', '15', '30', '45']],
       timeIndex: [0, defaultHour, 0],
@@ -285,41 +322,29 @@ export default {
   },
 
   computed: {
-    categoryPickerRange() {
-      return this.categoryOptions.map((item) => item.scene || item.label)
+    scenePickerRange() {
+      return this.sceneOptions.map((item) => item.label)
+    },
+
+    selectedSceneLabel() {
+      return String(this.form.sceneName || '未选择')
+    },
+
+    typePickerRange() {
+      const list = Array.isArray(this.typeOptions) ? this.typeOptions : []
+      if (!list.length) return ['请选择活动形式']
+      return list.map((item) => item.name)
     },
 
     selectedCategoryLabel() {
-      return String(this.form.categoryLabel || '其他')
+      const categoryId = resolveCategoryBySceneType(this.form.sceneId, this.form.typeId)
+      return getCategoryLabel(categoryId)
     },
 
     formationWindowHint() {
       const mins = this.formationWindowValues[this.formationWindowIndex]
       return `发布后${mins}分钟内未成团，会通知你决定是否继续`
     },
-
-    existingCategoryLabelMap() {
-      const map = {}
-      ;(this.categoryOptions || []).forEach((item) => {
-        const label = String(item?.label || '').trim()
-        if (!label) return
-        const key = this.normalizeCategoryText(label)
-        if (!key) return
-        if (!map[key]) map[key] = label
-      })
-      const otherKey = this.normalizeCategoryText('其它')
-      if (otherKey && !map[otherKey]) map[otherKey] = '其他'
-      return map
-    },
-
-    customCategoryDuplicateLabel() {
-      if (this.form.categoryId !== 'other') return ''
-      const value = String(this.form.customCategoryLabel || '').trim()
-      if (!value) return ''
-      const key = this.normalizeCategoryText(value)
-      if (!key) return ''
-      return this.existingCategoryLabelMap[key] || ''
-    }
   },
 
   onLoad(options = {}) {
@@ -357,12 +382,34 @@ export default {
       return `${m}月${d}日 ${h}:${min}`
     },
 
+    syncSceneAndType(sceneId = '', typeId = '') {
+      const safeSceneId = String(sceneId || '').trim() || String(this.sceneOptions?.[0]?.id || '')
+      const sceneIdx = this.sceneOptions.findIndex((item) => item.id === safeSceneId)
+      const finalSceneIndex = sceneIdx >= 0 ? sceneIdx : 0
+      const finalScene = this.sceneOptions[finalSceneIndex] || this.sceneOptions[0] || { id: '', label: '' }
+      const types = getTypesByScene(finalScene.id)
+      this.sceneIndex = finalSceneIndex
+      this.form.sceneId = finalScene.id
+      this.form.sceneName = finalScene.label
+      this.typeOptions = types
+
+      let nextTypeIndex = types.findIndex((item) => item.id === String(typeId || '').trim())
+      if (nextTypeIndex < 0) nextTypeIndex = 0
+      if (nextTypeIndex < 0) nextTypeIndex = 0
+      this.typeIndex = nextTypeIndex
+      const finalType = types[nextTypeIndex] || { id: '', name: '' }
+      this.form.typeId = finalType.id
+      this.form.typeName = finalType.name
+    },
+
     applyMarketPrefill(payload = {}, options = {}) {
       const showToast = options?.showToast !== false
       const title = String(payload?.title || '').trim()
       const description = String(payload?.description || '').trim()
       const address = String(payload?.address || '').trim()
       const categoryId = String(payload?.categoryId || '').trim().toLowerCase()
+      const sceneId = String(payload?.sceneId || '').trim()
+      const typeId = String(payload?.typeId || '').trim()
       const startTimeText = String(payload?.startTime || '').trim()
       const lockDate = payload?.lockDate === true || String(payload?.lockDate || '') === 'true'
       const marketId = String(payload?.marketId || '').trim()
@@ -392,18 +439,13 @@ export default {
         this.form.lng = lng
       }
 
-      if (categoryId) {
-        const hitIndex = this.categoryOptions.findIndex((item) => String(item.id || '') === categoryId)
-        if (hitIndex >= 0) {
-          this.categoryIndex = hitIndex
-          const selected = this.categoryOptions[hitIndex]
-          this.form.categoryId = selected.id
-          this.form.categoryLabel = selected.label
-          if (selected.id !== 'other') {
-            this.form.customCategoryLabel = ''
-          }
-        }
-      }
+      const mappedSceneType = resolveSceneTypeFromLegacyFields({
+        sceneId,
+        typeId,
+        categoryId,
+        title,
+      })
+      this.syncSceneAndType(mappedSceneType.sceneId, mappedSceneType.typeId)
 
       const startMs = new Date(startTimeText).getTime()
       if (Number.isFinite(startMs) && startMs > Date.now()) {
@@ -453,7 +495,7 @@ export default {
         payload = null
       }
       if (!payload || typeof payload !== 'object') return false
-      const hasUsefulField = ['title', 'description', 'address', 'categoryId', 'startTime', 'lat', 'lng']
+      const hasUsefulField = ['title', 'description', 'address', 'categoryId', 'sceneId', 'typeId', 'startTime', 'lat', 'lng']
         .some((k) => typeof payload[k] !== 'undefined' && payload[k] !== '')
       if (!hasUsefulField) return false
       try {
@@ -470,20 +512,14 @@ export default {
         description: this.safeDecodeURIComponent(options.description),
         address: this.safeDecodeURIComponent(options.address),
         categoryId: this.safeDecodeURIComponent(options.categoryId),
+        sceneId: this.safeDecodeURIComponent(options.sceneId),
+        typeId: this.safeDecodeURIComponent(options.typeId),
         startTime: this.safeDecodeURIComponent(options.startTime),
         marketId: this.safeDecodeURIComponent(options.marketId),
         marketTitle: this.safeDecodeURIComponent(options.marketTitle),
         lat: options.lat,
         lng: options.lng,
       }, { showToast: true })
-    },
-
-    normalizeCategoryText(value = '') {
-      return String(value || '')
-        .trim()
-        .toLowerCase()
-        .replace(/\s+/g, '')
-        .replace(/[·•・,，。!！?？:：;；、'"`~～\-—_（）()【】\[\]\/\\]/g, '')
     },
 
     // 成团开关切换时重置输入
@@ -504,15 +540,33 @@ export default {
       this.formationWindowIndex = Number(e.detail.value || 0)
     },
 
-    onCategoryChange(e) {
+    onSceneChange(e) {
       const idx = Number(e.detail.value || 0)
-      this.categoryIndex = idx
-      const selected = this.categoryOptions[idx] || this.categoryOptions[0]
-      this.form.categoryId = selected.id
-      this.form.categoryLabel = selected.label
-      if (selected.id !== 'other') {
-        this.form.customCategoryLabel = ''
+      const selected = this.sceneOptions[idx] || this.sceneOptions[0]
+      this.syncSceneAndType(selected?.id || '', '')
+      this.form.themeIds = []
+    },
+
+    onTypeChange(e) {
+      const idx = Number(e.detail.value || 0)
+      this.typeIndex = idx
+      const selected = this.typeOptions[idx] || this.typeOptions[0] || { id: '', name: '' }
+      this.form.typeId = selected.id
+      this.form.typeName = selected.name
+    },
+
+    toggleTheme(themeId = '') {
+      const id = String(themeId || '').trim()
+      if (!id) return
+      const current = Array.isArray(this.form.themeIds) ? [...this.form.themeIds] : []
+      const exists = current.includes(id)
+      let next = []
+      if (exists) {
+        next = current.filter((item) => item !== id)
+      } else {
+        next = [...current, id]
       }
+      this.form.themeIds = normalizeThemeIds(next, 3)
     },
 
     // 失焦时校验并格式化
@@ -780,12 +834,13 @@ _doChooseLocation() {
         uni.showToast({ title: '请选择开始时间', icon: 'none' })
         return
       }
-      if (this.form.categoryId === 'other' && !String(this.form.customCategoryLabel || '').trim()) {
-        uni.showToast({ title: '请选择“其它”时请填写具体分类', icon: 'none' })
+      if (!this.form.sceneId || !this.form.typeId) {
+        uni.showToast({ title: '请选择活动场景和活动形式', icon: 'none' })
         return
       }
-      if (this.form.categoryId === 'other' && this.customCategoryDuplicateLabel) {
-        uni.showToast({ title: `分类已存在：${this.customCategoryDuplicateLabel}`, icon: 'none' })
+      this.form.themeIds = normalizeThemeIds(this.form.themeIds, 3)
+      if (this.form.sceneId === 'festival_theme' && this.form.themeIds.length === 0) {
+        uni.showToast({ title: '节庆主题活动至少选择1个主题', icon: 'none' })
         return
       }
       if (this.form.startTimeMs <= Date.now()) {
@@ -799,14 +854,18 @@ _doChooseLocation() {
 
       this.submitting = true
       try {
+        const finalCategoryId = resolveCategoryBySceneType(this.form.sceneId, this.form.typeId)
         const res = await callCloud('publishActivity', {
           title:            this.form.title.trim(),
           description:      this.form.description.trim(),
-          categoryId:       this.form.categoryId,
-          categoryLabel:    this.form.categoryLabel,
-          customCategoryLabel: this.form.categoryId === 'other'
-            ? String(this.form.customCategoryLabel || '').trim()
-            : '',
+          sceneId:          this.form.sceneId,
+          sceneName:        this.form.sceneName,
+          typeId:           this.form.typeId,
+          typeName:         this.form.typeName,
+          themeIds:         this.form.themeIds,
+          categoryId:       finalCategoryId,
+          categoryLabel:    getCategoryLabel(finalCategoryId),
+          customCategoryLabel: '',
           lat:              this.form.lat,
           lng:              this.form.lng,
           address:          this.form.address,
@@ -845,9 +904,11 @@ _doChooseLocation() {
             NOT_VERIFIED:  '请先完成身份核验',
             IDENTITY_CHECK_REQUIRED: '当前账号需补充身份核验',
             INVALID_TITLE: '标题格式有误',
+            INVALID_SCENE: '请选择有效活动场景',
+            INVALID_TYPE: '请选择有效活动形式',
+            INVALID_THEME: '活动主题不合法',
+            THEME_REQUIRED: '节庆主题活动至少选择1个主题',
             INVALID_CATEGORY: '请选择有效活动分类',
-            INVALID_CUSTOM_CATEGORY: '请选择“其它”时请填写具体分类',
-            DUPLICATE_CUSTOM_CATEGORY: '你填写的“其它分类”与现有分类重复，请直接选择已有分类',
             START_PASSED:  '开始时间不能早于现在',
             INVALID_MIN:   '成团人数至少2人',
             INVALID_WINDOW:'成团时间窗口不合法',
