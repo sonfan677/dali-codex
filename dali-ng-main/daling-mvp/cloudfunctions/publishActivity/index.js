@@ -249,6 +249,13 @@ const THEME_ID_SET = new Set([
   'new_year', 'valentine',
 ])
 
+const USER_VISIBLE_TAG_ALLOW_SET = new Set([
+  '适合新朋友', '一个人也能来', '适合游客', '适合旅居者', '适合同城常住', '适合女生', '适合亲子', '可带宠物', '适合初学者', '同频交流',
+  '轻松', '热闹', '安静', '深聊', '专业', '文艺', '松弛', '户外自然', '节日氛围', '沉浸体验',
+  '小规模', '限额报名', '需要预约', '可反复参与', '新手友好',
+  '室内活动', '适合拍照', '有吃有喝',
+])
+
 function normalizeCategoryId(categoryId = '') {
   const safe = String(categoryId || '').trim().toLowerCase()
   return LEGACY_CATEGORY_ID_MAP[safe] || safe || 'other'
@@ -306,6 +313,16 @@ function normalizeThemeIds(themeIds = [], max = 3) {
     unique.push(id)
   })
   return unique.slice(0, Math.max(0, Number(max) || 3))
+}
+
+function normalizeVisibleTags(visibleTags = [], max = 12) {
+  const unique = []
+  ;(Array.isArray(visibleTags) ? visibleTags : []).forEach((item) => {
+    const tag = String(item || '').trim()
+    if (!tag || !USER_VISIBLE_TAG_ALLOW_SET.has(tag) || unique.includes(tag)) return
+    unique.push(tag)
+  })
+  return unique.slice(0, Math.max(0, Number(max) || 12))
 }
 
 // 大理白族自治州发布范围（近似地理围栏，后续可改为配置化 polygon）
@@ -705,6 +722,7 @@ exports.main = async (event, context) => {
     typeId = '',
     typeName = '',
     themeIds = [],
+    visibleTags = [],
     lat,
     lng,
     address = '',
@@ -741,6 +759,7 @@ exports.main = async (event, context) => {
   const finalTypeId = String(sceneType?.typeId || '').trim()
   const finalTypeName = String(sceneType?.typeName || typeName || '').trim()
   const finalCategoryId = normalizeCategoryId(sceneType?.categoryId || categoryId || 'other')
+  const finalVisibleTags = normalizeVisibleTags(visibleTags, 12)
   const normalizedCustomCategoryLabel = normalizeCustomCategoryLabel(customCategoryLabel)
   const rawThemeIds = Array.isArray(themeIds) ? themeIds : []
   const hasInvalidTheme = rawThemeIds.some((item) => {
@@ -860,6 +879,7 @@ exports.main = async (event, context) => {
       typeId: finalTypeId,
       typeName: finalTypeName,
       themeIds: finalThemeIds,
+      userVisibleTags: finalVisibleTags,
       categoryId: finalCategoryId,
       categoryLabel: finalCategoryLabel,
       categoryCustomLabel: finalCategoryId === 'other' ? normalizedCustomCategoryLabel : '',

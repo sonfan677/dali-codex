@@ -24,6 +24,36 @@
             placeholder="活动详情、集合方式、注意事项等（选填）"
             maxlength="200"
           />
+          <view class="visible-tags-summary">
+            <text class="visible-tags-summary-text">{{ visibleTagSummaryText }}</text>
+            <text class="visible-tags-toggle" @tap="toggleVisibleTagPanel">{{ showVisibleTagPanel ? '收起' : '去选择' }}</text>
+          </view>
+          <view v-if="form.visibleTags.length" class="selected-visible-tags">
+            <text
+              v-for="tag in form.visibleTags"
+              :key="`selected-tag-${tag}`"
+              class="selected-visible-tag"
+            >{{ tag }}</text>
+          </view>
+          <view v-if="showVisibleTagPanel" class="visible-tag-groups">
+            <view
+              v-for="group in visibleTagGroups"
+              :key="`visible-group-${group.id}`"
+              class="visible-tag-group"
+            >
+              <text class="visible-tag-group-title">{{ group.label }}</text>
+              <view class="visible-tag-list">
+                <text
+                  v-for="tag in group.tags"
+                  :key="`visible-tag-${group.id}-${tag}`"
+                  class="visible-tag-item"
+                  :class="{ 'visible-tag-item--active': form.visibleTags.includes(tag) }"
+                  @tap="toggleVisibleTag(tag)"
+                >{{ tag }}</text>
+              </view>
+            </view>
+          </view>
+          <text class="hint">标签会在活动详情里展示，帮助其他用户快速理解活动</text>
         </view>
 
         <!-- 场景 -->
@@ -330,6 +360,30 @@ function buildTimeRange() {
   return { dates, hours, minutes }
 }
 
+const USER_VISIBLE_TAG_GROUPS = [
+  {
+    id: 'who',
+    label: '适合谁',
+    tags: ['适合新朋友', '一个人也能来', '适合游客', '适合旅居者', '适合同城常住', '适合女生', '适合亲子', '可带宠物', '适合初学者', '同频交流'],
+  },
+  {
+    id: 'vibe',
+    label: '氛围',
+    tags: ['轻松', '热闹', '安静', '深聊', '专业', '文艺', '松弛', '户外自然', '节日氛围', '沉浸体验'],
+  },
+  {
+    id: 'format',
+    label: '形式',
+    tags: ['小规模', '限额报名', '需要预约', '可反复参与', '新手友好'],
+  },
+  {
+    id: 'traits',
+    label: '场景特征',
+    tags: ['户外自然', '室内活动', '可带宠物', '适合拍照', '有吃有喝'],
+  },
+]
+const USER_VISIBLE_TAG_ALLOW_SET = new Set(USER_VISIBLE_TAG_GROUPS.flatMap((group) => group.tags))
+
 export default {
   setup() {
     const userStore = useUserStore()
@@ -355,6 +409,7 @@ export default {
       form: {
         title: '',
         description: '',
+        visibleTags: [],
         lat: 0,
         lng: 0,
         address: '',
@@ -384,6 +439,8 @@ export default {
       timeIndex: [0, defaultHour, 0],
       durationOptions: ['1小时', '2小时', '3小时', '4小时', '6小时', '8小时'],
       durationIndex: 1,
+      visibleTagGroups: USER_VISIBLE_TAG_GROUPS,
+      showVisibleTagPanel: false,
       formationWindowOptions: ['15分钟（极速成团）', '30分钟（标准成团）', '60分钟（预约成团）'],
       formationWindowValues: [15, 30, 60],
       formationWindowIndex: 1,
@@ -417,6 +474,12 @@ export default {
     formationWindowHint() {
       const mins = this.formationWindowValues[this.formationWindowIndex]
       return `发布后${mins}分钟内未成团，会通知你决定是否继续`
+    },
+
+    visibleTagSummaryText() {
+      const total = Array.isArray(this.form?.visibleTags) ? this.form.visibleTags.length : 0
+      if (!total) return '用户可见标签（选填）'
+      return `用户可见标签（选填） · 已选 ${total} 个`
     },
   },
 
@@ -631,6 +694,22 @@ export default {
 
     onRequireApprovalChange(e) {
       this.form.requireApproval = !!e?.detail?.value
+    },
+
+    toggleVisibleTagPanel() {
+      this.showVisibleTagPanel = !this.showVisibleTagPanel
+    },
+
+    toggleVisibleTag(tag = '') {
+      const safeTag = String(tag || '').trim()
+      if (!safeTag || !USER_VISIBLE_TAG_ALLOW_SET.has(safeTag)) return
+      const current = Array.isArray(this.form.visibleTags) ? [...this.form.visibleTags] : []
+      const exists = current.includes(safeTag)
+      const next = exists
+        ? current.filter((item) => item !== safeTag)
+        : [...current, safeTag]
+      const deduped = [...new Set(next)]
+      this.form.visibleTags = deduped.slice(0, 12)
     },
 
     chooseContactQrcode() {
@@ -992,9 +1071,14 @@ _doChooseLocation() {
       this.submitting = true
       try {
         const finalCategoryId = resolveCategoryBySceneType(this.form.sceneId, this.form.typeId)
+        const visibleTags = [...new Set((Array.isArray(this.form.visibleTags) ? this.form.visibleTags : [])
+          .map((item) => String(item || '').trim())
+          .filter((item) => item && USER_VISIBLE_TAG_ALLOW_SET.has(item)))]
+          .slice(0, 12)
         const res = await callCloud('publishActivity', {
           title:            this.form.title.trim(),
           description:      this.form.description.trim(),
+          visibleTags,
           sceneId:          this.form.sceneId,
           sceneName:        this.form.sceneName,
           typeId:           this.form.typeId,
@@ -1116,6 +1200,66 @@ _doChooseLocation() {
   display: block;
   text-align: right;
   margin-top: 8rpx;
+}
+.visible-tags-summary {
+  margin-top: 14rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.visible-tags-summary-text {
+  font-size: 24rpx;
+  color: #667085;
+}
+.visible-tags-toggle {
+  font-size: 24rpx;
+  color: #1A3C5E;
+}
+.selected-visible-tags {
+  margin-top: 10rpx;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10rpx;
+}
+.selected-visible-tag {
+  padding: 6rpx 14rpx;
+  border-radius: 999rpx;
+  font-size: 22rpx;
+  color: #155EEF;
+  background: #EEF4FF;
+}
+.visible-tag-groups {
+  margin-top: 14rpx;
+  padding: 16rpx;
+  border-radius: 12rpx;
+  background: #F8FAFC;
+}
+.visible-tag-group + .visible-tag-group {
+  margin-top: 16rpx;
+}
+.visible-tag-group-title {
+  display: block;
+  margin-bottom: 8rpx;
+  font-size: 24rpx;
+  color: #475467;
+}
+.visible-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10rpx;
+}
+.visible-tag-item {
+  padding: 8rpx 14rpx;
+  border-radius: 999rpx;
+  font-size: 22rpx;
+  color: #475467;
+  background: #FFFFFF;
+  border: 1rpx solid #E4E7EC;
+}
+.visible-tag-item--active {
+  color: #1A3C5E;
+  background: #EAF2FB;
+  border-color: #1A3C5E;
 }
 .location-row, .picker-row {
   display: flex;

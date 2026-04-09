@@ -53,8 +53,18 @@
       </view>
 
       <!-- 描述 -->
-      <view v-if="activity.description" class="desc-box">
-        <text class="desc-text">{{ activity.description }}</text>
+      <view v-if="activity.description || userVisibleTagsForDisplay.length" class="desc-box">
+        <view v-if="userVisibleTagsForDisplay.length" class="desc-visible-tags">
+          <text class="desc-visible-tags-title">用户可见标签</text>
+          <view class="desc-visible-tag-list">
+            <text
+              v-for="tag in userVisibleTagsForDisplay"
+              :key="`detail-visible-tag-${activity._id}-${tag}`"
+              class="desc-visible-tag"
+            >{{ tag }}</text>
+          </view>
+        </view>
+        <text v-if="activity.description" class="desc-text">{{ activity.description }}</text>
       </view>
 
       <!-- 联系方式 -->
@@ -632,6 +642,14 @@ export default {
       if (this.activity?.sceneId) return getSceneLabel(this.activity.sceneId)
       if (this.activity?.categoryLabel) return this.activity.categoryLabel
       return getCategoryLabel(this.activity?.categoryId || 'other')
+    },
+
+    userVisibleTagsForDisplay() {
+      const list = Array.isArray(this.activity?.userVisibleTags) ? this.activity.userVisibleTags : []
+      const normalized = list
+        .map((item) => String(item || '').trim())
+        .filter(Boolean)
+      return [...new Set(normalized)].slice(0, 12)
     },
 
     pricingText() {
@@ -1526,6 +1544,27 @@ export default {
   padding: 24rpx; margin: 24rpx 0;
 }
 .desc-text { font-size: 28rpx; color: #555; line-height: 1.7; }
+.desc-visible-tags {
+  margin-bottom: 12rpx;
+}
+.desc-visible-tags-title {
+  display: block;
+  margin-bottom: 8rpx;
+  font-size: 22rpx;
+  color: #667085;
+}
+.desc-visible-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8rpx;
+}
+.desc-visible-tag {
+  padding: 6rpx 12rpx;
+  border-radius: 999rpx;
+  font-size: 22rpx;
+  color: #155EEF;
+  background: #EEF4FF;
+}
 
 .contact-block {
   margin: 24rpx 0;
