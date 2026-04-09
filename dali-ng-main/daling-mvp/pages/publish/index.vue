@@ -60,23 +60,6 @@
           <text class="hint">系统标签映射：{{ selectedCategoryLabel }}</text>
         </view>
 
-        <!-- 主题 -->
-        <view class="field">
-          <text class="label">活动主题（最多3个）</text>
-          <view class="theme-tags">
-            <view
-              v-for="theme in themeOptions"
-              :key="theme.id"
-              class="theme-tag"
-              :class="{ 'theme-tag--active': form.themeIds.includes(theme.id) }"
-              @tap="toggleTheme(theme.id)"
-            >
-              {{ theme.label }}
-            </view>
-          </view>
-          <text class="hint" v-if="form.sceneId === 'festival_theme'">节庆主题场景至少选择1个主题</text>
-        </view>
-
         <!-- 地点 -->
         <view class="field" @tap="chooseLocation">
           <text class="label">活动地点 *</text>
@@ -320,11 +303,9 @@
 import { callCloud } from '@/utils/cloud.js'
 import { useUserStore } from '@/stores/user.js'
 import {
-  ACTIVITY_THEME_OPTIONS,
   PUBLISH_SCENE_OPTIONS,
   getCategoryLabel,
   getTypesByScene,
-  normalizeThemeIds,
   resolveCategoryBySceneType,
   resolveSceneTypeFromLegacyFields,
 } from '@/utils/activityMeta.js'
@@ -383,7 +364,6 @@ export default {
         sceneName: defaultSceneLabel,
         typeId: defaultType.id,
         typeName: defaultType.name,
-        themeIds: [],
         maxParticipants: null,
         chargeType: 'free',
         feeAmount: '',
@@ -399,7 +379,6 @@ export default {
       sceneIndex: 0,
       typeOptions: defaultTypeOptions,
       typeIndex: 0,
-      themeOptions: ACTIVITY_THEME_OPTIONS,
       timeRangeData: { dates, hours, minutes },
       timeRange: [dates, hours, ['00', '15', '30', '45']],
       timeIndex: [0, defaultHour, 0],
@@ -703,7 +682,6 @@ export default {
       const idx = Number(e.detail.value || 0)
       const selected = this.sceneOptions[idx] || this.sceneOptions[0]
       this.syncSceneAndType(selected?.id || '', '')
-      this.form.themeIds = []
     },
 
     onTypeChange(e) {
@@ -712,20 +690,6 @@ export default {
       const selected = this.typeOptions[idx] || this.typeOptions[0] || { id: '', name: '' }
       this.form.typeId = selected.id
       this.form.typeName = selected.name
-    },
-
-    toggleTheme(themeId = '') {
-      const id = String(themeId || '').trim()
-      if (!id) return
-      const current = Array.isArray(this.form.themeIds) ? [...this.form.themeIds] : []
-      const exists = current.includes(id)
-      let next = []
-      if (exists) {
-        next = current.filter((item) => item !== id)
-      } else {
-        next = [...current, id]
-      }
-      this.form.themeIds = normalizeThemeIds(next, 3)
     },
 
     // 失焦时校验并格式化
@@ -1016,11 +980,6 @@ _doChooseLocation() {
         uni.showToast({ title: '请至少填写1项联系方式', icon: 'none' })
         return
       }
-      this.form.themeIds = normalizeThemeIds(this.form.themeIds, 3)
-      if (this.form.sceneId === 'festival_theme' && this.form.themeIds.length === 0) {
-        uni.showToast({ title: '节庆主题活动至少选择1个主题', icon: 'none' })
-        return
-      }
       if (this.form.startTimeMs <= Date.now()) {
         uni.showToast({ title: '开始时间不能早于现在', icon: 'none' })
         return
@@ -1040,7 +999,6 @@ _doChooseLocation() {
           sceneName:        this.form.sceneName,
           typeId:           this.form.typeId,
           typeName:         this.form.typeName,
-          themeIds:         this.form.themeIds,
           chargeType:       this.form.chargeType,
           feeAmount,
           allowWaitlist:    !!this.form.allowWaitlist,
@@ -1091,8 +1049,6 @@ _doChooseLocation() {
             INVALID_TITLE: '标题格式有误',
             INVALID_SCENE: '请选择有效活动场景',
             INVALID_TYPE: '请选择有效活动形式',
-            INVALID_THEME: '活动主题不合法',
-            THEME_REQUIRED: '节庆主题活动至少选择1个主题',
             INVALID_CHARGE_TYPE: '收费方式不合法',
             INVALID_FEE_AMOUNT: '付费金额不合法',
             CONTACT_REQUIRED: '请至少填写1项联系方式',

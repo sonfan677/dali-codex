@@ -751,9 +751,6 @@ exports.main = async (event, context) => {
     return { success: false, error: 'INVALID_THEME', message: '活动主题不合法' }
   }
   const finalThemeIds = normalizeThemeIds(rawThemeIds, 3)
-  if (finalSceneId === 'festival_theme' && finalThemeIds.length === 0) {
-    return { success: false, error: 'THEME_REQUIRED', message: '节庆主题活动至少选择1个主题' }
-  }
 
   // 2. 参数校验
   if (!title || title.trim().length === 0) {
