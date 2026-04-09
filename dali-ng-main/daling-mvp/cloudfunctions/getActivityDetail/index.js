@@ -1,6 +1,7 @@
 const cloud = require('wx-server-sdk')
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 const db = cloud.database()
+const _ = db.command
 
 const CATEGORY_MAP = {
   sport: '运动',
@@ -377,18 +378,49 @@ exports.main = async (event) => {
     sceneName: activity.sceneName || sceneType.sceneName,
     typeId: activity.typeId || sceneType.typeId,
     typeName: activity.typeName || sceneType.typeName,
+    chargeType: String(activity.chargeType || activity.pricing?.chargeType || 'free'),
+    feeAmount: Number(activity.feeAmount ?? activity.pricing?.feeAmount ?? 0) || 0,
+    pricing: {
+      chargeType: String(activity.pricing?.chargeType || activity.chargeType || 'free'),
+      feeAmount: Number(activity.pricing?.feeAmount ?? activity.feeAmount ?? 0) || 0,
+      currency: activity.pricing?.currency || 'CNY',
+    },
+    allowWaitlist: !!(activity.allowWaitlist ?? activity.joinPolicy?.allowWaitlist),
+    requireApproval: !!(activity.requireApproval ?? activity.joinPolicy?.requireApproval),
+    joinPolicy: {
+      allowWaitlist: !!(activity.joinPolicy?.allowWaitlist ?? activity.allowWaitlist),
+      requireApproval: !!(activity.joinPolicy?.requireApproval ?? activity.requireApproval),
+    },
     trustProfile: buildTrustProfile(activity, publisher, nowMs),
   }
   const { data: joinedList } = await db.collection('participations')
-    .where({ activityId, userId: OPENID, status: 'joined' })
+    .where({
+      activityId,
+      userId: OPENID,
+      status: _.in(['joined', 'pending_approval', 'waitlist']),
+    })
     .limit(1)
     .get()
+  const joinStatus = String(joinedList[0]?.status || 'none')
 
   const isPublisher = activity.publisherId === OPENID
+  const canSeeContact = isPublisher || isAdmin || joinStatus === 'joined'
+  const sourceContactInfo = activity.contactInfo || {}
+  const maskedContactInfo = canSeeContact
+    ? sourceContactInfo
+    : {
+      visibility: 'joined_only',
+      locked: true,
+      hasPhone: !!sourceContactInfo.phone,
+      hasWechat: !!sourceContactInfo.wechat,
+      hasWechatQrcode: !!sourceContactInfo.wechatQrcodeFileId,
+    }
+  enrichedActivity.contactInfo = maskedContactInfo
+
   let participantList = []
   if (isPublisher) {
     const { data: rawParticipants } = await db.collection('participations')
-      .where({ activityId, status: 'joined' })
+      .where({ activityId })
       .orderBy('joinedAt', 'desc')
       .limit(100)
       .field({
@@ -401,10 +433,14 @@ exports.main = async (event) => {
         attendanceMarkedAt: true,
         attendanceMarkedBy: true,
         attendanceNote: true,
+        status: true,
+        reviewStatus: true,
       })
       .get()
 
-    participantList = (rawParticipants || []).map((item) => ({
+    participantList = (rawParticipants || [])
+      .filter((item) => ['joined', 'pending_approval', 'waitlist'].includes(String(item.status || '')))
+      .map((item) => ({
       _id: item._id,
       openid: item.userId || '',
       nickname: item.userNickname || '匿名用户',
@@ -414,7 +450,9 @@ exports.main = async (event) => {
       attendanceMarkedAt: item.attendanceMarkedAt || null,
       attendanceMarkedBy: item.attendanceMarkedBy || '',
       attendanceNote: item.attendanceNote || '',
-    }))
+      participationStatus: item.status || 'joined',
+      reviewStatus: item.reviewStatus || '',
+      }))
   }
 
   let adminInsight = null
@@ -489,7 +527,9 @@ exports.main = async (event) => {
   return {
     success: true,
     activity: enrichedActivity,
-    hasJoined: joinedList.length > 0,
+    hasJoined: joinStatus === 'joined',
+    joinStatus,
+    canSeeContact,
     isPublisher,
     isAdmin,
     adminInsight,

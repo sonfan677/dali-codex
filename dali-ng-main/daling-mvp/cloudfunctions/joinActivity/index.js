@@ -3,27 +3,49 @@ cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 const db = cloud.database()
 const _ = db.command
 
+const ACTIVE_JOIN_STATUSES = ['joined', 'pending_approval', 'waitlist']
+
 exports.main = async (event, context) => {
   const { OPENID } = cloud.getWXContext()
   const { activityId } = event
 
-  // 1. 检查是否已报名
-  const { data: existing } = await db.collection('participations')
-    .where({ activityId, userId: OPENID, status: 'joined' })
-    .get()
-  if (existing.length > 0) {
-    return { success: false, error: 'ALREADY_JOINED', message: '你已经报名了' }
+  if (!activityId) {
+    return { success: false, error: 'INVALID_ACTIVITY_ID', message: '缺少活动ID' }
   }
 
-  // 2. 获取用户信息
+  // 1. 获取用户信息
   const { data: users } = await db.collection('users')
     .where({ _openid: OPENID })
     .get()
   const user = users[0] || {}
 
-  // 3. 事务报名（防止并发超额）
+  // 2. 事务报名（防止并发超额）
   try {
     const transaction = await db.startTransaction()
+
+    const existingRes = await transaction.collection('participations')
+      .where({
+        activityId,
+        userId: OPENID,
+        status: _.in(ACTIVE_JOIN_STATUSES),
+      })
+      .limit(1)
+      .get()
+    const activeRecord = existingRes.data && existingRes.data[0]
+    if (activeRecord) {
+      await transaction.rollback()
+      const msgMap = {
+        joined: '你已经报名了',
+        pending_approval: '你已提交报名申请，请等待审核',
+        waitlist: '你已在候补队列中',
+      }
+      return {
+        success: false,
+        error: 'ALREADY_JOINED',
+        message: msgMap[activeRecord.status] || '你已经报名了',
+        joinStatus: activeRecord.status,
+      }
+    }
 
     const actRes = await transaction.collection('activities').doc(activityId).get()
     const activity = actRes.data
@@ -40,27 +62,43 @@ exports.main = async (event, context) => {
       await transaction.rollback()
       return { success: false, error: 'ENDED', message: '活动已结束' }
     }
-    if (activity.currentParticipants >= activity.maxParticipants) {
-      await transaction.rollback()
-      return { success: false, error: 'FULL', message: '活动已满员' }
-    }
     // 不能报名自己发布的活动
     if (activity.publisherId === OPENID) {
       await transaction.rollback()
       return { success: false, error: 'OWN_ACTIVITY', message: '不能报名自己发布的活动' }
     }
 
-    const newCount = activity.currentParticipants + 1
-    const isFull = newCount >= activity.maxParticipants
+    const allowWaitlist = !!(activity.joinPolicy?.allowWaitlist ?? activity.allowWaitlist)
+    const requireApproval = !!(activity.joinPolicy?.requireApproval ?? activity.requireApproval)
+    const currentCount = Number(activity.currentParticipants || 0)
+    const maxCount = Number(activity.maxParticipants || 999)
+    const isReachedMax = currentCount >= maxCount
+
+    let targetStatus = 'joined'
+    if (isReachedMax) {
+      if (allowWaitlist) {
+        targetStatus = 'waitlist'
+      } else {
+        await transaction.rollback()
+        return { success: false, error: 'FULL', message: '活动已满员' }
+      }
+    } else if (requireApproval) {
+      targetStatus = 'pending_approval'
+    }
+
+    const shouldOccupySeat = targetStatus === 'joined'
+    const newCount = shouldOccupySeat ? currentCount + 1 : currentCount
+    const isFull = newCount >= maxCount
     let nextFormationStatus = activity.formationStatus || null
 
-    // 更新人数
-    const updateActivityData = {
-      currentParticipants: newCount,
-      status: isFull ? 'FULL' : 'OPEN',
-      updatedAt: db.serverDate(),
+    // 仅“报名成功”才占坑
+    const updateActivityData = {}
+    if (shouldOccupySeat) {
+      updateActivityData.currentParticipants = newCount
+      updateActivityData.status = isFull ? 'FULL' : 'OPEN'
+      updateActivityData.updatedAt = db.serverDate()
     }
-    if (activity.isGroupFormation) {
+    if (shouldOccupySeat && activity.isGroupFormation) {
       const minParticipants = Number(activity.minParticipants) || 0
       if (
         ['FORMING', 'PENDING_ORGANIZER'].includes(activity.formationStatus) &&
@@ -73,9 +111,11 @@ exports.main = async (event, context) => {
       }
     }
 
-    await transaction.collection('activities').doc(activityId).update({
-      data: updateActivityData
-    })
+    if (Object.keys(updateActivityData).length > 0) {
+      await transaction.collection('activities').doc(activityId).update({
+        data: updateActivityData
+      })
+    }
 
     // 写入/恢复报名记录（允许“取消后再次报名”）
     const joinedRecordRes = await transaction.collection('participations')
@@ -84,15 +124,10 @@ exports.main = async (event, context) => {
       .get()
     const existedRecord = joinedRecordRes.data && joinedRecordRes.data[0]
 
-    if (existedRecord && existedRecord.status === 'joined') {
-      await transaction.rollback()
-      return { success: false, error: 'ALREADY_JOINED', message: '你已经报名了' }
-    }
-
     if (existedRecord) {
       await transaction.collection('participations').doc(existedRecord._id).update({
         data: {
-          status: 'joined',
+          status: targetStatus,
           userNickname: user.nickname || existedRecord.userNickname || '',
           userAvatar: user.avatarUrl || existedRecord.userAvatar || '',
           cityId: activity.cityId || existedRecord.cityId || 'dali',
@@ -101,6 +136,9 @@ exports.main = async (event, context) => {
           attendanceMarkedBy: '',
           attendanceNote: '',
           joinedAt: db.serverDate(),
+          appliedAt: db.serverDate(),
+          reviewStatus: targetStatus === 'pending_approval' ? 'pending' : (targetStatus === 'joined' ? 'approved' : ''),
+          reviewedAt: targetStatus === 'joined' ? db.serverDate() : null,
           cancelledAt: null,
           updatedAt: db.serverDate(),
         }
@@ -114,12 +152,15 @@ exports.main = async (event, context) => {
           userNickname: user.nickname || '',
           userAvatar: user.avatarUrl || '',
           cityId: activity.cityId || 'dali',
-          status: 'joined',
+          status: targetStatus,
           attendanceStatus: '',
           attendanceMarkedAt: null,
           attendanceMarkedBy: '',
           attendanceNote: '',
           joinedAt: db.serverDate(),
+          appliedAt: db.serverDate(),
+          reviewStatus: targetStatus === 'pending_approval' ? 'pending' : (targetStatus === 'joined' ? 'approved' : ''),
+          reviewedAt: targetStatus === 'joined' ? db.serverDate() : null,
           cancelledAt: null,
           createdAt: db.serverDate(),
           updatedAt: db.serverDate(),
@@ -129,38 +170,43 @@ exports.main = async (event, context) => {
 
     await transaction.commit()
     
-    // 更新用户统计（异步）
-    db.collection('users').where({ _openid: OPENID }).update({
-      data: { joinCount: _.inc(1), updatedAt: db.serverDate() }
-    }).catch(() => {})
-    
-    // 发送报名成功通知（异步，不影响主流程）
-    const startTime = new Date(activity.startTime)
-    const mo  = startTime.getMonth() + 1
-    const day = startTime.getDate()
-    const h   = startTime.getHours().toString().padStart(2, '0')
-    const m   = startTime.getMinutes().toString().padStart(2, '0')
-    
-    cloud.callFunction({
-      name: 'sendNotification',
-      data: {
-        type: 'join_success',
-        openid: OPENID,
+    if (shouldOccupySeat) {
+      // 更新用户统计（异步）
+      db.collection('users').where({ _openid: OPENID }).update({
+        data: { joinCount: _.inc(1), updatedAt: db.serverDate() }
+      }).catch(() => {})
+
+      // 发送报名成功通知（异步，不影响主流程）
+      const startTime = new Date(activity.startTime)
+      const mo  = startTime.getMonth() + 1
+      const day = startTime.getDate()
+      const h   = startTime.getHours().toString().padStart(2, '0')
+      const m   = startTime.getMinutes().toString().padStart(2, '0')
+
+      cloud.callFunction({
+        name: 'sendNotification',
         data: {
-          title:    activity.title,
-          time:     `${mo}月${day}日 ${h}:${m}`,
-          content:  activity.description || '你已报名成功，请留意活动时间',
-          location: (activity.location && activity.location.address) || '见活动详情',
-          tips:     '请提前10分钟到场，避免迟到',
+          type: 'join_success',
+          openid: OPENID,
+          data: {
+            title:    activity.title,
+            time:     `${mo}月${day}日 ${h}:${m}`,
+            content:  activity.description || '你已报名成功，请留意活动时间',
+            location: (activity.location && activity.location.address) || '见活动详情',
+            tips:     '请提前10分钟到场，避免迟到',
+          }
         }
-      }
-    }).catch(e => console.error('发送报名通知失败', e))
+      }).catch(e => console.error('发送报名通知失败', e))
+    }
     
     return {
       success: true,
+      joinStatus: targetStatus,
       currentParticipants: newCount,
       isFull,
       formationStatus: nextFormationStatus,
+      requiresApproval: requireApproval,
+      isWaitlist: targetStatus === 'waitlist',
     }
 
   } catch(e) {

@@ -716,6 +716,13 @@ exports.main = async (event, context) => {
     formationWindow,
     cityId,
     marketLink = null,
+    chargeType = 'free',
+    feeAmount = 0,
+    allowWaitlist = false,
+    requireApproval = false,
+    contactPhone = '',
+    contactWechat = '',
+    contactQrcodeFileId = '',
   } = event
 
   const cityConfig = await loadCityConfig(cityId || DEFAULT_CITY_CONFIG.cityId)
@@ -780,6 +787,30 @@ exports.main = async (event, context) => {
       }
     }
   }
+  const finalChargeType = String(chargeType || '').trim().toLowerCase()
+  if (!['free', 'aa', 'paid'].includes(finalChargeType)) {
+    return { success: false, error: 'INVALID_CHARGE_TYPE', message: '收费方式不合法' }
+  }
+  const feeNum = Number(feeAmount)
+  const finalFeeAmount = finalChargeType === 'paid'
+    ? feeNum
+    : 0
+  if (finalChargeType === 'paid' && (!Number.isFinite(finalFeeAmount) || finalFeeAmount <= 0)) {
+    return { success: false, error: 'INVALID_FEE_AMOUNT', message: '付费金额不合法' }
+  }
+  const finalAllowWaitlist = !!allowWaitlist
+  const finalRequireApproval = !!requireApproval
+  const finalContactPhone = String(contactPhone || '').trim()
+  const finalContactWechat = String(contactWechat || '').trim()
+  const finalContactQrcodeFileId = String(contactQrcodeFileId || '').trim()
+  if (!finalContactPhone && !finalContactWechat && !finalContactQrcodeFileId) {
+    return { success: false, error: 'CONTACT_REQUIRED', message: '请至少填写1项联系方式' }
+  }
+  const finalContactType = finalContactQrcodeFileId
+    ? 'wechat_qrcode'
+    : finalContactWechat
+      ? 'wechat'
+      : 'phone'
   if (!startTime || !endTime) {
     return { success: false, error: 'INVALID_TIME', message: '请选择活动时间' }
   }
@@ -852,6 +883,19 @@ exports.main = async (event, context) => {
       maxParticipants,
       minParticipants,
       currentParticipants: 0,
+      chargeType: finalChargeType,
+      feeAmount: finalFeeAmount,
+      pricing: {
+        chargeType: finalChargeType,
+        feeAmount: finalFeeAmount,
+        currency: 'CNY',
+      },
+      allowWaitlist: finalAllowWaitlist,
+      requireApproval: finalRequireApproval,
+      joinPolicy: {
+        allowWaitlist: finalAllowWaitlist,
+        requireApproval: finalRequireApproval,
+      },
       status: 'OPEN',
       isGroupFormation,
       formationWindow: isGroupFormation ? finalFormationWindow : null,
@@ -870,11 +914,16 @@ exports.main = async (event, context) => {
         intentStartedAt: null,
         formationTriggeredAt: null,
       },
-      contactType: 'official',
+      contactType: finalContactType,
       contactInfo: {
-        type: 'wechat',
-        value: '',
+        phone: finalContactPhone,
+        wechat: finalContactWechat,
+        wechatQrcodeFileId: finalContactQrcodeFileId,
+        type: finalContactType,
+        value: finalContactWechat || finalContactPhone || finalContactQrcodeFileId || '',
+        visibility: 'joined_only',
         cityId: finalCityId,
+        updatedAt: db.serverDate(),
       },
       trustProfile,
       effectiveScore: baseEffectiveScore,
@@ -944,6 +993,8 @@ exports.main = async (event, context) => {
     sceneName: finalSceneName,
     typeId: finalTypeId,
     typeName: finalTypeName,
+    chargeType: finalChargeType,
+    feeAmount: finalFeeAmount,
     cityConfigVersion: cityConfig.version,
     serverTimestamp: Date.now(),
   }

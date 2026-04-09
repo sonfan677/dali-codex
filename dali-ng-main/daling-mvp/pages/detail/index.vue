@@ -43,10 +43,43 @@
           <text v-if="activity.maxParticipants < 999">· 最多 {{ activity.maxParticipants }} 人</text>
         </text>
       </view>
+      <view class="info-row">
+        <text class="info-label">费用</text>
+        <text class="info-value">{{ pricingText }}</text>
+      </view>
+      <view class="info-row">
+        <text class="info-label">报名</text>
+        <text class="info-value">{{ joinPolicyText }}</text>
+      </view>
 
       <!-- 描述 -->
       <view v-if="activity.description" class="desc-box">
         <text class="desc-text">{{ activity.description }}</text>
+      </view>
+
+      <!-- 联系方式 -->
+      <view class="contact-block">
+        <view class="contact-header">
+          <text class="contact-title">联系方式 / 入群方式</text>
+          <text class="contact-sub">报名成功后可见</text>
+        </view>
+        <view v-if="hasVisibleContact" class="contact-content">
+          <view v-if="visibleContactPhone" class="contact-row">
+            <text class="contact-label">电话</text>
+            <text class="contact-value">{{ visibleContactPhone }}</text>
+          </view>
+          <view v-if="visibleContactWechat" class="contact-row">
+            <text class="contact-label">微信</text>
+            <text class="contact-value">{{ visibleContactWechat }}</text>
+          </view>
+          <view v-if="visibleContactQrcode" class="contact-qrcode-wrap">
+            <text class="contact-label">微信二维码</text>
+            <image class="contact-qrcode" :src="visibleContactQrcode" mode="aspectFit" />
+          </view>
+        </view>
+        <view v-else class="contact-locked">
+          <text>{{ contactLockedTip }}</text>
+        </view>
       </view>
 
       <!-- 管理员可见：处理痕迹 -->
@@ -163,6 +196,9 @@
           <view class="participant-info">
             <text class="participant-name">{{ item.nickname || '匿名用户' }}</text>
             <text class="participant-time">报名时间：{{ formatJoinedAt(item.joinedAt) }}</text>
+            <text class="participant-status" :class="participationStatusClass(item.participationStatus)">
+              状态：{{ participationStatusText(item.participationStatus) }}
+            </text>
             <text class="participant-attendance" :class="attendanceStatusClass(item.attendanceStatus)">
               出勤：{{ attendanceStatusText(item.attendanceStatus) }}
             </text>
@@ -170,7 +206,7 @@
               标记时间：{{ formatJoinedAt(item.attendanceMarkedAt) }}
             </text>
           </view>
-          <view v-if="canMarkAttendance" class="participant-actions">
+          <view v-if="canMarkAttendance && item.participationStatus === 'joined'" class="participant-actions">
             <button
               class="participant-mark-btn participant-mark-btn--ok"
               size="mini"
@@ -295,15 +331,21 @@
 
       <!-- 已报名且可取消 -->
       <button
-        v-else-if="hasJoined && canQuitJoin"
+        v-else-if="joinStatus !== 'none' && canQuitJoin"
         class="btn btn--quit"
         @tap="quitJoin"
         :loading="quitting"
-      >取消报名</button>
+      >{{ quitJoinBtnText }}</button>
 
       <!-- 已报名但不可取消 -->
-      <button v-else-if="hasJoined" class="btn btn--joined" disabled>
+      <button v-else-if="joinStatus === 'joined'" class="btn btn--joined" disabled>
         已报名 ✓
+      </button>
+      <button v-else-if="joinStatus === 'pending_approval'" class="btn btn--joined" disabled>
+        待审核
+      </button>
+      <button v-else-if="joinStatus === 'waitlist'" class="btn btn--joined" disabled>
+        候补中
       </button>
 
       <!-- 可以报名 -->
@@ -374,11 +416,13 @@ export default {
     return {
       activity: null,
       hasJoined: false,
+      joinStatus: 'none',
       joining: false,
       quitting: false,
       extendingWindow: false,
       serverTime: Date.now(),
       currentOpenid: '',
+      canSeeContact: false,
       isAdminView: false,
       adminInsight: null,
       participantList: [],
@@ -438,6 +482,7 @@ export default {
 
     canJoin() {
       if (!this.activity) return false
+      if (this.joinStatus !== 'none') return false
       return this.activity.status === 'OPEN' && this.timeStatus.status !== 'ended'
     },
 
@@ -453,12 +498,15 @@ export default {
     },
 
     canQuitJoin() {
-      if (!this.activity || !this.hasJoined || this.isPublisher) return false
+      if (!this.activity || this.joinStatus === 'none' || this.isPublisher) return false
       if (['ENDED', 'CANCELLED'].includes(this.activity.status)) return false
       return this.timeStatus.status !== 'ended'
     },
 
     joinBtnText() {
+      if (this.activity?.joinPolicy?.requireApproval) {
+        return '提交报名申请'
+      }
       if (
         this.activity?.isGroupFormation &&
         ['FORMING', 'PENDING_ORGANIZER'].includes(this.activity?.formationStatus)
@@ -467,6 +515,12 @@ export default {
         if (shortage > 0) return `参与成团（还差${shortage}人）`
       }
       return '我要参与'
+    },
+
+    quitJoinBtnText() {
+      if (this.joinStatus === 'pending_approval') return '取消申请'
+      if (this.joinStatus === 'waitlist') return '取消候补'
+      return '取消报名'
     },
 
     disabledReason() {
@@ -580,6 +634,48 @@ export default {
       return getCategoryLabel(this.activity?.categoryId || 'other')
     },
 
+    pricingText() {
+      if (!this.activity) return '免费'
+      const chargeType = String(this.activity?.pricing?.chargeType || this.activity?.chargeType || 'free')
+      const feeAmount = Number(this.activity?.pricing?.feeAmount ?? this.activity?.feeAmount ?? 0) || 0
+      if (chargeType === 'paid') return `付费（¥${feeAmount}）`
+      if (chargeType === 'aa') return 'AA'
+      return '免费'
+    },
+
+    joinPolicyText() {
+      if (!this.activity) return '直接报名'
+      const allowWaitlist = !!(this.activity?.joinPolicy?.allowWaitlist ?? this.activity?.allowWaitlist)
+      const requireApproval = !!(this.activity?.joinPolicy?.requireApproval ?? this.activity?.requireApproval)
+      const fragments = []
+      fragments.push(requireApproval ? '需发起人审核' : '直接报名')
+      fragments.push(allowWaitlist ? '可候补' : '不可候补')
+      return fragments.join(' · ')
+    },
+
+    visibleContactPhone() {
+      return this.canSeeContact ? String(this.activity?.contactInfo?.phone || '').trim() : ''
+    },
+
+    visibleContactWechat() {
+      return this.canSeeContact ? String(this.activity?.contactInfo?.wechat || '').trim() : ''
+    },
+
+    visibleContactQrcode() {
+      return this.canSeeContact ? String(this.activity?.contactInfo?.wechatQrcodeFileId || '').trim() : ''
+    },
+
+    hasVisibleContact() {
+      return !!(this.visibleContactPhone || this.visibleContactWechat || this.visibleContactQrcode)
+    },
+
+    contactLockedTip() {
+      if (this.canSeeContact) return '发起人暂未填写联系方式'
+      if (this.joinStatus === 'pending_approval') return '你的报名申请待审核，通过后可查看联系方式'
+      if (this.joinStatus === 'waitlist') return '你当前在候补中，报名成功后可查看联系方式'
+      return '报名成功后可见联系方式/入群方式'
+    },
+
     participantFilteredList() {
       const keyword = String(this.participantKeyword || '').trim().toLowerCase()
       const list = Array.isArray(this.participantList) ? [...this.participantList] : []
@@ -649,6 +745,8 @@ export default {
 
     commentPermissionTip() {
       if (this.isPublisher) return '发布者可回复留言'
+      if (this.joinStatus === 'pending_approval') return '报名审核通过后可留言互动'
+      if (this.joinStatus === 'waitlist') return '候补转为报名成功后可留言互动'
       if (!this.hasJoined) return '报名后可留言互动'
       return '当前不可留言'
     },
@@ -660,9 +758,11 @@ export default {
         const res = await callCloud('getActivityDetail', { activityId: this.activityId })
         if (!res || !res.success) throw new Error(res?.message || '活动不存在')
         this.activity = res.activity
-        this.hasJoined = !!res.hasJoined
+        this.joinStatus = String(res.joinStatus || (res.hasJoined ? 'joined' : 'none'))
+        this.hasJoined = this.joinStatus === 'joined'
         this.serverTime = res.serverTime || Date.now()
         this.currentOpenid = res.currentOpenid || this.currentOpenid
+        this.canSeeContact = !!res.canSeeContact
         this.isAdminView = !!res.isAdmin
         this.adminInsight = res.adminInsight || null
         this.participantList = Array.isArray(res.participantList) ? res.participantList : []
@@ -711,6 +811,24 @@ export default {
         no_show: 'participant-attendance--no',
       }
       return map[String(status || '')] || 'participant-attendance--none'
+    },
+
+    participationStatusText(status) {
+      const map = {
+        joined: '已报名',
+        pending_approval: '待审核',
+        waitlist: '候补中',
+      }
+      return map[String(status || '')] || '已报名'
+    },
+
+    participationStatusClass(status) {
+      const map = {
+        joined: 'participant-status--joined',
+        pending_approval: 'participant-status--pending',
+        waitlist: 'participant-status--waitlist',
+      }
+      return map[String(status || '')] || 'participant-status--joined'
     },
 
     isAttendanceUpdating(openid, status) {
@@ -1164,32 +1282,40 @@ export default {
         const detail = subRes?.errMsg || ''
         if (detail.includes('can only be invoked by user TAP gesture')) {
           console.warn('[订阅消息] 非用户手势触发，跳过弹窗提示，不影响报名')
-          return
-        }
-        uni.showModal({
-          title: '订阅授权未弹出',
-          content: detail
-            ? `不影响报名\n原因：${detail}`
-            : '不影响报名\n可能是微信侧限制或设置关闭',
-          confirmText: '去设置',
-          success: (r) => {
-            if (r.confirm && typeof wx !== 'undefined' && wx.openSetting) {
-              wx.openSetting({ withSubscriptions: true })
+        } else {
+          uni.showModal({
+            title: '订阅授权未弹出',
+            content: detail
+              ? `不影响报名\n原因：${detail}`
+              : '不影响报名\n可能是微信侧限制或设置关闭',
+            confirmText: '去设置',
+            success: (r) => {
+              if (r.confirm && typeof wx !== 'undefined' && wx.openSetting) {
+                wx.openSetting({ withSubscriptions: true })
+              }
             }
-          }
-        })
+          })
+        }
       }
     
       this.joining = true
       try {
         const res = await callCloud('joinActivity', { activityId: this.activityId })
         if (res.success) {
-          this.hasJoined = true
-          this.activity.currentParticipants += 1
-          if (res.isFull) this.activity.status = 'FULL'
-          if (res.formationStatus) this.activity.formationStatus = res.formationStatus
-          await this.loadComments()
-          uni.showToast({ title: '报名成功！', icon: 'success' })
+          this.joinStatus = String(res.joinStatus || 'joined')
+          this.hasJoined = this.joinStatus === 'joined'
+          if (this.joinStatus === 'joined') {
+            this.activity.currentParticipants += 1
+            if (res.isFull) this.activity.status = 'FULL'
+            if (res.formationStatus) this.activity.formationStatus = res.formationStatus
+          }
+          await this.loadDetail()
+          const joinMsgMap = {
+            joined: '报名成功！',
+            pending_approval: '已提交申请，待发起人审核',
+            waitlist: '活动已满，已加入候补',
+          }
+          uni.showToast({ title: joinMsgMap[this.joinStatus] || '操作成功', icon: 'success' })
         } else {
           const msgs = {
             ALREADY_JOINED: '你已经报名了',
@@ -1220,16 +1346,24 @@ export default {
           try {
             const result = await callCloud('quitActivity', { activityId: this.activityId })
             if (result?.success) {
+              const cancelledJoinStatus = String(result?.cancelledJoinStatus || this.joinStatus || 'joined')
               this.hasJoined = false
+              this.joinStatus = 'none'
               this.activity.currentParticipants = Math.max(
                 0,
                 Number(result.currentParticipants ?? this.activity.currentParticipants - 1)
               )
               if (result.activityStatus) this.activity.status = result.activityStatus
               if (result.formationStatus) this.activity.formationStatus = result.formationStatus
+              this.canSeeContact = this.isPublisher || this.isAdminView
               this.replyTarget = null
               await this.loadComments()
-              uni.showToast({ title: '已取消报名', icon: 'success' })
+              const cancelMsgMap = {
+                pending_approval: '已取消报名申请',
+                waitlist: '已取消候补',
+                joined: '已取消报名',
+              }
+              uni.showToast({ title: cancelMsgMap[cancelledJoinStatus] || '已取消报名', icon: 'success' })
             } else {
               const msgMap = {
                 NOT_JOINED: '你当前未报名该活动',
@@ -1392,6 +1526,67 @@ export default {
   padding: 24rpx; margin: 24rpx 0;
 }
 .desc-text { font-size: 28rpx; color: #555; line-height: 1.7; }
+
+.contact-block {
+  margin: 24rpx 0;
+  padding: 24rpx;
+  border-radius: 12rpx;
+  background: #fff;
+}
+.contact-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12rpx;
+}
+.contact-title {
+  font-size: 28rpx;
+  font-weight: 700;
+  color: #1a1a1a;
+}
+.contact-sub {
+  font-size: 22rpx;
+  color: #98A2B3;
+}
+.contact-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10rpx;
+}
+.contact-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12rpx;
+}
+.contact-label {
+  width: 128rpx;
+  font-size: 24rpx;
+  color: #667085;
+  flex-shrink: 0;
+}
+.contact-value {
+  flex: 1;
+  font-size: 24rpx;
+  color: #1f2937;
+  word-break: break-all;
+}
+.contact-qrcode-wrap {
+  margin-top: 8rpx;
+}
+.contact-qrcode {
+  margin-top: 10rpx;
+  width: 240rpx;
+  height: 240rpx;
+  border-radius: 10rpx;
+  background: #f4f6f8;
+}
+.contact-locked {
+  padding: 12rpx 14rpx;
+  border-radius: 10rpx;
+  background: #f7f8fa;
+  font-size: 24rpx;
+  color: #667085;
+}
 
 .admin-trace {
   margin: 24rpx 0;
@@ -1614,6 +1809,18 @@ export default {
 .participant-time {
   font-size: 22rpx;
   color: #999;
+}
+.participant-status {
+  font-size: 22rpx;
+}
+.participant-status--joined {
+  color: #1E7145;
+}
+.participant-status--pending {
+  color: #B54708;
+}
+.participant-status--waitlist {
+  color: #2E75B6;
 }
 .participant-attendance {
   font-size: 22rpx;

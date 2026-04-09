@@ -135,6 +135,93 @@
           />
         </view>
 
+        <!-- 收费设置 -->
+        <view class="field">
+          <text class="label">收费方式 *</text>
+          <view class="fee-options">
+            <view
+              class="fee-option"
+              :class="{ 'fee-option--active': form.chargeType === 'free' }"
+              @tap="setChargeType('free')"
+            >免费</view>
+            <view
+              class="fee-option"
+              :class="{ 'fee-option--active': form.chargeType === 'aa' }"
+              @tap="setChargeType('aa')"
+            >AA</view>
+            <view
+              class="fee-option"
+              :class="{ 'fee-option--active': form.chargeType === 'paid' }"
+              @tap="setChargeType('paid')"
+            >付费</view>
+          </view>
+          <view v-if="form.chargeType === 'paid'" class="fee-input-row">
+            <text class="fee-currency">¥</text>
+            <input
+              class="fee-amount-input"
+              type="digit"
+              :value="form.feeAmount"
+              placeholder="填写金额（人民币）"
+              @input="onFeeAmountInput"
+            />
+          </view>
+        </view>
+
+        <!-- 报名规则 -->
+        <view class="field field-switch">
+          <view>
+            <text class="label mb0">允许候补 *</text>
+            <text class="hint">满员后仍可进入候补队列</text>
+          </view>
+          <switch
+            :checked="form.allowWaitlist"
+            color="#1A3C5E"
+            @change="onAllowWaitlistChange"
+          />
+        </view>
+
+        <view class="field field-switch">
+          <view>
+            <text class="label mb0">发起人审核后参与 *</text>
+            <text class="hint">开启后，报名先进入待审核</text>
+          </view>
+          <switch
+            :checked="form.requireApproval"
+            color="#1A3C5E"
+            @change="onRequireApprovalChange"
+          />
+        </view>
+
+        <!-- 联系方式/入群方式 -->
+        <view class="field">
+          <text class="label">联系方式/入群方式（至少填1项）*</text>
+          <input
+            class="input"
+            v-model="form.contactPhone"
+            placeholder="电话号码（选填）"
+            maxlength="30"
+          />
+          <input
+            class="input mt12"
+            v-model="form.contactWechat"
+            placeholder="微信号（选填）"
+            maxlength="40"
+          />
+          <view class="qrcode-row mt12">
+            <button class="qrcode-btn" @tap="chooseContactQrcode">
+              {{ form.contactQrcodeFileId ? '更换微信二维码图片' : '上传微信二维码图片（选填）' }}
+            </button>
+            <text v-if="form.contactQrcodeFileId" class="qrcode-clear" @tap="clearContactQrcode">清除</text>
+          </view>
+          <image
+            v-if="form.contactQrcodeFileId"
+            class="qrcode-preview"
+            :src="form.contactQrcodeFileId"
+            mode="aspectFill"
+          />
+          <text class="hint">仅报名成功用户可见联系方式</text>
+        </view>
+
         <!-- 成团活动开关 -->
         <view class="field field-switch">
           <view>
@@ -298,6 +385,13 @@ export default {
         typeName: defaultType.name,
         themeIds: [],
         maxParticipants: null,
+        chargeType: 'free',
+        feeAmount: '',
+        allowWaitlist: false,
+        requireApproval: false,
+        contactPhone: '',
+        contactWechat: '',
+        contactQrcodeFileId: '',
         isGroupFormation: false,
         minParticipants: 2,
       },
@@ -538,6 +632,71 @@ export default {
 
     onFormationWindowChange(e) {
       this.formationWindowIndex = Number(e.detail.value || 0)
+    },
+
+    setChargeType(type = 'free') {
+      const safe = ['free', 'aa', 'paid'].includes(type) ? type : 'free'
+      this.form.chargeType = safe
+      if (safe !== 'paid') this.form.feeAmount = ''
+    },
+
+    onFeeAmountInput(e) {
+      const raw = String(e?.detail?.value || '')
+      const cleaned = raw.replace(/[^\d.]/g, '').replace(/\.{2,}/g, '.')
+      this.form.feeAmount = cleaned
+    },
+
+    onAllowWaitlistChange(e) {
+      this.form.allowWaitlist = !!e?.detail?.value
+    },
+
+    onRequireApprovalChange(e) {
+      this.form.requireApproval = !!e?.detail?.value
+    },
+
+    chooseContactQrcode() {
+      // #ifdef MP-WEIXIN
+      if (typeof wx === 'undefined' || !wx.chooseMedia || !wx.cloud || !wx.cloud.uploadFile) {
+        uni.showToast({ title: '当前环境暂不支持上传二维码', icon: 'none' })
+        return
+      }
+      wx.chooseMedia({
+        count: 1,
+        mediaType: ['image'],
+        sourceType: ['album', 'camera'],
+        success: async (res) => {
+          const filePath = String(res?.tempFiles?.[0]?.tempFilePath || '')
+          if (!filePath) return
+          uni.showLoading({ title: '上传中...' })
+          try {
+            const extMatch = filePath.match(/\.(\w+)$/)
+            const ext = extMatch ? extMatch[1] : 'jpg'
+            const cloudPath = `activity_contact_qrcode/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`
+            const uploadRes = await wx.cloud.uploadFile({
+              cloudPath,
+              filePath,
+            })
+            const fileID = String(uploadRes?.fileID || '')
+            if (!fileID) throw new Error('UPLOAD_EMPTY_FILE_ID')
+            this.form.contactQrcodeFileId = fileID
+            uni.showToast({ title: '二维码已上传', icon: 'success' })
+          } catch (err) {
+            console.error('上传二维码失败', err)
+            uni.showToast({ title: '上传失败，请重试', icon: 'none' })
+          } finally {
+            uni.hideLoading()
+          }
+        },
+      })
+      // #endif
+
+      // #ifndef MP-WEIXIN
+      uni.showToast({ title: '仅微信小程序支持上传二维码', icon: 'none' })
+      // #endif
+    },
+
+    clearContactQrcode() {
+      this.form.contactQrcodeFileId = ''
     },
 
     onSceneChange(e) {
@@ -838,6 +997,25 @@ _doChooseLocation() {
         uni.showToast({ title: '请选择活动场景和活动形式', icon: 'none' })
         return
       }
+      if (!['free', 'aa', 'paid'].includes(this.form.chargeType)) {
+        uni.showToast({ title: '请选择收费方式', icon: 'none' })
+        return
+      }
+      let feeAmount = 0
+      if (this.form.chargeType === 'paid') {
+        feeAmount = Number(this.form.feeAmount)
+        if (!Number.isFinite(feeAmount) || feeAmount <= 0) {
+          uni.showToast({ title: '请填写正确的付费金额', icon: 'none' })
+          return
+        }
+      }
+      const contactPhone = String(this.form.contactPhone || '').trim()
+      const contactWechat = String(this.form.contactWechat || '').trim()
+      const contactQrcodeFileId = String(this.form.contactQrcodeFileId || '').trim()
+      if (!contactPhone && !contactWechat && !contactQrcodeFileId) {
+        uni.showToast({ title: '请至少填写1项联系方式', icon: 'none' })
+        return
+      }
       this.form.themeIds = normalizeThemeIds(this.form.themeIds, 3)
       if (this.form.sceneId === 'festival_theme' && this.form.themeIds.length === 0) {
         uni.showToast({ title: '节庆主题活动至少选择1个主题', icon: 'none' })
@@ -863,6 +1041,13 @@ _doChooseLocation() {
           typeId:           this.form.typeId,
           typeName:         this.form.typeName,
           themeIds:         this.form.themeIds,
+          chargeType:       this.form.chargeType,
+          feeAmount,
+          allowWaitlist:    !!this.form.allowWaitlist,
+          requireApproval:  !!this.form.requireApproval,
+          contactPhone,
+          contactWechat,
+          contactQrcodeFileId,
           categoryId:       finalCategoryId,
           categoryLabel:    getCategoryLabel(finalCategoryId),
           customCategoryLabel: '',
@@ -908,6 +1093,9 @@ _doChooseLocation() {
             INVALID_TYPE: '请选择有效活动形式',
             INVALID_THEME: '活动主题不合法',
             THEME_REQUIRED: '节庆主题活动至少选择1个主题',
+            INVALID_CHARGE_TYPE: '收费方式不合法',
+            INVALID_FEE_AMOUNT: '付费金额不合法',
+            CONTACT_REQUIRED: '请至少填写1项联系方式',
             INVALID_CATEGORY: '请选择有效活动分类',
             START_PASSED:  '开始时间不能早于现在',
             INVALID_MIN:   '成团人数至少2人',
@@ -978,11 +1166,77 @@ _doChooseLocation() {
   align-items: center;
   justify-content: space-between;
 }
+.mt12 { margin-top: 12rpx; }
 .location-chosen    { font-size: 30rpx; color: #333; flex: 1; }
 .location-placeholder { font-size: 30rpx; color: #ccc; flex: 1; }
 .picker-value       { font-size: 30rpx; color: #333; flex: 1; }
 .picker-placeholder { font-size: 30rpx; color: #ccc; flex: 1; }
 .arrow { font-size: 36rpx; color: #ccc; }
+
+.fee-options {
+  display: flex;
+  gap: 14rpx;
+  flex-wrap: wrap;
+}
+.fee-option {
+  padding: 10rpx 18rpx;
+  border-radius: 999rpx;
+  font-size: 24rpx;
+  color: #475467;
+  background: #F2F4F7;
+}
+.fee-option--active {
+  color: #1A3C5E;
+  background: #EAF2FB;
+  font-weight: 600;
+}
+.fee-input-row {
+  margin-top: 14rpx;
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+}
+.fee-currency {
+  font-size: 30rpx;
+  color: #333;
+}
+.fee-amount-input {
+  flex: 1;
+  height: 72rpx;
+  border-radius: 12rpx;
+  background: #F5F7FA;
+  padding: 0 16rpx;
+  font-size: 28rpx;
+  color: #333;
+}
+.qrcode-row {
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+}
+.qrcode-btn {
+  margin: 0;
+  border: none;
+  height: 66rpx;
+  line-height: 66rpx;
+  border-radius: 10rpx;
+  padding: 0 20rpx;
+  background: #EEF4FB;
+  color: #1A3C5E;
+  font-size: 24rpx;
+}
+.qrcode-btn::after { border: none; }
+.qrcode-clear {
+  font-size: 24rpx;
+  color: #B42318;
+}
+.qrcode-preview {
+  margin-top: 14rpx;
+  width: 180rpx;
+  height: 180rpx;
+  border-radius: 10rpx;
+  background: #f2f4f7;
+}
 
 .phone-bind-mask {
   position: fixed;

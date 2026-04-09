@@ -3,6 +3,8 @@ cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 const db = cloud.database()
 const _ = db.command
 
+const ACTIVE_JOIN_STATUSES = ['joined', 'pending_approval', 'waitlist']
+
 exports.main = async (event) => {
   const { OPENID } = cloud.getWXContext()
   const { activityId } = event || {}
@@ -40,7 +42,11 @@ exports.main = async (event) => {
     }
 
     const joinedRes = await transaction.collection('participations')
-      .where({ activityId, userId: OPENID, status: 'joined' })
+      .where({
+        activityId,
+        userId: OPENID,
+        status: _.in(ACTIVE_JOIN_STATUSES),
+      })
       .limit(1)
       .get()
 
@@ -50,16 +56,20 @@ exports.main = async (event) => {
     }
 
     const participation = joinedRes.data[0]
+    const previousJoinStatus = String(participation.status || '')
+    const shouldReleaseSeat = previousJoinStatus === 'joined'
     const current = Number(activity.currentParticipants) || 0
-    const nextCount = Math.max(0, current - 1)
-    const nextStatus = activity.status === 'FULL' ? 'OPEN' : activity.status
+    const nextCount = shouldReleaseSeat ? Math.max(0, current - 1) : current
+    const nextStatus = shouldReleaseSeat && activity.status === 'FULL' ? 'OPEN' : activity.status
     const updateData = {
-      currentParticipants: nextCount,
-      status: nextStatus,
       updatedAt: db.serverDate(),
     }
+    if (shouldReleaseSeat) {
+      updateData.currentParticipants = nextCount
+      updateData.status = nextStatus
+    }
 
-    if (activity.isGroupFormation && activity.formationStatus === 'CONFIRMED') {
+    if (shouldReleaseSeat && activity.isGroupFormation && activity.formationStatus === 'CONFIRMED') {
       const min = Number(activity.minParticipants) || 0
       const deadlineMs = new Date(activity.formationDeadline).getTime()
       if (nextCount < min && Number.isFinite(deadlineMs) && deadlineMs > nowMs) {
@@ -72,6 +82,7 @@ exports.main = async (event) => {
     await transaction.collection('participations').doc(participation._id).update({
       data: {
         status: 'cancelled',
+        reviewStatus: '',
         cancelledAt: db.serverDate(),
         updatedAt: db.serverDate(),
       }
@@ -79,15 +90,18 @@ exports.main = async (event) => {
 
     await transaction.commit()
 
-    db.collection('users').where({ _openid: OPENID }).update({
-      data: {
-        joinCount: _.inc(-1),
-        updatedAt: db.serverDate(),
-      }
-    }).catch(() => {})
+    if (shouldReleaseSeat) {
+      db.collection('users').where({ _openid: OPENID }).update({
+        data: {
+          joinCount: _.inc(-1),
+          updatedAt: db.serverDate(),
+        }
+      }).catch(() => {})
+    }
 
     return {
       success: true,
+      cancelledJoinStatus: previousJoinStatus,
       currentParticipants: nextCount,
       activityStatus: nextStatus,
       formationStatus: updateData.formationStatus || activity.formationStatus || null,
