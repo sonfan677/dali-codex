@@ -5,16 +5,18 @@ export const LEGACY_CATEGORY_ID_MAP = {
 }
 
 export const ACTIVITY_SCENE_DEFINITIONS = [
-  { id: 'local_explore', label: '在地探索', desc: '古城漫游、打卡、探店路线' },
-  { id: 'casual_gathering', label: '轻松聚会', desc: '饭局、桌游、观影、闲聊' },
-  { id: 'social_networking', label: '交友社交', desc: '交友局、资源对接、圈层交流' },
-  { id: 'learning_sharing', label: '学习分享', desc: '讲座、沙龙、读书、语言交换' },
-  { id: 'workshop_experience', label: '体验工作坊', desc: '手作、咖啡茶、非遗体验' },
-  { id: 'music_performance', label: '音乐演出', desc: 'live、开放麦、展演现场' },
-  { id: 'market_popups', label: '市集摆摊', desc: '文创/美食市集、快闪、试吃' },
-  { id: 'outdoor_nature', label: '户外活动', desc: '徒步、骑行、露营、水上活动' },
-  { id: 'family_pet', label: '亲子宠物', desc: '亲子活动、宠物友好活动' },
-  { id: 'festival_theme', label: '节庆主题', desc: '三月街、火把节、节日限定' },
+  { id: 'local_explore', label: '在地探索', desc: '围绕大理空间、点位、路线、城市体验展开', iconHint: '地图/定位' },
+  { id: 'casual_gathering', label: '轻松聚会', desc: '低门槛、轻社交、容易参加', iconHint: '聊天/碰杯' },
+  { id: 'social_networking', label: '交友社交', desc: '以认识人、链接人、破冰为主', iconHint: '人群/握手' },
+  { id: 'learning_sharing', label: '学习分享', desc: '听讲、交流、输入内容为主', iconHint: '书本/麦克风' },
+  { id: 'workshop_experience', label: '体验工作坊', desc: '更重参与、动手、体验感', iconHint: '手作/画笔' },
+  { id: 'music_performance', label: '音乐演出', desc: '演出、放映、现场娱乐氛围', iconHint: '音符/舞台' },
+  { id: 'market_popups', label: '市集摆摊', desc: '摆摊、市集、试吃试用、快闪', iconHint: '摊位/购物袋' },
+  { id: 'outdoor_nature', label: '户外活动', desc: '徒步、骑行、露营、自然活动', iconHint: '山/帐篷' },
+  { id: 'family_pet', label: '亲子宠物', desc: '家庭、儿童、宠物友好活动', iconHint: '小孩/宠物' },
+  { id: 'public_welfare', label: '公益社区', desc: '志愿、环保、社区共建、交换', iconHint: '爱心/树叶' },
+  { id: 'nomad_city', label: '旅居同城', desc: '新来大理、旅居融入、数字游民等', iconHint: '小屋/行李箱' },
+  { id: 'festival_theme', label: '节庆主题', desc: '三月街、火把节、节日和时令主题', iconHint: '火把/灯笼' },
 ]
 
 export const ACTIVITY_TYPE_OPTIONS_BY_SCENE = {
@@ -106,6 +108,26 @@ export const ACTIVITY_TYPE_OPTIONS_BY_SCENE = {
     { id: 'pet_meetup', name: '宠物社交', categoryId: 'social' },
     { id: 'pet_walk', name: '遛宠活动', categoryId: 'outdoor' },
     { id: 'pet_friendly_market', name: '宠物友好市集', categoryId: 'culture' },
+  ],
+  public_welfare: [
+    { id: 'volunteer_service', name: '志愿服务', categoryId: 'social' },
+    { id: 'community_cleanup', name: '社区清洁行动', categoryId: 'outdoor' },
+    { id: 'eco_action', name: '环保行动', categoryId: 'outdoor' },
+    { id: 'public_charity_event', name: '公益筹办活动', categoryId: 'social' },
+    { id: 'neighborhood_mutual_aid', name: '邻里互助', categoryId: 'social' },
+    { id: 'skill_volunteer', name: '技能公益分享', categoryId: 'culture' },
+    { id: 'donation_drive', name: '公益募捐', categoryId: 'culture' },
+    { id: 'swap_freecycle', name: '公益交换', categoryId: 'culture' },
+  ],
+  nomad_city: [
+    { id: 'newcomer_welcome', name: '新来大理欢迎局', categoryId: 'social' },
+    { id: 'city_settlement_help', name: '本地安顿互助', categoryId: 'social' },
+    { id: 'digital_nomad_meetup', name: '数字游民见面会', categoryId: 'social' },
+    { id: 'remote_work_study', name: '远程工作学习局', categoryId: 'culture' },
+    { id: 'co_living_social', name: '共居社交', categoryId: 'social' },
+    { id: 'local_buddy_pairing', name: '同城搭子配对', categoryId: 'social' },
+    { id: 'rental_life_share', name: '租房生活经验分享', categoryId: 'culture' },
+    { id: 'city_language_exchange', name: '旅居语言交流', categoryId: 'social' },
   ],
   festival_theme: [
     { id: 'march_street_theme', name: '三月街主题', categoryId: 'culture' },
@@ -230,6 +252,8 @@ const SCENE_DEFAULT_CATEGORY_MAP = {
   market_popups: 'culture',
   outdoor_nature: 'outdoor',
   family_pet: 'social',
+  public_welfare: 'social',
+  nomad_city: 'social',
   festival_theme: 'culture',
 }
 

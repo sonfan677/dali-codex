@@ -52,6 +52,8 @@ const SCENE_LABEL_MAP = {
   market_popups: '市集摆摊',
   outdoor_nature: '户外活动',
   family_pet: '亲子宠物',
+  public_welfare: '公益社区',
+  nomad_city: '旅居同城',
   festival_theme: '节庆主题',
 }
 
@@ -144,6 +146,26 @@ const TYPE_OPTIONS_BY_SCENE = {
     { id: 'pet_meetup', name: '宠物社交' },
     { id: 'pet_walk', name: '遛宠活动' },
     { id: 'pet_friendly_market', name: '宠物友好市集' },
+  ],
+  public_welfare: [
+    { id: 'volunteer_service', name: '志愿服务' },
+    { id: 'community_cleanup', name: '社区清洁行动' },
+    { id: 'eco_action', name: '环保行动' },
+    { id: 'public_charity_event', name: '公益筹办活动' },
+    { id: 'neighborhood_mutual_aid', name: '邻里互助' },
+    { id: 'skill_volunteer', name: '技能公益分享' },
+    { id: 'donation_drive', name: '公益募捐' },
+    { id: 'swap_freecycle', name: '公益交换' },
+  ],
+  nomad_city: [
+    { id: 'newcomer_welcome', name: '新来大理欢迎局' },
+    { id: 'city_settlement_help', name: '本地安顿互助' },
+    { id: 'digital_nomad_meetup', name: '数字游民见面会' },
+    { id: 'remote_work_study', name: '远程工作学习局' },
+    { id: 'co_living_social', name: '共居社交' },
+    { id: 'local_buddy_pairing', name: '同城搭子配对' },
+    { id: 'rental_life_share', name: '租房生活经验分享' },
+    { id: 'city_language_exchange', name: '旅居语言交流' },
   ],
   festival_theme: [
     { id: 'march_street_theme', name: '三月街主题' },

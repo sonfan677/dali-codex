@@ -58,6 +58,8 @@ const SCENE_LABEL_MAP = {
   market_popups: '市集摆摊',
   outdoor_nature: '户外活动',
   family_pet: '亲子宠物',
+  public_welfare: '公益社区',
+  nomad_city: '旅居同城',
   festival_theme: '节庆主题',
 }
 
@@ -150,6 +152,26 @@ const TYPE_OPTIONS_BY_SCENE = {
     { id: 'pet_meetup', name: '宠物社交', categoryId: 'social' },
     { id: 'pet_walk', name: '遛宠活动', categoryId: 'outdoor' },
     { id: 'pet_friendly_market', name: '宠物友好市集', categoryId: 'culture' },
+  ],
+  public_welfare: [
+    { id: 'volunteer_service', name: '志愿服务', categoryId: 'social' },
+    { id: 'community_cleanup', name: '社区清洁行动', categoryId: 'outdoor' },
+    { id: 'eco_action', name: '环保行动', categoryId: 'outdoor' },
+    { id: 'public_charity_event', name: '公益筹办活动', categoryId: 'social' },
+    { id: 'neighborhood_mutual_aid', name: '邻里互助', categoryId: 'social' },
+    { id: 'skill_volunteer', name: '技能公益分享', categoryId: 'culture' },
+    { id: 'donation_drive', name: '公益募捐', categoryId: 'culture' },
+    { id: 'swap_freecycle', name: '公益交换', categoryId: 'culture' },
+  ],
+  nomad_city: [
+    { id: 'newcomer_welcome', name: '新来大理欢迎局', categoryId: 'social' },
+    { id: 'city_settlement_help', name: '本地安顿互助', categoryId: 'social' },
+    { id: 'digital_nomad_meetup', name: '数字游民见面会', categoryId: 'social' },
+    { id: 'remote_work_study', name: '远程工作学习局', categoryId: 'culture' },
+    { id: 'co_living_social', name: '共居社交', categoryId: 'social' },
+    { id: 'local_buddy_pairing', name: '同城搭子配对', categoryId: 'social' },
+    { id: 'rental_life_share', name: '租房生活经验分享', categoryId: 'culture' },
+    { id: 'city_language_exchange', name: '旅居语言交流', categoryId: 'social' },
   ],
   festival_theme: [
     { id: 'march_street_theme', name: '三月街主题', categoryId: 'culture' },

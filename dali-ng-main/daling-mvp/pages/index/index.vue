@@ -148,6 +148,8 @@ const COMMON_SCENE_ID_SET = new Set([
   'market_popups',
   'outdoor_nature',
   'family_pet',
+  'public_welfare',
+  'nomad_city',
   'festival_theme',
 ])
 
