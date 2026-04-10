@@ -104,6 +104,26 @@
           <text class="admin-trace-item">已处理：{{ adminInsight.handledReports || 0 }}</text>
           <text class="admin-trace-item">已忽略：{{ adminInsight.ignoredReports || 0 }}</text>
         </view>
+        <view v-if="adminOpsTagSections.length" class="admin-ops-block">
+          <text class="admin-log-title">后台标签（结构化自动）</text>
+          <view
+            v-for="section in adminOpsTagSections"
+            :key="`admin-ops-${section.key}`"
+            class="admin-ops-row"
+          >
+            <text class="admin-ops-label">{{ section.label }}</text>
+            <view class="admin-ops-tag-list">
+              <text
+                v-for="tag in section.tags"
+                :key="`admin-ops-${section.key}-${tag}`"
+                class="admin-ops-tag"
+              >{{ tag }}</text>
+            </view>
+          </view>
+          <text v-if="adminInsight?.opsTagSummary?.generatedAtMs" class="admin-trace-text">
+            打标时间：{{ formatCommentTime(adminInsight.opsTagSummary.generatedAtMs) }}
+          </text>
+        </view>
         <text v-if="adminInsight.latestReportReason" class="admin-trace-text">
           最近举报：{{ adminInsight.latestReportReason }}
         </text>
@@ -727,6 +747,24 @@ export default {
 
     adminActionHistory() {
       return Array.isArray(this.adminInsight?.actionHistory) ? this.adminInsight.actionHistory : []
+    },
+
+    adminOpsTagSections() {
+      const summary = this.adminInsight?.opsTagSummary || {}
+      const defs = [
+        { key: 'coreTags', label: '核心标签', tags: Array.isArray(summary.coreTags) ? summary.coreTags : [] },
+        { key: 'activityGoal', label: '活动目标', tags: Array.isArray(summary.activityGoal) ? summary.activityGoal : [] },
+        { key: 'chargingMode', label: '收费模式', tags: Array.isArray(summary.chargingMode) ? summary.chargingMode : [] },
+        { key: 'riskBase', label: '风险等级', tags: Array.isArray(summary.riskBase) ? summary.riskBase : [] },
+        { key: 'regionLayer', label: '地域层级', tags: Array.isArray(summary.regionLayer) ? summary.regionLayer : [] },
+        { key: 'distribution', label: '分发属性', tags: Array.isArray(summary.distribution) ? summary.distribution : [] },
+      ]
+      return defs
+        .map((item) => ({
+          ...item,
+          tags: [...new Set((item.tags || []).map((tag) => String(tag || '').trim()).filter(Boolean))].slice(0, 6),
+        }))
+        .filter((item) => item.tags.length > 0)
     },
 
     commentThreads() {
@@ -1673,6 +1711,33 @@ export default {
   margin-top: 18rpx;
   padding-top: 16rpx;
   border-top: 1rpx solid rgba(122, 75, 0, 0.12);
+}
+.admin-ops-block {
+  margin: 8rpx 0 6rpx;
+  padding: 14rpx;
+  border-radius: 10rpx;
+  background: rgba(122, 75, 0, 0.05);
+}
+.admin-ops-row + .admin-ops-row {
+  margin-top: 10rpx;
+}
+.admin-ops-label {
+  display: block;
+  font-size: 22rpx;
+  color: #7A4B00;
+  margin-bottom: 6rpx;
+}
+.admin-ops-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8rpx;
+}
+.admin-ops-tag {
+  padding: 4rpx 12rpx;
+  border-radius: 999rpx;
+  background: rgba(122, 75, 0, 0.1);
+  color: #7A4B00;
+  font-size: 20rpx;
 }
 .admin-log-title {
   display: block;

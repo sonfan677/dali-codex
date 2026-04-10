@@ -59,6 +59,7 @@ async function fetchActivitiesByIds(ids = []) {
         riskLevel: true,
         riskScore: true,
         riskReasonCodes: true,
+        opsTagProfile: true,
         location: true,
         startTime: true,
         endTime: true,
@@ -102,6 +103,75 @@ function buildReportMetaMap(reportList = []) {
     acc[activityId] = current
     return acc
   }, {})
+}
+
+function safeArray(value) {
+  return Array.isArray(value) ? value : []
+}
+
+function addCounter(counter = {}, list = []) {
+  safeArray(list).forEach((item) => {
+    const tag = String(item || '').trim()
+    if (!tag) return
+    counter[tag] = Number(counter[tag] || 0) + 1
+  })
+}
+
+function counterRows(counter = {}, limit = 8) {
+  return Object.keys(counter)
+    .map((label) => ({ label, count: Number(counter[label] || 0) }))
+    .filter((item) => item.count > 0)
+    .sort((a, b) => (b.count !== a.count ? b.count - a.count : a.label.localeCompare(b.label, 'zh-Hans-CN')))
+    .slice(0, limit)
+}
+
+function buildOpsTagOverview(activityList = []) {
+  const total = Array.isArray(activityList) ? activityList.length : 0
+  if (!total) {
+    return {
+      total,
+      tagged: 0,
+      coverageRate: 0,
+      topCoreTags: [],
+      topActivityGoal: [],
+      topChargingMode: [],
+      topRiskBase: [],
+      topRegionLayer: [],
+      topDistribution: [],
+    }
+  }
+
+  const coreCounter = {}
+  const goalCounter = {}
+  const chargeCounter = {}
+  const riskCounter = {}
+  const regionCounter = {}
+  const distributionCounter = {}
+
+  let tagged = 0
+  activityList.forEach((item) => {
+    const profile = item?.opsTagProfile
+    if (!profile || typeof profile !== 'object') return
+    tagged += 1
+    addCounter(coreCounter, profile.coreTags)
+    addCounter(goalCounter, profile?.dimensions?.activityGoal)
+    addCounter(chargeCounter, profile?.dimensions?.commercial?.chargingMode)
+    addCounter(riskCounter, profile?.dimensions?.risk?.base)
+    addCounter(regionCounter, profile?.dimensions?.region?.cityLayer)
+    addCounter(distributionCounter, profile?.dimensions?.operation?.distribution)
+  })
+
+  return {
+    total,
+    tagged,
+    coverageRate: total > 0 ? Number((tagged / total).toFixed(4)) : 0,
+    topCoreTags: counterRows(coreCounter, 10),
+    topActivityGoal: counterRows(goalCounter, 8),
+    topChargingMode: counterRows(chargeCounter, 8),
+    topRiskBase: counterRows(riskCounter, 8),
+    topRegionLayer: counterRows(regionCounter, 8),
+    topDistribution: counterRows(distributionCounter, 8),
+  }
 }
 
 function resolveActionLinkedActivityId(item = {}) {
@@ -328,6 +398,7 @@ exports.main = async () => {
         riskLevel: true,
         riskScore: true,
         riskReasonCodes: true,
+        opsTagProfile: true,
         location: true,
         startTime: true,
         endTime: true,
@@ -600,6 +671,8 @@ exports.main = async () => {
       }
     })
 
+  const opsTagOverview = buildOpsTagOverview(enrichedActivityList)
+
   return {
     success: true,
     currentOpenid: OPENID,
@@ -648,6 +721,7 @@ exports.main = async () => {
       runs: opsPatrolRunList.slice(0, 8),
     },
     reportList,
+    opsTagOverview,
     activityList: enrichedActivityList,
     actionLogList,
     userProfileList,

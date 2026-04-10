@@ -2,6 +2,7 @@ const cloud = require('wx-server-sdk')
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 const db = cloud.database()
 const _ = db.command
+const { buildOpsTagProfile } = require('./opsTagging')
 
 function safeText(v) {
   return String(v || '').trim()
@@ -86,12 +87,29 @@ exports.main = async (event) => {
   }
 
   const nextStatus = current >= finalMax ? 'FULL' : 'OPEN'
+  const nextAddress = safeText(address) || activity.location?.address || ''
   const nextLocation = {
     ...(activity.location || {}),
     lat: nextLat,
     lng: nextLng,
-    address: safeText(address) || activity.location?.address || '',
+    address: nextAddress,
   }
+  const opsTagProfile = buildOpsTagProfile({
+    sceneId: activity.sceneId,
+    typeId: activity.typeId,
+    categoryId: activity.categoryId,
+    chargeType: activity.chargeType || activity.pricing?.chargeType || 'free',
+    feeAmount: Number(activity.feeAmount ?? activity.pricing?.feeAmount ?? 0),
+    maxParticipants: finalMax,
+    requireApproval: !!(activity.requireApproval ?? activity.joinPolicy?.requireApproval),
+    allowWaitlist: !!(activity.allowWaitlist ?? activity.joinPolicy?.allowWaitlist),
+    isGroupFormation: !!activity.isGroupFormation,
+    startTime,
+    address: nextAddress,
+    cityId: activity.cityId || 'dali',
+    lat: nextLat,
+    lng: nextLng,
+  })
 
   await db.collection('activities').doc(activityId).update({
     data: {
@@ -100,6 +118,7 @@ exports.main = async (event) => {
       endTime: new Date(endTime),
       maxParticipants: finalMax,
       status: nextStatus,
+      opsTagProfile,
       modificationRiskScore: _.inc(1),
       updatedAt: db.serverDate(),
     }

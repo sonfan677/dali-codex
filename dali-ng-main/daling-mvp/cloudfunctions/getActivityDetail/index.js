@@ -336,6 +336,24 @@ function buildTrustProfile(activity, user, nowMs) {
   }
 }
 
+function safeArray(value) {
+  return Array.isArray(value) ? value : []
+}
+
+function buildAdminOpsTagSummary(profile = null) {
+  if (!profile || typeof profile !== 'object') return null
+  return {
+    version: String(profile.version || ''),
+    coreTags: safeArray(profile.coreTags).slice(0, 6),
+    activityGoal: safeArray(profile?.dimensions?.activityGoal).slice(0, 4),
+    chargingMode: safeArray(profile?.dimensions?.commercial?.chargingMode).slice(0, 3),
+    riskBase: safeArray(profile?.dimensions?.risk?.base).slice(0, 3),
+    regionLayer: safeArray(profile?.dimensions?.region?.cityLayer).slice(0, 3),
+    distribution: safeArray(profile?.dimensions?.operation?.distribution).slice(0, 4),
+    generatedAtMs: Number(profile.generatedAtMs || 0) || 0,
+  }
+}
+
 exports.main = async (event) => {
   const { OPENID } = cloud.getWXContext()
   const { activityId } = event
@@ -392,6 +410,10 @@ exports.main = async (event) => {
       requireApproval: !!(activity.joinPolicy?.requireApproval ?? activity.requireApproval),
     },
     trustProfile: buildTrustProfile(activity, publisher, nowMs),
+  }
+  const adminOpsTagSummary = buildAdminOpsTagSummary(activity?.opsTagProfile)
+  if (!isAdmin) {
+    delete enrichedActivity.opsTagProfile
   }
   const { data: joinedList } = await db.collection('participations')
     .where({
@@ -520,6 +542,7 @@ exports.main = async (event) => {
       latestReportStatus: latestReport?.reportStatus || '',
       latestHandleNote: latestReport?.handleNote || '',
       latestHandledAt: latestReport?.handledAt || null,
+      opsTagSummary: adminOpsTagSummary,
       actionHistory: actionHistory.slice(0, 5),
     }
   }

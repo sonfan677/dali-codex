@@ -990,6 +990,22 @@
               </view>
             </view>
           </view>
+
+          <view class="admin-distribution-section">
+            <text class="admin-distribution-title">后台标签概览（结构化自动）</text>
+            <text class="card-openid">覆盖率：{{ opsTagCoverageText }}</text>
+            <view v-if="opsTagQuickLines.length === 0" class="card-openid">暂无自动标签数据</view>
+            <view v-else class="ops-tag-quick-list">
+              <view
+                v-for="item in opsTagQuickLines"
+                :key="`ops-tag-line-${item.key}`"
+                class="ops-tag-quick-item"
+              >
+                <text class="ops-tag-quick-label">{{ item.label }}</text>
+                <text class="ops-tag-quick-value">{{ item.value }}</text>
+              </view>
+            </view>
+          </view>
         </view>
 
         <view v-if="filteredActivityList.length === 0" class="empty">
@@ -1486,6 +1502,17 @@ export default {
         loadedAt: null,
       },
       reportList: [],
+      opsTagOverview: {
+        total: 0,
+        tagged: 0,
+        coverageRate: 0,
+        topCoreTags: [],
+        topActivityGoal: [],
+        topChargingMode: [],
+        topRiskBase: [],
+        topRegionLayer: [],
+        topDistribution: [],
+      },
       activityList: [],
       actionLogList: [],
       userProfileList: [],
@@ -2551,6 +2578,33 @@ export default {
       return this.activityDistributionData.categoryRows
     },
 
+    opsTagCoverageText() {
+      const total = Number(this.opsTagOverview?.total || 0)
+      const tagged = Number(this.opsTagOverview?.tagged || 0)
+      if (!total) return '0%（0/0）'
+      const rate = Math.round((tagged / total) * 100)
+      return `${rate}%（${tagged}/${total}）`
+    },
+
+    opsTagQuickLines() {
+      const formatLine = (rows = []) => {
+        const list = (Array.isArray(rows) ? rows : [])
+          .slice(0, 4)
+          .map((item) => `${item.label}(${item.count})`)
+        return list.length ? list.join(' / ') : '暂无'
+      }
+      const ov = this.opsTagOverview || {}
+      const lines = [
+        { key: 'goal', label: '活动目标', value: formatLine(ov.topActivityGoal) },
+        { key: 'charge', label: '收费模式', value: formatLine(ov.topChargingMode) },
+        { key: 'risk', label: '风险等级', value: formatLine(ov.topRiskBase) },
+        { key: 'region', label: '地域层级', value: formatLine(ov.topRegionLayer) },
+        { key: 'distribution', label: '分发属性', value: formatLine(ov.topDistribution) },
+        { key: 'core', label: '核心标签', value: formatLine(ov.topCoreTags) },
+      ]
+      return lines
+    },
+
     filteredActionLogList() {
       const keyword = this.normalizeKeyword(this.searchKeyword)
       const filtered = this.actionLogList.filter((item) => {
@@ -3576,6 +3630,17 @@ export default {
           runs: [],
         }
         this.reportList = res.reportList || []
+        this.opsTagOverview = res.opsTagOverview || {
+          total: 0,
+          tagged: 0,
+          coverageRate: 0,
+          topCoreTags: [],
+          topActivityGoal: [],
+          topChargingMode: [],
+          topRiskBase: [],
+          topRegionLayer: [],
+          topDistribution: [],
+        }
         this.activityList = res.activityList || []
         this.actionLogList = res.actionLogList || []
         this.userProfileList = res.userProfileList || []
@@ -5671,6 +5736,29 @@ export default {
   font-size: 21rpx;
   color: #344054;
   text-align: right;
+}
+.ops-tag-quick-list {
+  margin-top: 10rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+.ops-tag-quick-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+  padding: 10rpx 12rpx;
+  border-radius: 10rpx;
+  background: #f8fafc;
+}
+.ops-tag-quick-label {
+  font-size: 21rpx;
+  color: #475467;
+}
+.ops-tag-quick-value {
+  font-size: 21rpx;
+  color: #1f2937;
+  line-height: 1.5;
 }
 
 .card {

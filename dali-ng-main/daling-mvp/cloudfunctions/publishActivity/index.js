@@ -2,6 +2,7 @@ const cloud = require('wx-server-sdk')
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 const db = cloud.database()
 const _ = db.command
+const { buildOpsTagProfile, OPS_TAG_VERSION } = require('./opsTagging')
 const VERIFY_AUTO_APPROVE_DEFAULT_MINUTES = 10
 
 const DEFAULT_CITY_CONFIG = {
@@ -752,7 +753,7 @@ exports.main = async (event, context) => {
     return { success: false, error: 'INVALID_SCENE', message: '活动场景不合法' }
   }
   if (sceneType?.error === 'INVALID_TYPE') {
-    return { success: false, error: 'INVALID_TYPE', message: '活动形式不合法' }
+    return { success: false, error: 'INVALID_TYPE', message: '活动类型不合法' }
   }
   const finalSceneId = String(sceneType?.sceneId || '').trim()
   const finalSceneName = String(sceneType?.sceneName || sceneName || '').trim()
@@ -864,6 +865,22 @@ exports.main = async (event, context) => {
   const formationDeadline = isGroupFormation
     ? new Date(now + finalFormationWindow * 60 * 1000)
     : null
+  const opsTagProfile = buildOpsTagProfile({
+    sceneId: finalSceneId,
+    typeId: finalTypeId,
+    categoryId: finalCategoryId,
+    chargeType: finalChargeType,
+    feeAmount: finalFeeAmount,
+    maxParticipants,
+    requireApproval: finalRequireApproval,
+    allowWaitlist: finalAllowWaitlist,
+    isGroupFormation: !!isGroupFormation,
+    startTime,
+    address,
+    cityId: finalCityId,
+    lat: latNum,
+    lng: lngNum,
+  })
 
   // 4. 写入数据库
   const trustProfile = buildTrustProfileForPublish(user)
@@ -943,6 +960,7 @@ exports.main = async (event, context) => {
         updatedAt: db.serverDate(),
       },
       trustProfile,
+      opsTagProfile,
       effectiveScore: baseEffectiveScore,
       decayStartedAt: null,
       participantFeedback: {
@@ -1012,6 +1030,8 @@ exports.main = async (event, context) => {
     typeName: finalTypeName,
     chargeType: finalChargeType,
     feeAmount: finalFeeAmount,
+    opsTagVersion: OPS_TAG_VERSION,
+    opsTagCore: Array.isArray(opsTagProfile?.coreTags) ? opsTagProfile.coreTags : [],
     cityConfigVersion: cityConfig.version,
     serverTimestamp: Date.now(),
   }
