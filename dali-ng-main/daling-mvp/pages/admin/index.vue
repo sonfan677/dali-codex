@@ -1006,6 +1006,37 @@
               </view>
             </view>
           </view>
+
+          <view class="admin-distribution-section">
+            <text class="admin-distribution-title">用户分群概览（自动）</text>
+            <text class="card-openid">
+              总样本 {{ userSegmentOverview.total }} · 游客 {{ userSegmentOverview.byFinal.visitor || 0 }} · 旅居 {{ userSegmentOverview.byFinal.nomad || 0 }} · 本地 {{ userSegmentOverview.byFinal.local || 0 }}
+            </text>
+            <text class="card-openid">
+              本次自动回写：{{ userSegmentSync.synced || 0 }}/{{ userSegmentSync.touched || 0 }}{{ userSegmentSync.skipped ? '（已关闭）' : '' }}
+            </text>
+          </view>
+
+          <view class="admin-distribution-section">
+            <text class="admin-distribution-title">运营结论卡（自动）</text>
+            <view v-if="opsInsightCards.length === 0" class="card-openid">暂无结论数据</view>
+            <view v-else class="ops-insight-list">
+              <view
+                v-for="item in opsInsightCards"
+                :key="`insight_${item.key}`"
+                class="ops-insight-item"
+              >
+                <view class="title-row">
+                  <text class="ops-insight-title">{{ item.title }}</text>
+                  <text class="mini-pill mini-pill--log">{{ insightConfidenceText(item.confidence) }}</text>
+                </view>
+                <text class="ops-insight-metric">{{ item.metric || '--' }}</text>
+                <text class="ops-insight-summary">{{ item.summary }}</text>
+                <text class="ops-insight-meta">样本量：{{ item.sampleSize || 0 }}</text>
+                <text class="ops-insight-suggestion">建议动作：{{ item.suggestion }}</text>
+              </view>
+            </view>
+          </view>
         </view>
 
         <view v-if="filteredActivityList.length === 0" class="empty">
@@ -1520,6 +1551,31 @@ export default {
           isPet: 0,
           isApprovalRequired: 0,
         },
+      },
+      opsInsightCards: [],
+      userSegmentOverview: {
+        total: 0,
+        byFinal: {
+          visitor: 0,
+          nomad: 0,
+          local: 0,
+          unknown: 0,
+        },
+        bySource: {
+          manual_lock: 0,
+          self_declared: 0,
+          auto_inferred: 0,
+        },
+        byConfidence: {
+          high: 0,
+          medium: 0,
+          low: 0,
+        },
+      },
+      userSegmentSync: {
+        synced: 0,
+        touched: 0,
+        skipped: false,
       },
       activityList: [],
       actionLogList: [],
@@ -3667,6 +3723,31 @@ export default {
             isApprovalRequired: 0,
           },
         }
+        this.opsInsightCards = Array.isArray(res.opsInsightCards) ? res.opsInsightCards : []
+        this.userSegmentOverview = res.userSegmentOverview || {
+          total: 0,
+          byFinal: {
+            visitor: 0,
+            nomad: 0,
+            local: 0,
+            unknown: 0,
+          },
+          bySource: {
+            manual_lock: 0,
+            self_declared: 0,
+            auto_inferred: 0,
+          },
+          byConfidence: {
+            high: 0,
+            medium: 0,
+            low: 0,
+          },
+        }
+        this.userSegmentSync = res.userSegmentSync || {
+          synced: 0,
+          touched: 0,
+          skipped: false,
+        }
         this.activityList = res.activityList || []
         this.actionLogList = res.actionLogList || []
         this.userProfileList = res.userProfileList || []
@@ -3702,6 +3783,13 @@ export default {
       if (safe === 'high') return 'status-pill--result-risk'
       if (safe === 'medium') return 'status-pill--pending'
       return 'status-pill--handled'
+    },
+
+    insightConfidenceText(level = '') {
+      const safe = String(level || '').toLowerCase()
+      if (safe === 'high') return '高置信度'
+      if (safe === 'medium') return '中置信度'
+      return '低置信度'
     },
 
     async runOpsPatrolNow() {
@@ -5785,6 +5873,45 @@ export default {
   font-size: 21rpx;
   color: #1f2937;
   line-height: 1.5;
+}
+.ops-insight-list {
+  margin-top: 10rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 10rpx;
+}
+.ops-insight-item {
+  padding: 12rpx;
+  border-radius: 10rpx;
+  background: #f7fafc;
+  border: 1rpx solid #e7eef6;
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+}
+.ops-insight-title {
+  font-size: 22rpx;
+  font-weight: 600;
+  color: #1f2937;
+}
+.ops-insight-metric {
+  font-size: 24rpx;
+  font-weight: 700;
+  color: #1a3c5e;
+}
+.ops-insight-summary {
+  font-size: 21rpx;
+  color: #475467;
+  line-height: 1.45;
+}
+.ops-insight-meta {
+  font-size: 20rpx;
+  color: #667085;
+}
+.ops-insight-suggestion {
+  font-size: 20rpx;
+  color: #0f766e;
+  line-height: 1.4;
 }
 
 .card {

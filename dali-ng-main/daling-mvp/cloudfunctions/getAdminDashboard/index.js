@@ -49,13 +49,23 @@ async function fetchActivitiesByIds(ids = []) {
       .field({
         _id: true,
         cityId: true,
+        sceneId: true,
+        sceneName: true,
+        typeId: true,
+        typeName: true,
         categoryId: true,
         categoryLabel: true,
         title: true,
+        publisherId: true,
         publisherNickname: true,
         currentParticipants: true,
+        minParticipants: true,
         status: true,
+        isGroupFormation: true,
+        formationStatus: true,
         isRecommended: true,
+        chargeType: true,
+        pricing: true,
         riskLevel: true,
         riskScore: true,
         riskReasonCodes: true,
@@ -70,6 +80,41 @@ async function fetchActivitiesByIds(ids = []) {
     results.push(...(data || []))
   }
   return results
+}
+
+async function fetchRecentParticipations(maxCount = PARTICIPATION_ANALYSIS_LIMIT) {
+  const safeMax = Math.max(100, Math.min(3000, Number(maxCount || PARTICIPATION_ANALYSIS_LIMIT)))
+  const pageSize = 100
+  const results = []
+  let skip = 0
+  while (results.length < safeMax) {
+    const rest = safeMax - results.length
+    const take = Math.min(pageSize, rest)
+    const { data } = await db.collection('participations')
+      .orderBy('joinedAt', 'desc')
+      .skip(skip)
+      .limit(take)
+      .field({
+        _id: true,
+        _openid: true,
+        cityId: true,
+        activityId: true,
+        userId: true,
+        status: true,
+        joinedAt: true,
+        appliedAt: true,
+        cancelledAt: true,
+        createdAt: true,
+        updatedAt: true,
+      })
+      .get()
+      .catch(() => ({ data: [] }))
+    if (!Array.isArray(data) || data.length === 0) break
+    results.push(...data)
+    if (data.length < take) break
+    skip += data.length
+  }
+  return results.slice(0, safeMax)
 }
 
 function buildReportMetaMap(reportList = []) {
@@ -258,10 +303,612 @@ function calcUserRiskScore(user = {}) {
 }
 
 const VERIFY_AUTO_APPROVE_DEFAULT_MINUTES = 10
+const ANALYSIS_WINDOW_DAYS = 90
+const PARTICIPATION_ANALYSIS_LIMIT = 1200
+const AUTO_USER_SEGMENT_SYNC_ENABLED = String(process.env.AUTO_USER_SEGMENT_SYNC || 'on').toLowerCase() !== 'off'
+const MAX_SEGMENT_SYNC_PER_LOAD = 80
 
 function toTimestamp(value) {
   const ms = new Date(value).getTime()
   return Number.isFinite(ms) ? ms : NaN
+}
+
+function toDayKey(value) {
+  const ts = toTimestamp(value)
+  if (!Number.isFinite(ts)) return ''
+  const d = new Date(ts)
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+function hoursOf(value) {
+  const ts = toTimestamp(value)
+  if (!Number.isFinite(ts)) return NaN
+  return new Date(ts).getHours()
+}
+
+function isNightStart(value) {
+  const hour = hoursOf(value)
+  if (!Number.isFinite(hour)) return false
+  return hour >= 19 || hour < 2
+}
+
+function pctText(num = 0, digits = 1) {
+  const n = Number(num || 0)
+  if (!Number.isFinite(n)) return '0%'
+  return `${(n * 100).toFixed(digits)}%`
+}
+
+function pickTopScene(counter = {}, minCount = 1) {
+  const rows = Object.keys(counter)
+    .map((sceneName) => ({ sceneName, count: Number(counter[sceneName] || 0) }))
+    .filter((item) => item.count >= minCount)
+    .sort((a, b) => (b.count !== a.count ? b.count - a.count : a.sceneName.localeCompare(b.sceneName, 'zh-Hans-CN')))
+  return rows[0] || null
+}
+
+function normalizeSegmentCode(raw = '') {
+  const safe = String(raw || '').trim().toLowerCase()
+  if (!safe) return 'unknown'
+  if (['游客', 'tourist', 'visitor', 'travel'].includes(safe)) return 'visitor'
+  if (['旅居', '旅居者', 'nomad', 'stay'].includes(safe)) return 'nomad'
+  if (['本地', '本地人', '常住', 'local', 'resident'].includes(safe)) return 'local'
+  if (['unknown', 'none', 'skip', '暂不选择', '未选择'].includes(safe)) return 'unknown'
+  return 'unknown'
+}
+
+function segmentLabel(code = 'unknown') {
+  const map = {
+    visitor: '游客',
+    nomad: '旅居者',
+    local: '本地常住',
+    unknown: '未分群',
+  }
+  return map[String(code || '').toLowerCase()] || '未分群'
+}
+
+function buildUserBehaviorMap(userRows = [], activityRows = [], participationRows = []) {
+  const map = new Map()
+  const ensure = (openid = '') => {
+    const key = String(openid || '').trim()
+    if (!key) return null
+    if (!map.has(key)) {
+      map.set(key, {
+        openid: key,
+        firstSeenMs: NaN,
+        lastSeenMs: NaN,
+        activeDaySet30: new Set(),
+        activeDaySet60: new Set(),
+        activeDaySet90: new Set(),
+        recentPublish90: 0,
+        recentJoin90: 0,
+        nightPublish90: 0,
+        nightJoin90: 0,
+        joinedSceneCounter: {},
+      })
+    }
+    return map.get(key)
+  }
+  const nowMs = Date.now()
+  const start30 = nowMs - 30 * 24 * 60 * 60 * 1000
+  const start60 = nowMs - 60 * 24 * 60 * 60 * 1000
+  const start90 = nowMs - ANALYSIS_WINDOW_DAYS * 24 * 60 * 60 * 1000
+
+  const markActive = (state, ts) => {
+    if (!state || !Number.isFinite(ts)) return
+    state.firstSeenMs = Number.isFinite(state.firstSeenMs) ? Math.min(state.firstSeenMs, ts) : ts
+    state.lastSeenMs = Number.isFinite(state.lastSeenMs) ? Math.max(state.lastSeenMs, ts) : ts
+    const dayKey = toDayKey(ts)
+    if (!dayKey) return
+    if (ts >= start30) state.activeDaySet30.add(dayKey)
+    if (ts >= start60) state.activeDaySet60.add(dayKey)
+    if (ts >= start90) state.activeDaySet90.add(dayKey)
+  }
+
+  userRows.forEach((item) => {
+    const state = ensure(item?._openid)
+    if (!state) return
+    markActive(state, toTimestamp(item.createdAt))
+    markActive(state, toTimestamp(item.updatedAt))
+  })
+
+  activityRows.forEach((item) => {
+    const state = ensure(item?.publisherId || item?._openid)
+    if (!state) return
+    const createdTs = toTimestamp(item.createdAt)
+    markActive(state, createdTs)
+    markActive(state, toTimestamp(item.updatedAt))
+    if (Number.isFinite(createdTs) && createdTs >= start90) {
+      state.recentPublish90 += 1
+      if (isNightStart(item.startTime)) state.nightPublish90 += 1
+    }
+  })
+
+  participationRows.forEach((item) => {
+    const openid = item?.userId || item?._openid
+    const state = ensure(openid)
+    if (!state) return
+    const joinedTs = toTimestamp(item.joinedAt || item.appliedAt || item.createdAt)
+    markActive(state, joinedTs)
+    markActive(state, toTimestamp(item.updatedAt))
+    const status = String(item.status || '')
+    if (Number.isFinite(joinedTs) && joinedTs >= start90 && ['joined', 'pending_approval', 'waitlist', 'cancelled'].includes(status)) {
+      state.recentJoin90 += 1
+      if (isNightStart(item.activityStartTime)) state.nightJoin90 += 1
+      const sceneName = String(item.activitySceneName || '').trim()
+      if (sceneName) state.joinedSceneCounter[sceneName] = Number(state.joinedSceneCounter[sceneName] || 0) + 1
+    }
+  })
+
+  return map
+}
+
+function inferAutoSegment(behavior = {}, user = {}) {
+  const firstMs = Number(behavior.firstSeenMs)
+  const lastMs = Number(behavior.lastSeenMs)
+  const spanDays = (Number.isFinite(firstMs) && Number.isFinite(lastMs))
+    ? Math.max(0, Math.round((lastMs - firstMs) / (24 * 60 * 60 * 1000)))
+    : 0
+  const active30 = Number(behavior.activeDaySet30?.size || 0)
+  const active60 = Number(behavior.activeDaySet60?.size || 0)
+  const active90 = Number(behavior.activeDaySet90?.size || 0)
+  const publish90 = Number(behavior.recentPublish90 || 0)
+  const join90 = Number(behavior.recentJoin90 || 0)
+  const noShowCount = Number(user.noShowCount || 0)
+  const reportAgainstCount = Number(user.reportAgainstCount || 0)
+  const riskPenalty = noShowCount + reportAgainstCount
+
+  let autoInferred = 'nomad'
+  let confidence = 'medium'
+  const reasons = []
+
+  if (spanDays >= 90 || active60 >= 20 || publish90 >= 6) {
+    autoInferred = 'local'
+    confidence = spanDays >= 120 || active60 >= 28 ? 'high' : 'medium'
+    reasons.push('活跃跨度/活跃天数较高')
+  } else if (spanDays <= 14 && active30 <= 7 && publish90 <= 1 && join90 <= 5) {
+    autoInferred = 'visitor'
+    confidence = spanDays <= 10 && active30 <= 5 ? 'high' : 'medium'
+    reasons.push('短周期低频活跃特征')
+  } else {
+    autoInferred = 'nomad'
+    confidence = (spanDays >= 45 || active60 >= 10 || publish90 >= 2) ? 'high' : 'medium'
+    reasons.push('中周期持续活跃特征')
+  }
+
+  if (active90 <= 2) confidence = 'low'
+  if (riskPenalty >= 4 && confidence === 'high') confidence = 'medium'
+
+  return {
+    autoInferred,
+    confidence,
+    evidence: {
+      spanDays,
+      activeDays30: active30,
+      activeDays60: active60,
+      activeDays90: active90,
+      recentPublish90: publish90,
+      recentJoin90: join90,
+      nightPublish90: Number(behavior.nightPublish90 || 0),
+      nightJoin90: Number(behavior.nightJoin90 || 0),
+    },
+    reasons,
+  }
+}
+
+function resolveFinalSegment(user = {}, inferred = {}) {
+  const userSegment = user?.userSegment || {}
+  const selfDeclared = normalizeSegmentCode(userSegment.selfDeclared || user.segmentSelfDeclared || '')
+  const manualLock = normalizeSegmentCode(userSegment.manualLock || user.segmentManualLock || '')
+  const autoInferred = normalizeSegmentCode(inferred.autoInferred || 'unknown')
+
+  if (manualLock !== 'unknown') {
+    return {
+      selfDeclared,
+      autoInferred,
+      finalLabel: manualLock,
+      confidence: 'high',
+      source: 'manual_lock',
+    }
+  }
+  if (selfDeclared !== 'unknown') {
+    return {
+      selfDeclared,
+      autoInferred,
+      finalLabel: selfDeclared,
+      confidence: inferred.confidence === 'low' ? 'medium' : inferred.confidence,
+      source: 'self_declared',
+    }
+  }
+  return {
+    selfDeclared: 'unknown',
+    autoInferred,
+    finalLabel: autoInferred,
+    confidence: inferred.confidence || 'medium',
+    source: 'auto_inferred',
+  }
+}
+
+function buildUserSegmentPack(userRows = [], activityRows = [], participationRows = []) {
+  const behaviorMap = buildUserBehaviorMap(userRows, activityRows, participationRows)
+  const segmentList = userRows.map((user) => {
+    const behavior = behaviorMap.get(user?._openid) || {}
+    const inferred = inferAutoSegment(behavior, user)
+    const finalResult = resolveFinalSegment(user, inferred)
+    return {
+      openid: user._openid || '',
+      nickname: user.nickname || '',
+      cityId: user.cityId || 'dali',
+      ...finalResult,
+      evidence: inferred.evidence,
+      reasons: inferred.reasons,
+    }
+  })
+
+  const overview = {
+    total: segmentList.length,
+    byFinal: { visitor: 0, nomad: 0, local: 0, unknown: 0 },
+    bySource: { manual_lock: 0, self_declared: 0, auto_inferred: 0 },
+    byConfidence: { high: 0, medium: 0, low: 0 },
+  }
+  segmentList.forEach((row) => {
+    const key = normalizeSegmentCode(row.finalLabel)
+    overview.byFinal[key] = Number(overview.byFinal[key] || 0) + 1
+    const source = String(row.source || 'auto_inferred')
+    overview.bySource[source] = Number(overview.bySource[source] || 0) + 1
+    const confidence = String(row.confidence || 'medium')
+    overview.byConfidence[confidence] = Number(overview.byConfidence[confidence] || 0) + 1
+  })
+  return { segmentList, overview }
+}
+
+async function syncUserSegmentsToDb(userRows = [], segmentList = []) {
+  if (!AUTO_USER_SEGMENT_SYNC_ENABLED) return { synced: 0, touched: 0, skipped: true }
+  const byOpenid = segmentList.reduce((acc, item) => {
+    if (item?.openid) acc[item.openid] = item
+    return acc
+  }, {})
+  const targets = (userRows || [])
+    .map((user) => {
+      const next = byOpenid[user?._openid]
+      if (!next || !user?._id || !user?._openid) return null
+      const prev = user.userSegment || {}
+      const changed = (
+        normalizeSegmentCode(prev.selfDeclared || '') !== normalizeSegmentCode(next.selfDeclared || '')
+        || normalizeSegmentCode(prev.autoInferred || '') !== normalizeSegmentCode(next.autoInferred || '')
+        || normalizeSegmentCode(prev.finalLabel || '') !== normalizeSegmentCode(next.finalLabel || '')
+        || String(prev.confidence || '') !== String(next.confidence || '')
+        || String(prev.source || '') !== String(next.source || '')
+      )
+      if (!changed) return null
+      return {
+        docId: user._id,
+        openid: user._openid,
+        patch: {
+          selfDeclared: next.selfDeclared,
+          autoInferred: next.autoInferred,
+          finalLabel: next.finalLabel,
+          confidence: next.confidence,
+          source: next.source,
+          evidence: next.evidence,
+          reasons: next.reasons,
+          version: 'segment_v1',
+          updatedAt: db.serverDate(),
+        },
+      }
+    })
+    .filter(Boolean)
+    .slice(0, MAX_SEGMENT_SYNC_PER_LOAD)
+
+  let synced = 0
+  for (const item of targets) {
+    try {
+      await db.collection('users').doc(item.docId).update({
+        data: {
+          userSegment: item.patch,
+          segmentTagVersion: 'segment_v1',
+          segmentUpdatedAt: db.serverDate(),
+          updatedAt: db.serverDate(),
+        },
+      })
+      synced += 1
+    } catch (e) {
+      console.error('同步用户分群失败', item.openid, e)
+    }
+  }
+
+  return { synced, touched: targets.length, skipped: false }
+}
+
+function buildSegmentLabelMap(segmentList = []) {
+  return segmentList.reduce((acc, item) => {
+    const openid = String(item?.openid || '').trim()
+    if (!openid) return acc
+    acc[openid] = normalizeSegmentCode(item.finalLabel || 'unknown')
+    return acc
+  }, {})
+}
+
+function buildSceneCounterFromActivities(activityRows = [], filterFn = null) {
+  const counter = {}
+  ;(activityRows || []).forEach((item) => {
+    if (typeof filterFn === 'function' && !filterFn(item)) return
+    const sceneName = String(item?.sceneName || '未分类场景').trim() || '未分类场景'
+    counter[sceneName] = Number(counter[sceneName] || 0) + 1
+  })
+  return counter
+}
+
+function buildSceneCounterFromParticipations(participationRows = [], segmentMap = {}, segmentCode = 'unknown') {
+  const counter = {}
+  ;(participationRows || []).forEach((item) => {
+    if (String(item?.status || '') !== 'joined') return
+    const openid = String(item?.userId || item?._openid || '').trim()
+    if (!openid) return
+    const seg = normalizeSegmentCode(segmentMap[openid] || 'unknown')
+    if (seg !== segmentCode) return
+    const sceneName = String(item?.activitySceneName || '').trim()
+    if (!sceneName) return
+    counter[sceneName] = Number(counter[sceneName] || 0) + 1
+  })
+  return counter
+}
+
+function buildRepeatByScene(participationRows = []) {
+  const sceneUserCounter = {}
+  ;(participationRows || []).forEach((item) => {
+    if (String(item?.status || '') !== 'joined') return
+    const sceneName = String(item?.activitySceneName || '').trim()
+    const userId = String(item?.userId || item?._openid || '').trim()
+    if (!sceneName || !userId) return
+    sceneUserCounter[sceneName] = sceneUserCounter[sceneName] || {}
+    sceneUserCounter[sceneName][userId] = Number(sceneUserCounter[sceneName][userId] || 0) + 1
+  })
+
+  return Object.keys(sceneUserCounter).map((sceneName) => {
+    const users = sceneUserCounter[sceneName]
+    const allUserIds = Object.keys(users)
+    const uniqueUsers = allUserIds.length
+    const repeatUsers = allUserIds.filter((uid) => Number(users[uid] || 0) >= 2).length
+    const rate = uniqueUsers > 0 ? repeatUsers / uniqueUsers : 0
+    return { sceneName, uniqueUsers, repeatUsers, repeatRate: rate }
+  })
+}
+
+function buildOperationInsightCards(input = {}) {
+  const activityRows = Array.isArray(input.activityRows) ? input.activityRows : []
+  const participationRows = Array.isArray(input.participationRows) ? input.participationRows : []
+  const segmentList = Array.isArray(input.segmentList) ? input.segmentList : []
+  const segmentMap = buildSegmentLabelMap(segmentList)
+  const nowMs = Date.now()
+  const start90Ms = nowMs - ANALYSIS_WINDOW_DAYS * 24 * 60 * 60 * 1000
+  const activities90 = activityRows.filter((item) => {
+    const ts = toTimestamp(item.createdAt || item.startTime)
+    return Number.isFinite(ts) && ts >= start90Ms
+  })
+
+  const cards = []
+
+  // 1) 大理发起最多
+  const launchCounter = buildSceneCounterFromActivities(activities90, (item) => String(item.cityId || 'dali') === 'dali')
+  const launchTop = pickTopScene(launchCounter, 1)
+  cards.push({
+    key: 'top_launch_scene',
+    title: '大理用户发起最多的活动',
+    summary: launchTop ? `近${ANALYSIS_WINDOW_DAYS}天发起最多的是「${launchTop.sceneName}」` : '样本不足，暂未形成稳定结论',
+    metric: launchTop ? `${launchTop.count} 场` : '--',
+    sampleSize: activities90.length,
+    confidence: activities90.length >= 20 ? 'high' : activities90.length >= 8 ? 'medium' : 'low',
+    suggestion: launchTop ? `建议围绕「${launchTop.sceneName}」做固定档期和推荐位实验。` : '先补充样本后再看趋势。',
+  })
+
+  // 2) 游客/旅居/本地偏好
+  const visitorTop = pickTopScene(buildSceneCounterFromParticipations(participationRows, segmentMap, 'visitor'), 1)
+  const nomadTop = pickTopScene(buildSceneCounterFromParticipations(participationRows, segmentMap, 'nomad'), 1)
+  const localTop = pickTopScene(buildSceneCounterFromParticipations(participationRows, segmentMap, 'local'), 1)
+  cards.push({
+    key: 'segment_preference',
+    title: '游客/旅居/本地偏好',
+    summary: `游客偏好：${visitorTop?.sceneName || '暂无'}；旅居偏好：${nomadTop?.sceneName || '暂无'}；本地偏好：${localTop?.sceneName || '暂无'}`,
+    metric: `游客${visitorTop?.count || 0} / 旅居${nomadTop?.count || 0} / 本地${localTop?.count || 0}`,
+    sampleSize: participationRows.filter((item) => String(item.status || '') === 'joined').length,
+    confidence: participationRows.length >= 40 ? 'high' : participationRows.length >= 15 ? 'medium' : 'low',
+    suggestion: '按分群分别推首页“猜你想去”，并对比7日报名提升。',
+  })
+
+  // 3) 哪类更容易成局
+  const groupRows = activities90.filter((item) => !!item.isGroupFormation)
+  const formingByScene = {}
+  groupRows.forEach((item) => {
+    const sceneName = String(item.sceneName || '未分类场景')
+    const minNeed = Number(item.minParticipants || 0)
+    const current = Number(item.currentParticipants || 0)
+    const formed = String(item.formationStatus || '') === 'CONFIRMED' || (minNeed > 0 && current >= minNeed)
+    formingByScene[sceneName] = formingByScene[sceneName] || { total: 0, formed: 0 }
+    formingByScene[sceneName].total += 1
+    if (formed) formingByScene[sceneName].formed += 1
+  })
+  const formingRows = Object.keys(formingByScene).map((sceneName) => {
+    const item = formingByScene[sceneName]
+    const rate = item.total > 0 ? item.formed / item.total : 0
+    return { sceneName, ...item, rate }
+  }).sort((a, b) => (b.rate !== a.rate ? b.rate - a.rate : b.formed - a.formed))
+  const easiest = formingRows.find((item) => item.total >= 2) || formingRows[0]
+  cards.push({
+    key: 'forming_easiest',
+    title: '最容易成局的活动类型',
+    summary: easiest ? `「${easiest.sceneName}」成局率最高` : '暂无成局样本',
+    metric: easiest ? `${pctText(easiest.rate)}（${easiest.formed}/${easiest.total}）` : '--',
+    sampleSize: groupRows.length,
+    confidence: groupRows.length >= 16 ? 'high' : groupRows.length >= 8 ? 'medium' : 'low',
+    suggestion: easiest ? `优先把「${easiest.sceneName}」做成固定周更栏目。` : '先增加需要成团的活动样本。',
+  })
+
+  // 4) 夜场适配
+  const nightRows = activities90.filter((item) => isNightStart(item.startTime))
+  const nightByScene = {}
+  nightRows.forEach((item) => {
+    const sceneName = String(item.sceneName || '未分类场景')
+    nightByScene[sceneName] = nightByScene[sceneName] || { total: 0, participants: 0 }
+    nightByScene[sceneName].total += 1
+    nightByScene[sceneName].participants += Number(item.currentParticipants || 0)
+  })
+  const nightTop = Object.keys(nightByScene)
+    .map((sceneName) => {
+      const item = nightByScene[sceneName]
+      return {
+        sceneName,
+        total: item.total,
+        avgParticipants: item.total > 0 ? item.participants / item.total : 0,
+      }
+    })
+    .sort((a, b) => (b.avgParticipants !== a.avgParticipants ? b.avgParticipants - a.avgParticipants : b.total - a.total))[0]
+  cards.push({
+    key: 'night_fit_scene',
+    title: '更适合夜场的活动',
+    summary: nightTop ? `夜场平均参与人数最高的是「${nightTop.sceneName}」` : '夜场样本不足',
+    metric: nightTop ? `${nightTop.avgParticipants.toFixed(1)}人/场` : '--',
+    sampleSize: nightRows.length,
+    confidence: nightRows.length >= 12 ? 'high' : nightRows.length >= 6 ? 'medium' : 'low',
+    suggestion: nightTop ? `夜场优先排「${nightTop.sceneName}」，并加强安全提示。` : '先积累夜场活动样本。',
+  })
+
+  // 5) 复购表现
+  const repeatRows = buildRepeatByScene(participationRows)
+  const repeatTop = repeatRows
+    .filter((item) => item.uniqueUsers >= 3)
+    .sort((a, b) => (b.repeatRate !== a.repeatRate ? b.repeatRate - a.repeatRate : b.repeatUsers - a.repeatUsers))[0]
+  cards.push({
+    key: 'repeat_best_scene',
+    title: '复购（复参与）表现最佳',
+    summary: repeatTop ? `「${repeatTop.sceneName}」复参与率最高` : '暂无可用复参与样本',
+    metric: repeatTop ? `${pctText(repeatTop.repeatRate)}（${repeatTop.repeatUsers}/${repeatTop.uniqueUsers}）` : '--',
+    sampleSize: repeatRows.reduce((sum, item) => sum + item.uniqueUsers, 0),
+    confidence: repeatRows.length >= 6 ? 'medium' : 'low',
+    suggestion: repeatTop ? `针对「${repeatTop.sceneName}」增加会员/连续参与激励。` : '先扩大连续两次参与样本。',
+  })
+
+  // 6) 官方介入
+  const officialRows = activities90.map((item) => {
+    const tags = safeArray(item?.opsTagProfile?.dimensions?.operation?.officialOpsValue)
+    return {
+      sceneName: String(item.sceneName || '未分类场景'),
+      officialHint: tags.some((tag) => String(tag).startsWith('适合官方')),
+    }
+  })
+  const officialCounter = {}
+  officialRows.forEach((item) => {
+    officialCounter[item.sceneName] = officialCounter[item.sceneName] || { total: 0, hinted: 0 }
+    officialCounter[item.sceneName].total += 1
+    if (item.officialHint) officialCounter[item.sceneName].hinted += 1
+  })
+  const officialTop = Object.keys(officialCounter)
+    .map((sceneName) => {
+      const row = officialCounter[sceneName]
+      return {
+        sceneName,
+        total: row.total,
+        hinted: row.hinted,
+        rate: row.total > 0 ? row.hinted / row.total : 0,
+      }
+    })
+    .filter((item) => item.total >= 2)
+    .sort((a, b) => (b.rate !== a.rate ? b.rate - a.rate : b.hinted - a.hinted))[0]
+  cards.push({
+    key: 'official_intervention',
+    title: '最适合平台官方介入',
+    summary: officialTop ? `「${officialTop.sceneName}」具备最高官方介入信号` : '暂无稳定官方介入信号',
+    metric: officialTop ? `${pctText(officialTop.rate)}（${officialTop.hinted}/${officialTop.total}）` : '--',
+    sampleSize: activities90.length,
+    confidence: officialTop && officialTop.total >= 6 ? 'high' : officialTop ? 'medium' : 'low',
+    suggestion: officialTop ? '可优先尝试官方联办、官方专题推荐。' : '先扩大活动样本再判断官方介入方向。',
+  })
+
+  // 7) 商家合作
+  const bizCounter = {}
+  activities90.forEach((item) => {
+    const sceneName = String(item.sceneName || '未分类场景')
+    const supplyTags = safeArray(item?.opsTagProfile?.dimensions?.commercial?.supplySide)
+    const pathTags = safeArray(item?.opsTagProfile?.dimensions?.commercial?.monetizationPath)
+    const chargeType = String(item.chargeType || item?.pricing?.chargeType || '').toLowerCase()
+    const hasBizSignal = supplyTags.some((tag) => ['商家驱动', '品牌驱动'].includes(String(tag)))
+      || pathTags.some((tag) => ['品牌赞助', '商品销售', '餐饮联动', '酒水联动'].includes(String(tag)))
+      || ['aa', 'paid'].includes(chargeType)
+    bizCounter[sceneName] = bizCounter[sceneName] || { total: 0, biz: 0 }
+    bizCounter[sceneName].total += 1
+    if (hasBizSignal) bizCounter[sceneName].biz += 1
+  })
+  const bizTop = Object.keys(bizCounter)
+    .map((sceneName) => {
+      const item = bizCounter[sceneName]
+      return {
+        sceneName,
+        total: item.total,
+        biz: item.biz,
+        rate: item.total > 0 ? item.biz / item.total : 0,
+      }
+    })
+    .filter((item) => item.total >= 2)
+    .sort((a, b) => (b.rate !== a.rate ? b.rate - a.rate : b.biz - a.biz))[0]
+  cards.push({
+    key: 'merchant_coop',
+    title: '最适合与商家合作',
+    summary: bizTop ? `「${bizTop.sceneName}」商家合作信号最强` : '暂无稳定商家合作信号',
+    metric: bizTop ? `${pctText(bizTop.rate)}（${bizTop.biz}/${bizTop.total}）` : '--',
+    sampleSize: activities90.length,
+    confidence: bizTop && bizTop.total >= 6 ? 'high' : bizTop ? 'medium' : 'low',
+    suggestion: bizTop ? `先从「${bizTop.sceneName}」切入，设计联名套餐和商户包。` : '继续积累付费与联名活动样本。',
+  })
+
+  // 8) 节庆带动
+  const dayStats = {}
+  activities90.forEach((item) => {
+    const dayKey = toDayKey(item.startTime || item.createdAt)
+    if (!dayKey) return
+    const sceneName = String(item.sceneName || '未分类场景')
+    const isFestival = String(item.sceneId || '') === 'festival_theme'
+    dayStats[dayKey] = dayStats[dayKey] || { festival: 0, nonFestival: 0, nonFestivalSceneCounter: {} }
+    if (isFestival) {
+      dayStats[dayKey].festival += 1
+    } else {
+      dayStats[dayKey].nonFestival += 1
+      dayStats[dayKey].nonFestivalSceneCounter[sceneName] = Number(dayStats[dayKey].nonFestivalSceneCounter[sceneName] || 0) + 1
+    }
+  })
+  const dayRows = Object.keys(dayStats).map((dayKey) => ({ dayKey, ...dayStats[dayKey] }))
+  const festivalDays = dayRows.filter((item) => item.festival > 0)
+  const normalDays = dayRows.filter((item) => item.festival === 0)
+  const avgFestivalNon = festivalDays.length
+    ? festivalDays.reduce((sum, item) => sum + item.nonFestival, 0) / festivalDays.length
+    : 0
+  const avgNormalNon = normalDays.length
+    ? normalDays.reduce((sum, item) => sum + item.nonFestival, 0) / normalDays.length
+    : 0
+  const uplift = avgNormalNon > 0 ? (avgFestivalNon - avgNormalNon) / avgNormalNon : 0
+  const boostedSceneCounter = {}
+  festivalDays.forEach((item) => {
+    Object.keys(item.nonFestivalSceneCounter || {}).forEach((sceneName) => {
+      boostedSceneCounter[sceneName] = Number(boostedSceneCounter[sceneName] || 0) + Number(item.nonFestivalSceneCounter[sceneName] || 0)
+    })
+  })
+  const boostedScene = pickTopScene(boostedSceneCounter, 1)
+  cards.push({
+    key: 'festival_uplift',
+    title: '节庆主题带动效应',
+    summary: festivalDays.length && normalDays.length
+      ? `节庆日非节庆活动均值 ${avgFestivalNon.toFixed(1)}，较平日 ${avgNormalNon.toFixed(1)}，带动 ${pctText(uplift)}`
+      : '当前样本不足，暂无法形成稳定节庆带动结论',
+    metric: boostedScene ? `被带动最多：${boostedScene.sceneName}` : '--',
+    sampleSize: dayRows.length,
+    confidence: festivalDays.length >= 3 && normalDays.length >= 5 ? 'medium' : 'low',
+    suggestion: boostedScene
+      ? `节庆窗口可联动「${boostedScene.sceneName}」做跨场景专题。`
+      : '建议增加节庆样本后再判断带动关系。',
+  })
+
+  return cards
 }
 
 function resolveVerifyAutoApproveMinutes() {
@@ -369,7 +1016,7 @@ exports.main = async () => {
     return { success: false, error: 'UNAUTHORIZED', message: '无管理员权限' }
   }
 
-  const [pendingUsersRes, reportsRes, activitiesRes, actionLogsRes, userProfilesRes] = await Promise.all([
+  const [pendingUsersRes, reportsRes, activitiesRes, actionLogsRes, userProfilesRes, participationsRaw] = await Promise.all([
     db.collection('users')
       .where({ verifyStatus: 'pending' })
       .field({
@@ -413,13 +1060,23 @@ exports.main = async () => {
       .field({
         _id: true,
         cityId: true,
+        sceneId: true,
+        sceneName: true,
+        typeId: true,
+        typeName: true,
         categoryId: true,
         categoryLabel: true,
         title: true,
+        publisherId: true,
         publisherNickname: true,
         currentParticipants: true,
+        minParticipants: true,
         status: true,
+        isGroupFormation: true,
+        formationStatus: true,
         isRecommended: true,
+        chargeType: true,
+        pricing: true,
         riskLevel: true,
         riskScore: true,
         riskReasonCodes: true,
@@ -513,11 +1170,15 @@ exports.main = async () => {
         verifyReviewedAt: true,
         realName: true,
         phone: true,
+        userSegment: true,
+        segmentTagVersion: true,
+        segmentUpdatedAt: true,
         createdAt: true,
         updatedAt: true,
       })
       .get()
       .catch(() => ({ data: [] })),
+    fetchRecentParticipations(PARTICIPATION_ANALYSIS_LIMIT),
   ])
 
   const shouldFilterCity = meta.adminRole === 'cityAdmin'
@@ -592,6 +1253,9 @@ exports.main = async () => {
   const rawUserProfiles = shouldFilterCity
     ? (userProfilesRes.data || []).filter((item) => !item.cityId || item.cityId === meta.cityId)
     : (userProfilesRes.data || [])
+  const rawParticipations = shouldFilterCity
+    ? (participationsRaw || []).filter((item) => !item.cityId || item.cityId === meta.cityId)
+    : (participationsRaw || [])
 
   const last24hMs = Date.now() - 24 * 60 * 60 * 1000
 
@@ -614,6 +1278,16 @@ exports.main = async () => {
 
   if (missingLogActivityIds.length) {
     const extraActivities = await fetchActivitiesByIds(missingLogActivityIds)
+    extraActivities.forEach((item) => {
+      activityMap[item._id] = item
+    })
+  }
+
+  const missingParticipationActivityIds = rawParticipations
+    .map((item) => item.activityId)
+    .filter((id) => id && !activityMap[id])
+  if (missingParticipationActivityIds.length) {
+    const extraActivities = await fetchActivitiesByIds(missingParticipationActivityIds)
     extraActivities.forEach((item) => {
       activityMap[item._id] = item
     })
@@ -653,9 +1327,36 @@ exports.main = async () => {
     })
     .slice(0, 80)
 
+  const participationList = rawParticipations
+    .map((item) => ({
+      ...item,
+      activitySceneName: activityMap[item.activityId]?.sceneName
+        || activityMap[item.activityId]?.categoryLabel
+        || '',
+      activityStartTime: activityMap[item.activityId]?.startTime || null,
+      activityCityId: activityMap[item.activityId]?.cityId || '',
+    }))
+    .filter((item) => {
+      if (!shouldFilterCity) return true
+      return !item.activityCityId || item.activityCityId === meta.cityId || !item.cityId || item.cityId === meta.cityId
+    })
+    .slice(0, PARTICIPATION_ANALYSIS_LIMIT)
+
+  const { segmentList, overview: userSegmentOverview } = buildUserSegmentPack(
+    rawUserProfiles,
+    Object.values(activityMap),
+    participationList
+  )
+  const segmentByOpenid = segmentList.reduce((acc, item) => {
+    if (item?.openid) acc[item.openid] = item
+    return acc
+  }, {})
+  const segmentSyncResult = await syncUserSegmentsToDb(rawUserProfiles, segmentList)
+
   const userProfileList = rawUserProfiles
     .slice(0, 300)
     .map((item) => {
+      const segment = segmentByOpenid[item._openid] || null
       const realNamePlain = maybeDecodeSensitive(item.realName || '')
       const phonePlain = maybeDecodeSensitive(item.phone || '')
       const identityReasons = normalizeIdentityReasons(item.identityCheckReasons)
@@ -689,6 +1390,25 @@ exports.main = async () => {
         hasPhone: !!phonePlain,
         realNameMasked: maskName(realNamePlain),
         phoneMasked: maskPhone(phonePlain),
+        userSegment: segment
+          ? {
+              selfDeclared: segment.selfDeclared,
+              autoInferred: segment.autoInferred,
+              finalLabel: segment.finalLabel,
+              finalLabelText: segmentLabel(segment.finalLabel),
+              confidence: segment.confidence,
+              source: segment.source,
+              evidence: segment.evidence,
+            }
+          : {
+              selfDeclared: 'unknown',
+              autoInferred: 'unknown',
+              finalLabel: 'unknown',
+              finalLabelText: segmentLabel('unknown'),
+              confidence: 'low',
+              source: 'auto_inferred',
+              evidence: {},
+            },
         realNamePlain,
         phonePlain,
         createdAt: item.createdAt || null,
@@ -697,6 +1417,11 @@ exports.main = async () => {
     })
 
   const opsTagOverview = buildOpsTagOverview(enrichedActivityList)
+  const opsInsightCards = buildOperationInsightCards({
+    activityRows: enrichedActivityList,
+    participationRows: participationList,
+    segmentList,
+  })
 
   return {
     success: true,
@@ -747,6 +1472,9 @@ exports.main = async () => {
     },
     reportList,
     opsTagOverview,
+    opsInsightCards,
+    userSegmentOverview,
+    userSegmentSync: segmentSyncResult,
     activityList: enrichedActivityList,
     actionLogList,
     userProfileList,
