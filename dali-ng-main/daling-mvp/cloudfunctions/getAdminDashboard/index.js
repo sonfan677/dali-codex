@@ -307,6 +307,22 @@ const ANALYSIS_WINDOW_DAYS = 90
 const PARTICIPATION_ANALYSIS_LIMIT = 1200
 const AUTO_USER_SEGMENT_SYNC_ENABLED = String(process.env.AUTO_USER_SEGMENT_SYNC || 'on').toLowerCase() !== 'off'
 const MAX_SEGMENT_SYNC_PER_LOAD = 80
+const DEFAULT_SEGMENT_RULE_CONFIG = {
+  visitor: {
+    maxSpanDays: 14,
+    maxActiveDays30: 7,
+    maxPublish90: 1,
+    maxJoin90: 5,
+  },
+  local: {
+    minSpanDays: 90,
+    minActiveDays60: 20,
+    minPublish90: 6,
+  },
+  confidence: {
+    lowActiveDays90Threshold: 2,
+  },
+}
 
 function toTimestamp(value) {
   const ms = new Date(value).getTime()
@@ -357,6 +373,56 @@ function normalizeSegmentCode(raw = '') {
   if (['本地', '本地人', '常住', 'local', 'resident'].includes(safe)) return 'local'
   if (['unknown', 'none', 'skip', '暂不选择', '未选择'].includes(safe)) return 'unknown'
   return 'unknown'
+}
+
+function parseIntSafe(value, fallback) {
+  const n = Number(value)
+  return Number.isFinite(n) ? Math.round(n) : fallback
+}
+
+function sanitizeSegmentRuleConfig(raw = {}) {
+  const visitor = raw?.visitor || {}
+  const local = raw?.local || {}
+  const confidence = raw?.confidence || {}
+  return {
+    visitor: {
+      maxSpanDays: Math.max(1, Math.min(60, parseIntSafe(visitor.maxSpanDays, DEFAULT_SEGMENT_RULE_CONFIG.visitor.maxSpanDays))),
+      maxActiveDays30: Math.max(1, Math.min(30, parseIntSafe(visitor.maxActiveDays30, DEFAULT_SEGMENT_RULE_CONFIG.visitor.maxActiveDays30))),
+      maxPublish90: Math.max(0, Math.min(20, parseIntSafe(visitor.maxPublish90, DEFAULT_SEGMENT_RULE_CONFIG.visitor.maxPublish90))),
+      maxJoin90: Math.max(0, Math.min(40, parseIntSafe(visitor.maxJoin90, DEFAULT_SEGMENT_RULE_CONFIG.visitor.maxJoin90))),
+    },
+    local: {
+      minSpanDays: Math.max(30, Math.min(365, parseIntSafe(local.minSpanDays, DEFAULT_SEGMENT_RULE_CONFIG.local.minSpanDays))),
+      minActiveDays60: Math.max(5, Math.min(60, parseIntSafe(local.minActiveDays60, DEFAULT_SEGMENT_RULE_CONFIG.local.minActiveDays60))),
+      minPublish90: Math.max(0, Math.min(60, parseIntSafe(local.minPublish90, DEFAULT_SEGMENT_RULE_CONFIG.local.minPublish90))),
+    },
+    confidence: {
+      lowActiveDays90Threshold: Math.max(1, Math.min(20, parseIntSafe(confidence.lowActiveDays90Threshold, DEFAULT_SEGMENT_RULE_CONFIG.confidence.lowActiveDays90Threshold))),
+    },
+  }
+}
+
+async function loadSegmentRuleConfig(cityId = 'dali') {
+  let raw = null
+  try {
+    const byId = await db.collection('opsConfigs').doc('user_segment_rule').get()
+    raw = byId?.data || null
+  } catch (e) {}
+  if (!raw) {
+    try {
+      const byKey = await db.collection('opsConfigs')
+        .where({ key: 'user_segment_rule', cityId })
+        .limit(1)
+        .get()
+      raw = byKey?.data?.[0] || null
+    } catch (e) {}
+  }
+  const cfg = sanitizeSegmentRuleConfig(raw?.segmentRuleConfig || DEFAULT_SEGMENT_RULE_CONFIG)
+  return {
+    config: cfg,
+    version: String(raw?.version || 'segment_rule_default'),
+    updatedAt: raw?.updatedAt || null,
+  }
 }
 
 function segmentLabel(code = 'unknown') {
@@ -445,7 +511,8 @@ function buildUserBehaviorMap(userRows = [], activityRows = [], participationRow
   return map
 }
 
-function inferAutoSegment(behavior = {}, user = {}) {
+function inferAutoSegment(behavior = {}, user = {}, ruleConfig = DEFAULT_SEGMENT_RULE_CONFIG) {
+  const cfg = sanitizeSegmentRuleConfig(ruleConfig || DEFAULT_SEGMENT_RULE_CONFIG)
   const firstMs = Number(behavior.firstSeenMs)
   const lastMs = Number(behavior.lastSeenMs)
   const spanDays = (Number.isFinite(firstMs) && Number.isFinite(lastMs))
@@ -464,11 +531,16 @@ function inferAutoSegment(behavior = {}, user = {}) {
   let confidence = 'medium'
   const reasons = []
 
-  if (spanDays >= 90 || active60 >= 20 || publish90 >= 6) {
+  if (spanDays >= cfg.local.minSpanDays || active60 >= cfg.local.minActiveDays60 || publish90 >= cfg.local.minPublish90) {
     autoInferred = 'local'
     confidence = spanDays >= 120 || active60 >= 28 ? 'high' : 'medium'
     reasons.push('活跃跨度/活跃天数较高')
-  } else if (spanDays <= 14 && active30 <= 7 && publish90 <= 1 && join90 <= 5) {
+  } else if (
+    spanDays <= cfg.visitor.maxSpanDays
+    && active30 <= cfg.visitor.maxActiveDays30
+    && publish90 <= cfg.visitor.maxPublish90
+    && join90 <= cfg.visitor.maxJoin90
+  ) {
     autoInferred = 'visitor'
     confidence = spanDays <= 10 && active30 <= 5 ? 'high' : 'medium'
     reasons.push('短周期低频活跃特征')
@@ -478,7 +550,7 @@ function inferAutoSegment(behavior = {}, user = {}) {
     reasons.push('中周期持续活跃特征')
   }
 
-  if (active90 <= 2) confidence = 'low'
+  if (active90 <= cfg.confidence.lowActiveDays90Threshold) confidence = 'low'
   if (riskPenalty >= 4 && confidence === 'high') confidence = 'medium'
 
   return {
@@ -531,11 +603,11 @@ function resolveFinalSegment(user = {}, inferred = {}) {
   }
 }
 
-function buildUserSegmentPack(userRows = [], activityRows = [], participationRows = []) {
+function buildUserSegmentPack(userRows = [], activityRows = [], participationRows = [], segmentRuleConfig = DEFAULT_SEGMENT_RULE_CONFIG) {
   const behaviorMap = buildUserBehaviorMap(userRows, activityRows, participationRows)
   const segmentList = userRows.map((user) => {
     const behavior = behaviorMap.get(user?._openid) || {}
-    const inferred = inferAutoSegment(behavior, user)
+    const inferred = inferAutoSegment(behavior, user, segmentRuleConfig)
     const finalResult = resolveFinalSegment(user, inferred)
     return {
       openid: user._openid || '',
@@ -575,10 +647,11 @@ async function syncUserSegmentsToDb(userRows = [], segmentList = []) {
       const next = byOpenid[user?._openid]
       if (!next || !user?._id || !user?._openid) return null
       const prev = user.userSegment || {}
+      const prevFinal = normalizeSegmentCode(prev.finalLabel || '')
       const changed = (
         normalizeSegmentCode(prev.selfDeclared || '') !== normalizeSegmentCode(next.selfDeclared || '')
         || normalizeSegmentCode(prev.autoInferred || '') !== normalizeSegmentCode(next.autoInferred || '')
-        || normalizeSegmentCode(prev.finalLabel || '') !== normalizeSegmentCode(next.finalLabel || '')
+        || prevFinal !== normalizeSegmentCode(next.finalLabel || '')
         || String(prev.confidence || '') !== String(next.confidence || '')
         || String(prev.source || '') !== String(next.source || '')
       )
@@ -586,6 +659,8 @@ async function syncUserSegmentsToDb(userRows = [], segmentList = []) {
       return {
         docId: user._id,
         openid: user._openid,
+        prevFinal,
+        nextFinal: normalizeSegmentCode(next.finalLabel || ''),
         patch: {
           selfDeclared: next.selfDeclared,
           autoInferred: next.autoInferred,
@@ -603,6 +678,7 @@ async function syncUserSegmentsToDb(userRows = [], segmentList = []) {
     .slice(0, MAX_SEGMENT_SYNC_PER_LOAD)
 
   let synced = 0
+  let switched = 0
   for (const item of targets) {
     try {
       await db.collection('users').doc(item.docId).update({
@@ -614,12 +690,36 @@ async function syncUserSegmentsToDb(userRows = [], segmentList = []) {
         },
       })
       synced += 1
+      if (item.prevFinal !== item.nextFinal && item.prevFinal !== 'unknown') {
+        switched += 1
+        await db.collection('adminActions').add({
+          data: {
+            actionId: `segment_auto_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            adminId: 'system',
+            adminOpenid: 'system',
+            adminRole: 'system',
+            targetId: item.openid,
+            targetType: 'user',
+            action: 'segment_auto_switch',
+            actionType: 'segment_auto_switch',
+            reason: '用户分群自动切换',
+            beforeState: { finalLabel: item.prevFinal },
+            afterState: { finalLabel: item.nextFinal },
+            actionSource: 'system',
+            canAutoExecute: true,
+            manualOverride: false,
+            cityId: 'dali',
+            result: `${segmentLabel(item.prevFinal)} -> ${segmentLabel(item.nextFinal)}`,
+            createdAt: db.serverDate(),
+          },
+        }).catch(() => {})
+      }
     } catch (e) {
       console.error('同步用户分群失败', item.openid, e)
     }
   }
 
-  return { synced, touched: targets.length, skipped: false }
+  return { synced, switched, touched: targets.length, skipped: false }
 }
 
 function buildSegmentLabelMap(segmentList = []) {
@@ -690,6 +790,20 @@ function buildOperationInsightCards(input = {}) {
   })
 
   const cards = []
+  const pickRecommendCandidates = (sceneName = '', opts = {}) => {
+    const limit = Number(opts.limit || 3)
+    return activities90
+      .filter((item) => String(item.sceneName || '') === String(sceneName || ''))
+      .filter((item) => ['OPEN', 'FULL'].includes(String(item.status || '')))
+      .filter((item) => !item.isRecommended)
+      .sort((a, b) => Number(b.currentParticipants || 0) - Number(a.currentParticipants || 0))
+      .slice(0, limit)
+      .map((item) => ({
+        activityId: item._id,
+        title: item.title || '未命名活动',
+        participants: Number(item.currentParticipants || 0),
+      }))
+  }
 
   // 1) 大理发起最多
   const launchCounter = buildSceneCounterFromActivities(activities90, (item) => String(item.cityId || 'dali') === 'dali')
@@ -702,6 +816,13 @@ function buildOperationInsightCards(input = {}) {
     sampleSize: activities90.length,
     confidence: activities90.length >= 20 ? 'high' : activities90.length >= 8 ? 'medium' : 'low',
     suggestion: launchTop ? `建议围绕「${launchTop.sceneName}」做固定档期和推荐位实验。` : '先补充样本后再看趋势。',
+    actionType: launchTop ? 'batch_recommend' : '',
+    actionLabel: launchTop ? '一键推荐候选活动' : '',
+    actionPayload: launchTop ? {
+      sceneName: launchTop.sceneName,
+      reason: `运营结论卡执行：放大「${launchTop.sceneName}」供给`,
+      candidates: pickRecommendCandidates(launchTop.sceneName),
+    } : null,
   })
 
   // 2) 游客/旅居/本地偏好
@@ -716,6 +837,11 @@ function buildOperationInsightCards(input = {}) {
     sampleSize: participationRows.filter((item) => String(item.status || '') === 'joined').length,
     confidence: participationRows.length >= 40 ? 'high' : participationRows.length >= 15 ? 'medium' : 'low',
     suggestion: '按分群分别推首页“猜你想去”，并对比7日报名提升。',
+    actionType: 'copy_summary',
+    actionLabel: '复制分群偏好结论',
+    actionPayload: {
+      text: `游客偏好：${visitorTop?.sceneName || '暂无'}；旅居偏好：${nomadTop?.sceneName || '暂无'}；本地偏好：${localTop?.sceneName || '暂无'}`,
+    },
   })
 
   // 3) 哪类更容易成局
@@ -744,6 +870,13 @@ function buildOperationInsightCards(input = {}) {
     sampleSize: groupRows.length,
     confidence: groupRows.length >= 16 ? 'high' : groupRows.length >= 8 ? 'medium' : 'low',
     suggestion: easiest ? `优先把「${easiest.sceneName}」做成固定周更栏目。` : '先增加需要成团的活动样本。',
+    actionType: easiest ? 'batch_recommend' : '',
+    actionLabel: easiest ? '一键推荐该类型候选' : '',
+    actionPayload: easiest ? {
+      sceneName: easiest.sceneName,
+      reason: `运营结论卡执行：提升「${easiest.sceneName}」成局效率`,
+      candidates: pickRecommendCandidates(easiest.sceneName),
+    } : null,
   })
 
   // 4) 夜场适配
@@ -773,6 +906,13 @@ function buildOperationInsightCards(input = {}) {
     sampleSize: nightRows.length,
     confidence: nightRows.length >= 12 ? 'high' : nightRows.length >= 6 ? 'medium' : 'low',
     suggestion: nightTop ? `夜场优先排「${nightTop.sceneName}」，并加强安全提示。` : '先积累夜场活动样本。',
+    actionType: nightTop ? 'batch_recommend' : '',
+    actionLabel: nightTop ? '一键推荐夜场候选' : '',
+    actionPayload: nightTop ? {
+      sceneName: nightTop.sceneName,
+      reason: `运营结论卡执行：夜场放大「${nightTop.sceneName}」`,
+      candidates: pickRecommendCandidates(nightTop.sceneName),
+    } : null,
   })
 
   // 5) 复购表现
@@ -788,6 +928,11 @@ function buildOperationInsightCards(input = {}) {
     sampleSize: repeatRows.reduce((sum, item) => sum + item.uniqueUsers, 0),
     confidence: repeatRows.length >= 6 ? 'medium' : 'low',
     suggestion: repeatTop ? `针对「${repeatTop.sceneName}」增加会员/连续参与激励。` : '先扩大连续两次参与样本。',
+    actionType: repeatTop ? 'copy_summary' : '',
+    actionLabel: repeatTop ? '复制复购运营建议' : '',
+    actionPayload: repeatTop ? {
+      text: `复参与最佳：${repeatTop.sceneName}（${pctText(repeatTop.repeatRate)}）。建议上“连续参与激励+固定档期”。`,
+    } : null,
   })
 
   // 6) 官方介入
@@ -824,6 +969,13 @@ function buildOperationInsightCards(input = {}) {
     sampleSize: activities90.length,
     confidence: officialTop && officialTop.total >= 6 ? 'high' : officialTop ? 'medium' : 'low',
     suggestion: officialTop ? '可优先尝试官方联办、官方专题推荐。' : '先扩大活动样本再判断官方介入方向。',
+    actionType: officialTop ? 'batch_recommend' : '',
+    actionLabel: officialTop ? '一键推荐官方介入候选' : '',
+    actionPayload: officialTop ? {
+      sceneName: officialTop.sceneName,
+      reason: `运营结论卡执行：官方介入「${officialTop.sceneName}」`,
+      candidates: pickRecommendCandidates(officialTop.sceneName),
+    } : null,
   })
 
   // 7) 商家合作
@@ -860,6 +1012,11 @@ function buildOperationInsightCards(input = {}) {
     sampleSize: activities90.length,
     confidence: bizTop && bizTop.total >= 6 ? 'high' : bizTop ? 'medium' : 'low',
     suggestion: bizTop ? `先从「${bizTop.sceneName}」切入，设计联名套餐和商户包。` : '继续积累付费与联名活动样本。',
+    actionType: bizTop ? 'copy_summary' : '',
+    actionLabel: bizTop ? '复制商家合作建议' : '',
+    actionPayload: bizTop ? {
+      text: `商家合作优先：${bizTop.sceneName}。建议先做联名套餐+商家权益包。`,
+    } : null,
   })
 
   // 8) 节庆带动
@@ -906,9 +1063,94 @@ function buildOperationInsightCards(input = {}) {
     suggestion: boostedScene
       ? `节庆窗口可联动「${boostedScene.sceneName}」做跨场景专题。`
       : '建议增加节庆样本后再判断带动关系。',
+    actionType: boostedScene ? 'copy_summary' : '',
+    actionLabel: boostedScene ? '复制节庆联动建议' : '',
+    actionPayload: boostedScene ? {
+      text: `节庆联动建议：下次节庆窗口重点联动「${boostedScene.sceneName}」。`,
+    } : null,
   })
 
   return cards
+}
+
+function buildWeeklyBrief(input = {}) {
+  const activities = Array.isArray(input.activityRows) ? input.activityRows : []
+  const participations = Array.isArray(input.participationRows) ? input.participationRows : []
+  const insightCards = Array.isArray(input.insightCards) ? input.insightCards : []
+  const now = new Date()
+  const day = now.getDay() || 7
+  const monday = new Date(now.getTime() - (day - 1) * 24 * 60 * 60 * 1000)
+  monday.setHours(0, 0, 0, 0)
+  const mondayMs = monday.getTime()
+  const prevMondayMs = mondayMs - 7 * 24 * 60 * 60 * 1000
+  const nowMs = Date.now()
+  const inRange = (ts, start, end) => Number.isFinite(ts) && ts >= start && ts < end
+
+  const thisWeekActivities = activities.filter((item) => inRange(toTimestamp(item.createdAt), mondayMs, nowMs))
+  const prevWeekActivities = activities.filter((item) => inRange(toTimestamp(item.createdAt), prevMondayMs, mondayMs))
+  const thisWeekJoin = participations.filter((item) => String(item.status || '') === 'joined' && inRange(toTimestamp(item.joinedAt || item.createdAt), mondayMs, nowMs))
+  const prevWeekJoin = participations.filter((item) => String(item.status || '') === 'joined' && inRange(toTimestamp(item.joinedAt || item.createdAt), prevMondayMs, mondayMs))
+  const thisWeekCancel = participations.filter((item) => String(item.status || '') === 'cancelled' && inRange(toTimestamp(item.cancelledAt || item.updatedAt), mondayMs, nowMs))
+  const prevWeekCancel = participations.filter((item) => String(item.status || '') === 'cancelled' && inRange(toTimestamp(item.cancelledAt || item.updatedAt), prevMondayMs, mondayMs))
+
+  const growth = (cur, pre) => {
+    const c = Number(cur || 0)
+    const p = Number(pre || 0)
+    if (p <= 0) return c > 0 ? 1 : 0
+    return (c - p) / p
+  }
+  const topInsight = insightCards.slice(0, 3).map((item, idx) => `${idx + 1}. ${item.title}：${item.summary}`).join('\n')
+  const text = [
+    '【搭里运营自动周报】',
+    `本周新活动：${thisWeekActivities.length}（环比 ${pctText(growth(thisWeekActivities.length, prevWeekActivities.length))}）`,
+    `本周新报名：${thisWeekJoin.length}（环比 ${pctText(growth(thisWeekJoin.length, prevWeekJoin.length))}）`,
+    `本周取消报名：${thisWeekCancel.length}（环比 ${pctText(growth(thisWeekCancel.length, prevWeekCancel.length))}）`,
+    '',
+    '重点结论：',
+    topInsight || '暂无结论数据',
+  ].join('\n')
+  return {
+    weekStartDate: toDayKey(mondayMs),
+    generatedAt: new Date().toISOString(),
+    text,
+    metrics: {
+      thisWeekActivities: thisWeekActivities.length,
+      prevWeekActivities: prevWeekActivities.length,
+      thisWeekJoin: thisWeekJoin.length,
+      prevWeekJoin: prevWeekJoin.length,
+      thisWeekCancel: thisWeekCancel.length,
+      prevWeekCancel: prevWeekCancel.length,
+    },
+  }
+}
+
+function buildAnomalyAlerts(input = {}) {
+  const weekly = input.weeklyBrief || {}
+  const patrolSummary = input.patrolSummary || {}
+  const alerts = []
+  const m = weekly.metrics || {}
+  const dropRate = (cur, pre) => (Number(pre || 0) > 0 ? (Number(cur || 0) - Number(pre || 0)) / Number(pre || 0) : 0)
+  const joinDrop = dropRate(m.thisWeekJoin, m.prevWeekJoin)
+  const activityDrop = dropRate(m.thisWeekActivities, m.prevWeekActivities)
+  const cancelGrowth = dropRate(m.thisWeekCancel, m.prevWeekCancel)
+
+  if (joinDrop <= -0.3) {
+    alerts.push({ level: 'high', title: '本周报名下降明显', detail: `报名环比 ${pctText(joinDrop)}，建议优先处理供给与推荐位。` })
+  }
+  if (activityDrop <= -0.25) {
+    alerts.push({ level: 'medium', title: '本周供给下降', detail: `发布环比 ${pctText(activityDrop)}，建议开启活动招募。` })
+  }
+  if (cancelGrowth >= 0.35) {
+    alerts.push({ level: 'medium', title: '本周取消报名上升', detail: `取消环比 ${pctText(cancelGrowth)}，建议复盘时间/地点匹配。` })
+  }
+  const patrolLevel = String(patrolSummary.level || 'normal').toLowerCase()
+  if (patrolLevel === 'high') {
+    alerts.push({ level: 'high', title: '巡检高风险', detail: '巡检等级为高，请先处理超时举报和认证待办。' })
+  } else if (patrolLevel === 'medium') {
+    alerts.push({ level: 'medium', title: '巡检中风险', detail: '巡检等级为中，建议今天内完成巡检项处理。' })
+  }
+
+  return alerts.slice(0, 6)
 }
 
 function resolveVerifyAutoApproveMinutes() {
@@ -1016,7 +1258,7 @@ exports.main = async () => {
     return { success: false, error: 'UNAUTHORIZED', message: '无管理员权限' }
   }
 
-  const [pendingUsersRes, reportsRes, activitiesRes, actionLogsRes, userProfilesRes, participationsRaw] = await Promise.all([
+  const [pendingUsersRes, reportsRes, activitiesRes, actionLogsRes, userProfilesRes, participationsRaw, segmentRuleConfigRes] = await Promise.all([
     db.collection('users')
       .where({ verifyStatus: 'pending' })
       .field({
@@ -1103,6 +1345,9 @@ exports.main = async () => {
           'verify_auto_approved',
           'ops_patrol_run',
           'ops_patrol_alert',
+          'set_segment_lock',
+          'update_segment_rule_config',
+          'segment_auto_switch',
         ]),
       })
       .orderBy('createdAt', 'desc')
@@ -1179,6 +1424,7 @@ exports.main = async () => {
       .get()
       .catch(() => ({ data: [] })),
     fetchRecentParticipations(PARTICIPATION_ANALYSIS_LIMIT),
+    loadSegmentRuleConfig(meta.cityId || 'dali'),
   ])
 
   const shouldFilterCity = meta.adminRole === 'cityAdmin'
@@ -1342,10 +1588,14 @@ exports.main = async () => {
     })
     .slice(0, PARTICIPATION_ANALYSIS_LIMIT)
 
+  const segmentRuleConfig = segmentRuleConfigRes?.config || DEFAULT_SEGMENT_RULE_CONFIG
+  const segmentRuleConfigVersion = segmentRuleConfigRes?.version || 'segment_rule_default'
+  const segmentRuleConfigUpdatedAt = segmentRuleConfigRes?.updatedAt || null
   const { segmentList, overview: userSegmentOverview } = buildUserSegmentPack(
     rawUserProfiles,
     Object.values(activityMap),
-    participationList
+    participationList,
+    segmentRuleConfig
   )
   const segmentByOpenid = segmentList.reduce((acc, item) => {
     if (item?.openid) acc[item.openid] = item
@@ -1422,6 +1672,44 @@ exports.main = async () => {
     participationRows: participationList,
     segmentList,
   })
+  const opsPatrolSummary = latestOpsPatrol
+    ? {
+        level: latestOpsPatrol.patrolLevel || latestOpsPatrol.patrolSummary?.level || 'normal',
+        score: Number(latestOpsPatrol.patrolScore || latestOpsPatrol.patrolSummary?.score || 0),
+        triggeredCount: Number(latestOpsPatrol.patrolTriggeredCount || latestOpsPatrol.patrolSummary?.triggeredCount || 0),
+        cityId: latestOpsPatrol.patrolSummary?.cityId || latestOpsPatrol.cityId || meta.cityId,
+        checkedAt: latestOpsPatrol.patrolSummary?.checkedAt || latestOpsPatrol.createdAt || null,
+        reportOverdueCount: Number(latestOpsPatrol.patrolSummary?.reportOverdueCount || 0),
+        verifyOverdueCount: Number(latestOpsPatrol.patrolSummary?.verifyOverdueCount || 0),
+        supplyAlertLevel: latestOpsPatrol.patrolSummary?.supplyAlertLevel || 'normal',
+        supplyAlertFlags: latestOpsPatrol.patrolSummary?.supplyAlertFlags || [],
+        source: latestOpsPatrol.patrolSummary?.source || latestOpsPatrol.actionSource || '',
+        alertCount24h: opsPatrolAlertCount24h,
+        hasRecentRun: true,
+      }
+    : {
+        level: 'normal',
+        score: 0,
+        triggeredCount: 0,
+        cityId: meta.cityId,
+        checkedAt: null,
+        reportOverdueCount: 0,
+        verifyOverdueCount: 0,
+        supplyAlertLevel: 'normal',
+        supplyAlertFlags: [],
+        source: '',
+        alertCount24h: opsPatrolAlertCount24h,
+        hasRecentRun: false,
+      }
+  const opsWeeklyBrief = buildWeeklyBrief({
+    activityRows: enrichedActivityList,
+    participationRows: participationList,
+    insightCards: opsInsightCards,
+  })
+  const opsAnomalyAlerts = buildAnomalyAlerts({
+    weeklyBrief: opsWeeklyBrief,
+    patrolSummary: opsPatrolSummary,
+  })
 
   return {
     success: true,
@@ -1437,35 +1725,7 @@ exports.main = async () => {
       latestAutoApprovedAt: autoVerifySummary.latestAutoApprovedAt || null,
     },
     opsPatrol: {
-      summary: latestOpsPatrol
-        ? {
-            level: latestOpsPatrol.patrolLevel || latestOpsPatrol.patrolSummary?.level || 'normal',
-            score: Number(latestOpsPatrol.patrolScore || latestOpsPatrol.patrolSummary?.score || 0),
-            triggeredCount: Number(latestOpsPatrol.patrolTriggeredCount || latestOpsPatrol.patrolSummary?.triggeredCount || 0),
-            cityId: latestOpsPatrol.patrolSummary?.cityId || latestOpsPatrol.cityId || meta.cityId,
-            checkedAt: latestOpsPatrol.patrolSummary?.checkedAt || latestOpsPatrol.createdAt || null,
-            reportOverdueCount: Number(latestOpsPatrol.patrolSummary?.reportOverdueCount || 0),
-            verifyOverdueCount: Number(latestOpsPatrol.patrolSummary?.verifyOverdueCount || 0),
-            supplyAlertLevel: latestOpsPatrol.patrolSummary?.supplyAlertLevel || 'normal',
-            supplyAlertFlags: latestOpsPatrol.patrolSummary?.supplyAlertFlags || [],
-            source: latestOpsPatrol.patrolSummary?.source || latestOpsPatrol.actionSource || '',
-            alertCount24h: opsPatrolAlertCount24h,
-            hasRecentRun: true,
-          }
-        : {
-            level: 'normal',
-            score: 0,
-            triggeredCount: 0,
-            cityId: meta.cityId,
-            checkedAt: null,
-            reportOverdueCount: 0,
-            verifyOverdueCount: 0,
-            supplyAlertLevel: 'normal',
-            supplyAlertFlags: [],
-            source: '',
-            alertCount24h: opsPatrolAlertCount24h,
-            hasRecentRun: false,
-          },
+      summary: opsPatrolSummary,
       latestChecks: latestOpsPatrol?.patrolChecks || [],
       alerts: opsPatrolAlertList,
       runs: opsPatrolRunList.slice(0, 8),
@@ -1473,8 +1733,13 @@ exports.main = async () => {
     reportList,
     opsTagOverview,
     opsInsightCards,
+    opsWeeklyBrief,
+    opsAnomalyAlerts,
     userSegmentOverview,
     userSegmentSync: segmentSyncResult,
+    userSegmentRuleConfig: segmentRuleConfig,
+    userSegmentRuleConfigVersion: segmentRuleConfigVersion,
+    userSegmentRuleConfigUpdatedAt: segmentRuleConfigUpdatedAt,
     activityList: enrichedActivityList,
     actionLogList,
     userProfileList,

@@ -333,10 +333,24 @@
               @tap="exportUserProfileCsv"
             >导出用户资料CSV</button>
             <button
+              class="action-btn action-btn--detail"
+              :disabled="segmentRuleSaving"
+              @tap="editSegmentRuleConfig"
+            >调整分群规则</button>
+            <button
               class="action-btn action-btn--approve"
               @tap="activeTab = 'verify'"
             >去处理认证</button>
           </view>
+          <text class="card-openid">
+            规则版本：{{ userSegmentRuleConfigVersion || '--' }} · 最近更新：{{ userSegmentRuleConfigUpdatedAt ? formatTime(userSegmentRuleConfigUpdatedAt) : '--' }}
+          </text>
+          <text class="card-openid">
+            游客阈值：跨度≤{{ userSegmentRuleConfig.visitor.maxSpanDays }}天 / 活跃30天≤{{ userSegmentRuleConfig.visitor.maxActiveDays30 }} / 发布90天≤{{ userSegmentRuleConfig.visitor.maxPublish90 }} / 报名90天≤{{ userSegmentRuleConfig.visitor.maxJoin90 }}
+          </text>
+          <text class="card-openid">
+            本地阈值：跨度≥{{ userSegmentRuleConfig.local.minSpanDays }}天 或 活跃60天≥{{ userSegmentRuleConfig.local.minActiveDays60 }} 或 发布90天≥{{ userSegmentRuleConfig.local.minPublish90 }}
+          </text>
           <view v-if="scheme2TriggeredUserList.length === 0" class="empty empty--inline">
             <text class="empty-text">暂无触发方案2的用户</text>
           </view>
@@ -350,7 +364,14 @@
               <text class="card-openid">{{ shortOpenid(item.openid) }}</text>
             </view>
             <text class="card-openid">原因：{{ scheme2ReasonText(item.identityCheckReasons) }}</text>
+            <text class="card-openid">分群：{{ segmentLabelText(item.userSegment?.finalLabel) }}（{{ segmentConfidenceText(item.userSegment?.confidence) }}）</text>
             <text class="card-openid">发布7天：{{ item.recentPublish7dCount || 0 }} · 被举报：{{ item.reportAgainstCount || 0 }} · 状态：{{ scheme2StatusText(item.identityCheckStatus) }}</text>
+            <view class="card-actions">
+              <button class="action-btn action-btn--detail mini-btn" :disabled="segmentLockSavingOpenid===item.openid" @tap="setUserSegmentLock(item.openid, 'visitor')">锁为游客</button>
+              <button class="action-btn action-btn--detail mini-btn" :disabled="segmentLockSavingOpenid===item.openid" @tap="setUserSegmentLock(item.openid, 'nomad')">锁为旅居</button>
+              <button class="action-btn action-btn--detail mini-btn" :disabled="segmentLockSavingOpenid===item.openid" @tap="setUserSegmentLock(item.openid, 'local')">锁为本地</button>
+              <button class="action-btn action-btn--reject mini-btn" :disabled="segmentLockSavingOpenid===item.openid" @tap="setUserSegmentLock(item.openid, 'unknown')">清除锁定</button>
+            </view>
           </view>
         </view>
 
@@ -1034,6 +1055,36 @@
                 <text class="ops-insight-summary">{{ item.summary }}</text>
                 <text class="ops-insight-meta">样本量：{{ item.sampleSize || 0 }}</text>
                 <text class="ops-insight-suggestion">建议动作：{{ item.suggestion }}</text>
+                <view v-if="item.actionType && item.actionLabel" class="card-actions">
+                  <button
+                    class="action-btn action-btn--approve mini-btn"
+                    :disabled="insightActionLoadingKey===item.key"
+                    @tap="runInsightCardAction(item)"
+                  >{{ insightActionLoadingKey===item.key ? '执行中...' : item.actionLabel }}</button>
+                </view>
+              </view>
+            </view>
+          </view>
+
+          <view class="admin-distribution-section">
+            <text class="admin-distribution-title">运营自动周报（C）</text>
+            <text class="card-openid">周起始：{{ opsWeeklyBrief.weekStartDate || '--' }} · 生成时间：{{ opsWeeklyBrief.generatedAt ? formatTime(opsWeeklyBrief.generatedAt) : '--' }}</text>
+            <view class="card-actions card-actions--single">
+              <button class="action-btn action-btn--detail" @tap="copyOpsWeeklyBrief">复制周报摘要</button>
+            </view>
+            <text class="ops-brief-text">{{ opsWeeklyBrief.text || '暂无周报摘要' }}</text>
+          </view>
+
+          <view class="admin-distribution-section">
+            <text class="admin-distribution-title">异常提醒（C）</text>
+            <view v-if="opsAnomalyAlerts.length === 0" class="card-openid">暂无异常提醒</view>
+            <view v-else class="ops-alert-list">
+              <view v-for="(item, idx) in opsAnomalyAlerts" :key="`ops-anomaly-${idx}`" class="ops-alert-item">
+                <view class="title-row">
+                  <text class="ops-alert-title">{{ item.title }}</text>
+                  <text class="mini-pill" :class="item.level==='high' ? 'mini-pill--pending' : 'mini-pill--log'">{{ item.level==='high' ? '高风险' : '关注' }}</text>
+                </view>
+                <text class="ops-alert-detail">{{ item.detail }}</text>
               </view>
             </view>
           </view>
@@ -1577,6 +1628,34 @@ export default {
         touched: 0,
         skipped: false,
       },
+      userSegmentRuleConfig: {
+        visitor: {
+          maxSpanDays: 14,
+          maxActiveDays30: 7,
+          maxPublish90: 1,
+          maxJoin90: 5,
+        },
+        local: {
+          minSpanDays: 90,
+          minActiveDays60: 20,
+          minPublish90: 6,
+        },
+        confidence: {
+          lowActiveDays90Threshold: 2,
+        },
+      },
+      userSegmentRuleConfigVersion: '',
+      userSegmentRuleConfigUpdatedAt: null,
+      segmentRuleSaving: false,
+      segmentLockSavingOpenid: '',
+      insightActionLoadingKey: '',
+      opsWeeklyBrief: {
+        weekStartDate: '',
+        generatedAt: '',
+        text: '',
+        metrics: {},
+      },
+      opsAnomalyAlerts: [],
       activityList: [],
       actionLogList: [],
       userProfileList: [],
@@ -2165,6 +2244,9 @@ export default {
           { label: '手动下架', value: 'hide' },
           { label: '通过认证', value: 'verify' },
           { label: '拒绝认证', value: 'reject_verify' },
+          { label: '分群锁定', value: 'set_segment_lock' },
+          { label: '规则更新', value: 'update_segment_rule_config' },
+          { label: '分群切换', value: 'segment_auto_switch' },
           { label: '举报下架', value: 'resolve_report_hide' },
           { label: '举报忽略', value: 'resolve_report_ignore' },
           { label: '巡检执行', value: 'ops_patrol_run' },
@@ -3724,6 +3806,13 @@ export default {
           },
         }
         this.opsInsightCards = Array.isArray(res.opsInsightCards) ? res.opsInsightCards : []
+        this.opsWeeklyBrief = res.opsWeeklyBrief || {
+          weekStartDate: '',
+          generatedAt: '',
+          text: '',
+          metrics: {},
+        }
+        this.opsAnomalyAlerts = Array.isArray(res.opsAnomalyAlerts) ? res.opsAnomalyAlerts : []
         this.userSegmentOverview = res.userSegmentOverview || {
           total: 0,
           byFinal: {
@@ -3748,6 +3837,9 @@ export default {
           touched: 0,
           skipped: false,
         }
+        this.userSegmentRuleConfig = res.userSegmentRuleConfig || this.userSegmentRuleConfig
+        this.userSegmentRuleConfigVersion = res.userSegmentRuleConfigVersion || ''
+        this.userSegmentRuleConfigUpdatedAt = res.userSegmentRuleConfigUpdatedAt || null
         this.activityList = res.activityList || []
         this.actionLogList = res.actionLogList || []
         this.userProfileList = res.userProfileList || []
@@ -3790,6 +3882,223 @@ export default {
       if (safe === 'high') return '高置信度'
       if (safe === 'medium') return '中置信度'
       return '低置信度'
+    },
+
+    segmentLabelText(code = '') {
+      const map = {
+        visitor: '游客',
+        nomad: '旅居者',
+        local: '本地常住',
+        unknown: '未分群',
+      }
+      return map[String(code || '').toLowerCase()] || '未分群'
+    },
+
+    segmentConfidenceText(level = '') {
+      const map = {
+        high: '高置信度',
+        medium: '中置信度',
+        low: '低置信度',
+      }
+      return map[String(level || '').toLowerCase()] || '中置信度'
+    },
+
+    async runInsightCardAction(item = {}) {
+      if (!item || !item.actionType) return
+      this.insightActionLoadingKey = item.key || ''
+      try {
+        if (item.actionType === 'batch_recommend') {
+          await this.batchRecommendFromInsight(item)
+          return
+        }
+        if (item.actionType === 'copy_summary') {
+          const text = String(item?.actionPayload?.text || item.summary || '').trim()
+          if (!text) {
+            uni.showToast({ title: '暂无可复制内容', icon: 'none' })
+            return
+          }
+          await this.copyText(text, '结论已复制')
+          return
+        }
+        uni.showToast({ title: '暂不支持该动作', icon: 'none' })
+      } finally {
+        this.insightActionLoadingKey = ''
+      }
+    },
+
+    async batchRecommendFromInsight(item = {}) {
+      const payload = item?.actionPayload || {}
+      const candidates = Array.isArray(payload.candidates) ? payload.candidates.filter((c) => c?.activityId) : []
+      if (!candidates.length) {
+        uni.showToast({ title: '暂无可推荐候选', icon: 'none' })
+        return
+      }
+      const picked = candidates.slice(0, 3)
+      const reason = String(payload.reason || `运营结论卡执行：推荐${payload.sceneName || ''}`).trim()
+      const confirmText = `将推荐 ${picked.length} 条活动：\n${picked.map((c, idx) => `${idx + 1}. ${c.title}`).join('\n')}`
+      const confirmed = await new Promise((resolve) => {
+        uni.showModal({
+          title: '确认一键推荐？',
+          content: confirmText,
+          success: (res) => resolve(!!res.confirm),
+          fail: () => resolve(false),
+        })
+      })
+      if (!confirmed) return
+
+      let success = 0
+      for (const c of picked) {
+        try {
+          const ret = await callCloud('adminAction', {
+            action: 'recommend',
+            targetId: c.activityId,
+            targetType: 'activity',
+            reason,
+            actionSource: 'ai',
+            canAutoExecute: true,
+            manualOverride: false,
+            notifyAfterAction: false,
+          })
+          if (ret?.success) success += 1
+        } catch (e) {}
+      }
+      uni.showToast({ title: `已推荐 ${success}/${picked.length}`, icon: success > 0 ? 'success' : 'none' })
+      if (success > 0) await this.loadData()
+    },
+
+    async copyOpsWeeklyBrief() {
+      const text = String(this.opsWeeklyBrief?.text || '').trim()
+      if (!text) {
+        uni.showToast({ title: '暂无周报内容', icon: 'none' })
+        return
+      }
+      await this.copyText(text, '周报已复制')
+    },
+
+    async copyText(text = '', successTitle = '已复制') {
+      const val = String(text || '').trim()
+      if (!val) return
+      try {
+        await new Promise((resolve, reject) => {
+          uni.setClipboardData({
+            data: val,
+            success: resolve,
+            fail: reject,
+          })
+        })
+        uni.showToast({ title: successTitle, icon: 'success' })
+      } catch (e) {
+        uni.showToast({ title: '复制失败，请重试', icon: 'none' })
+      }
+    },
+
+    async editSegmentRuleConfig() {
+      if (this.segmentRuleSaving) return
+      const current = this.userSegmentRuleConfig || {}
+      const lines = [
+        `游客最大跨度天数=${current?.visitor?.maxSpanDays || 14}`,
+        `游客活跃30天阈值=${current?.visitor?.maxActiveDays30 || 7}`,
+        `游客发布90天阈值=${current?.visitor?.maxPublish90 || 1}`,
+        `游客报名90天阈值=${current?.visitor?.maxJoin90 || 5}`,
+        `本地最小跨度天数=${current?.local?.minSpanDays || 90}`,
+        `本地活跃60天阈值=${current?.local?.minActiveDays60 || 20}`,
+        `本地发布90天阈值=${current?.local?.minPublish90 || 6}`,
+        `低置信阈值(活跃90天)=${current?.confidence?.lowActiveDays90Threshold || 2}`,
+      ]
+      const template = [
+        '按以下格式填写（每行一个）：',
+        'visitor.maxSpanDays=14',
+        'visitor.maxActiveDays30=7',
+        'visitor.maxPublish90=1',
+        'visitor.maxJoin90=5',
+        'local.minSpanDays=90',
+        'local.minActiveDays60=20',
+        'local.minPublish90=6',
+        'confidence.lowActiveDays90Threshold=2',
+        '',
+        '当前配置：',
+        ...lines,
+      ].join('\n')
+      const content = await new Promise((resolve) => {
+        uni.showModal({
+          title: '调整分群规则',
+          editable: true,
+          placeholderText: template,
+          success: (res) => resolve(res.confirm ? String(res.content || '') : ''),
+          fail: () => resolve(''),
+        })
+      })
+      if (!content) return
+      const next = JSON.parse(JSON.stringify(current || {}))
+      const patchLines = content.split('\n').map((s) => s.trim()).filter(Boolean)
+      patchLines.forEach((line) => {
+        if (!line.includes('=')) return
+        const [path, rawVal] = line.split('=')
+        const keyPath = String(path || '').trim()
+        const v = Number(rawVal)
+        if (!Number.isFinite(v)) return
+        if (keyPath === 'visitor.maxSpanDays') next.visitor.maxSpanDays = v
+        if (keyPath === 'visitor.maxActiveDays30') next.visitor.maxActiveDays30 = v
+        if (keyPath === 'visitor.maxPublish90') next.visitor.maxPublish90 = v
+        if (keyPath === 'visitor.maxJoin90') next.visitor.maxJoin90 = v
+        if (keyPath === 'local.minSpanDays') next.local.minSpanDays = v
+        if (keyPath === 'local.minActiveDays60') next.local.minActiveDays60 = v
+        if (keyPath === 'local.minPublish90') next.local.minPublish90 = v
+        if (keyPath === 'confidence.lowActiveDays90Threshold') next.confidence.lowActiveDays90Threshold = v
+      })
+      this.segmentRuleSaving = true
+      try {
+        const ret = await callCloud('adminAction', {
+          action: 'update_segment_rule_config',
+          targetType: 'system',
+          targetId: 'user_segment_rule',
+          reason: '后台调整用户分群阈值',
+          segmentRuleConfig: next,
+          actionSource: 'human',
+          canAutoExecute: true,
+          manualOverride: true,
+          notifyAfterAction: false,
+        })
+        if (ret?.success) {
+          uni.showToast({ title: '规则已更新', icon: 'success' })
+          await this.loadData()
+        } else {
+          uni.showToast({ title: ret?.message || '更新失败', icon: 'none' })
+        }
+      } catch (e) {
+        uni.showToast({ title: '更新失败，请重试', icon: 'none' })
+      } finally {
+        this.segmentRuleSaving = false
+      }
+    },
+
+    async setUserSegmentLock(openid = '', segment = 'unknown') {
+      const safeOpenid = String(openid || '').trim()
+      if (!safeOpenid) return
+      this.segmentLockSavingOpenid = safeOpenid
+      try {
+        const ret = await callCloud('adminAction', {
+          action: 'set_segment_lock',
+          targetId: safeOpenid,
+          targetType: 'user',
+          lockSegment: segment,
+          reason: segment === 'unknown' ? '清除用户分群锁定' : `手动锁定用户分群为${this.segmentLabelText(segment)}`,
+          actionSource: 'human',
+          manualOverride: true,
+          canAutoExecute: true,
+          notifyAfterAction: false,
+        })
+        if (ret?.success) {
+          uni.showToast({ title: ret.message || '已更新', icon: 'success' })
+          await this.loadData()
+        } else {
+          uni.showToast({ title: ret?.message || '更新失败', icon: 'none' })
+        }
+      } catch (e) {
+        uni.showToast({ title: '更新失败，请重试', icon: 'none' })
+      } finally {
+        this.segmentLockSavingOpenid = ''
+      }
     },
 
     async runOpsPatrolNow() {
@@ -4138,6 +4447,9 @@ export default {
         verify: '通过身份核验',
         reject_verify: '拒绝身份核验',
         verify_auto_approved: '系统自动通过（待复核）',
+        set_segment_lock: '手动锁定用户分群',
+        update_segment_rule_config: '更新分群规则',
+        segment_auto_switch: '用户分群自动切换',
         ops_patrol_run: '运营自动巡检执行',
         ops_patrol_alert: '运营巡检风险告警',
         mark_attendance: '到场/爽约标记',
@@ -4180,6 +4492,9 @@ export default {
         unrecommend: 'status-pill--result-neutral',
         resolve_report_ignore: 'status-pill--result-neutral',
         ops_patrol_run: 'status-pill--result-neutral',
+        set_segment_lock: 'status-pill--result-neutral',
+        update_segment_rule_config: 'status-pill--result-neutral',
+        segment_auto_switch: 'status-pill--result-neutral',
         hide: 'status-pill--result-risk',
         ban: 'status-pill--result-risk',
         reject_verify: 'status-pill--result-risk',
@@ -5911,6 +6226,38 @@ export default {
 .ops-insight-suggestion {
   font-size: 20rpx;
   color: #0f766e;
+  line-height: 1.4;
+}
+.ops-brief-text {
+  margin-top: 8rpx;
+  white-space: pre-wrap;
+  font-size: 20rpx;
+  line-height: 1.5;
+  color: #334155;
+}
+.ops-alert-list {
+  margin-top: 10rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+.ops-alert-item {
+  background: #fff9f0;
+  border: 1rpx solid #fde7c2;
+  border-radius: 10rpx;
+  padding: 10rpx 12rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+}
+.ops-alert-title {
+  font-size: 21rpx;
+  color: #92400e;
+  font-weight: 600;
+}
+.ops-alert-detail {
+  font-size: 20rpx;
+  color: #7c2d12;
   line-height: 1.4;
 }
 

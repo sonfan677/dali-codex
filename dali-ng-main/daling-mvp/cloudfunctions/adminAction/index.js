@@ -2,6 +2,71 @@ const cloud = require('wx-server-sdk')
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 const db = cloud.database()
 
+function normalizeSegmentCode(raw = '') {
+  const safe = String(raw || '').trim().toLowerCase()
+  if (!safe) return 'unknown'
+  if (['游客', 'tourist', 'visitor', 'travel'].includes(safe)) return 'visitor'
+  if (['旅居', '旅居者', 'nomad', 'stay'].includes(safe)) return 'nomad'
+  if (['本地', '本地人', '常住', 'local', 'resident'].includes(safe)) return 'local'
+  if (['unknown', 'none', 'skip', '暂不选择', '未选择', 'clear'].includes(safe)) return 'unknown'
+  return 'unknown'
+}
+
+function segmentLabel(code = 'unknown') {
+  const map = {
+    visitor: '游客',
+    nomad: '旅居者',
+    local: '本地常住',
+    unknown: '未分群',
+  }
+  return map[String(code || '').toLowerCase()] || '未分群'
+}
+
+const DEFAULT_SEGMENT_RULE_CONFIG = {
+  visitor: {
+    maxSpanDays: 14,
+    maxActiveDays30: 7,
+    maxPublish90: 1,
+    maxJoin90: 5,
+  },
+  local: {
+    minSpanDays: 90,
+    minActiveDays60: 20,
+    minPublish90: 6,
+  },
+  confidence: {
+    lowActiveDays90Threshold: 2,
+  },
+}
+
+function parseIntSafe(value, fallback) {
+  const n = Number(value)
+  return Number.isFinite(n) ? Math.round(n) : fallback
+}
+
+function sanitizeSegmentRuleConfig(raw = {}) {
+  const visitor = raw?.visitor || {}
+  const local = raw?.local || {}
+  const confidence = raw?.confidence || {}
+  const cfg = {
+    visitor: {
+      maxSpanDays: Math.max(1, Math.min(60, parseIntSafe(visitor.maxSpanDays, DEFAULT_SEGMENT_RULE_CONFIG.visitor.maxSpanDays))),
+      maxActiveDays30: Math.max(1, Math.min(30, parseIntSafe(visitor.maxActiveDays30, DEFAULT_SEGMENT_RULE_CONFIG.visitor.maxActiveDays30))),
+      maxPublish90: Math.max(0, Math.min(20, parseIntSafe(visitor.maxPublish90, DEFAULT_SEGMENT_RULE_CONFIG.visitor.maxPublish90))),
+      maxJoin90: Math.max(0, Math.min(40, parseIntSafe(visitor.maxJoin90, DEFAULT_SEGMENT_RULE_CONFIG.visitor.maxJoin90))),
+    },
+    local: {
+      minSpanDays: Math.max(30, Math.min(365, parseIntSafe(local.minSpanDays, DEFAULT_SEGMENT_RULE_CONFIG.local.minSpanDays))),
+      minActiveDays60: Math.max(5, Math.min(60, parseIntSafe(local.minActiveDays60, DEFAULT_SEGMENT_RULE_CONFIG.local.minActiveDays60))),
+      minPublish90: Math.max(0, Math.min(60, parseIntSafe(local.minPublish90, DEFAULT_SEGMENT_RULE_CONFIG.local.minPublish90))),
+    },
+    confidence: {
+      lowActiveDays90Threshold: Math.max(1, Math.min(20, parseIntSafe(confidence.lowActiveDays90Threshold, DEFAULT_SEGMENT_RULE_CONFIG.confidence.lowActiveDays90Threshold))),
+    },
+  }
+  return cfg
+}
+
 function parseAdminMeta(openid) {
   const adminOpenids = (process.env.ADMIN_OPENIDS || '')
     .split(',')
@@ -354,6 +419,80 @@ exports.main = async (event) => {
         beforeState = reportBefore
         afterState = reportAfter
         result = { message: '举报已标记忽略' }
+      }
+      break
+    }
+
+    case 'set_segment_lock': {
+      finalTargetType = 'user'
+      beforeState = await getUserSnapshot(targetId)
+      if (!beforeState) {
+        return { success: false, error: 'NOT_FOUND', message: '用户不存在' }
+      }
+      const lockSegment = normalizeSegmentCode(event.lockSegment || event.segment || '')
+      const userSegment = beforeState.userSegment || {}
+      const nextUserSegment = {
+        ...userSegment,
+        manualLock: lockSegment,
+        finalLabel: lockSegment !== 'unknown'
+          ? lockSegment
+          : (normalizeSegmentCode(userSegment.selfDeclared || '') !== 'unknown'
+            ? normalizeSegmentCode(userSegment.selfDeclared || '')
+            : normalizeSegmentCode(userSegment.autoInferred || userSegment.finalLabel || 'unknown')),
+        source: lockSegment !== 'unknown' ? 'manual_lock' : (userSegment.source || 'auto_inferred'),
+        updatedAt: db.serverDate(),
+      }
+      await db.collection('users').where({ _openid: targetId }).update({
+        data: {
+          userSegment: nextUserSegment,
+          segmentTagVersion: 'segment_v1',
+          segmentUpdatedAt: db.serverDate(),
+          updatedAt: db.serverDate(),
+        },
+      })
+      afterState = await getUserSnapshot(targetId)
+      result = {
+        message: lockSegment === 'unknown'
+          ? '已清除分群锁定'
+          : `已锁定为${segmentLabel(lockSegment)}`,
+      }
+      break
+    }
+
+    case 'update_segment_rule_config': {
+      finalTargetType = 'system'
+      finalTargetId = 'user_segment_rule'
+      const payload = sanitizeSegmentRuleConfig(event.segmentRuleConfig || {})
+      let beforeDoc = null
+      try {
+        const docRes = await db.collection('opsConfigs').doc('user_segment_rule').get()
+        beforeDoc = docRes.data || null
+      } catch (e) {
+        beforeDoc = null
+      }
+      beforeState = beforeDoc ? {
+        segmentRuleConfig: beforeDoc.segmentRuleConfig || DEFAULT_SEGMENT_RULE_CONFIG,
+        version: beforeDoc.version || '',
+      } : null
+
+      await db.collection('opsConfigs').doc('user_segment_rule').set({
+        data: {
+          _id: 'user_segment_rule',
+          key: 'user_segment_rule',
+          cityId: cityId || adminCityId || 'dali',
+          segmentRuleConfig: payload,
+          version: `segment_rule_${Date.now()}`,
+          updatedBy: OPENID,
+          updatedAt: db.serverDate(),
+          createdAt: beforeDoc?.createdAt || db.serverDate(),
+        },
+      })
+      const afterDocRes = await db.collection('opsConfigs').doc('user_segment_rule').get().catch(() => null)
+      afterState = afterDocRes?.data || {
+        segmentRuleConfig: payload,
+      }
+      result = {
+        message: '分群规则已更新，刷新后台后生效',
       }
       break
     }
