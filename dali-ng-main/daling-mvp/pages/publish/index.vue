@@ -26,7 +26,7 @@
           />
           <view class="visible-tags-summary">
             <text class="visible-tags-summary-text">{{ visibleTagSummaryText }}</text>
-            <text class="visible-tags-toggle" @tap="toggleVisibleTagPanel">{{ showVisibleTagPanel ? '收起' : '去选择' }}</text>
+            <text class="visible-tags-summary-sub">一级类目默认展开，点击类目可选择标签</text>
           </view>
           <view v-if="form.visibleTags.length" class="selected-visible-tags">
             <text
@@ -35,14 +35,20 @@
               class="selected-visible-tag"
             >{{ tag }}</text>
           </view>
-          <view v-if="showVisibleTagPanel" class="visible-tag-groups">
+          <view class="visible-tag-groups">
             <view
               v-for="group in visibleTagGroups"
               :key="`visible-group-${group.id}`"
               class="visible-tag-group"
             >
-              <text class="visible-tag-group-title">{{ group.label }}</text>
-              <view class="visible-tag-list">
+              <view class="visible-tag-group-header" @tap="toggleVisibleTagGroup(group.id)">
+                <text class="visible-tag-group-title">{{ group.label }}</text>
+                <text class="visible-tag-group-meta">
+                  {{ visibleTagGroupSelectedCount(group.id) > 0 ? `已选 ${visibleTagGroupSelectedCount(group.id)} 个` : '' }}
+                  {{ isVisibleTagGroupOpen(group.id) ? '收起' : '展开' }}
+                </text>
+              </view>
+              <view v-if="isVisibleTagGroupOpen(group.id)" class="visible-tag-list">
                 <text
                   v-for="tag in group.tags"
                   :key="`visible-tag-${group.id}-${tag}`"
@@ -75,7 +81,7 @@
 
         <!-- 类型 -->
         <view class="field">
-          <text class="label">活动形式 *</text>
+          <text class="label">活动类型 *</text>
           <picker
             mode="selector"
             :range="typePickerRange"
@@ -87,7 +93,6 @@
               <text class="arrow">›</text>
             </view>
           </picker>
-          <text class="hint">系统标签映射：{{ selectedCategoryLabel }}</text>
         </view>
 
         <!-- 地点 -->
@@ -404,7 +409,7 @@ export default {
       showPhoneBindDialog: false,
       profileDraftNickname: '',
       profileDraftAvatar: '',
-	  scrollTop: 0,
+      scrollTop: 0,
       minParticipantsDisplay: '',
       form: {
         title: '',
@@ -440,7 +445,10 @@ export default {
       durationOptions: ['1小时', '2小时', '3小时', '4小时', '6小时', '8小时'],
       durationIndex: 1,
       visibleTagGroups: USER_VISIBLE_TAG_GROUPS,
-      showVisibleTagPanel: false,
+      visibleTagOpenMap: USER_VISIBLE_TAG_GROUPS.reduce((acc, group) => {
+        acc[group.id] = false
+        return acc
+      }, {}),
       formationWindowOptions: ['15分钟（极速成团）', '30分钟（标准成团）', '60分钟（预约成团）'],
       formationWindowValues: [15, 30, 60],
       formationWindowIndex: 1,
@@ -462,13 +470,8 @@ export default {
 
     typePickerRange() {
       const list = Array.isArray(this.typeOptions) ? this.typeOptions : []
-      if (!list.length) return ['请选择活动形式']
+      if (!list.length) return ['请选择活动类型']
       return list.map((item) => item.name)
-    },
-
-    selectedCategoryLabel() {
-      const categoryId = resolveCategoryBySceneType(this.form.sceneId, this.form.typeId)
-      return getCategoryLabel(categoryId)
     },
 
     formationWindowHint() {
@@ -696,8 +699,27 @@ export default {
       this.form.requireApproval = !!e?.detail?.value
     },
 
-    toggleVisibleTagPanel() {
-      this.showVisibleTagPanel = !this.showVisibleTagPanel
+    toggleVisibleTagGroup(groupId = '') {
+      const id = String(groupId || '').trim()
+      if (!id || !this.visibleTagOpenMap || typeof this.visibleTagOpenMap[id] === 'undefined') return
+      this.visibleTagOpenMap = {
+        ...this.visibleTagOpenMap,
+        [id]: !this.visibleTagOpenMap[id],
+      }
+    },
+
+    isVisibleTagGroupOpen(groupId = '') {
+      const id = String(groupId || '').trim()
+      return !!this.visibleTagOpenMap?.[id]
+    },
+
+    visibleTagGroupSelectedCount(groupId = '') {
+      const id = String(groupId || '').trim()
+      const group = (Array.isArray(this.visibleTagGroups) ? this.visibleTagGroups : [])
+        .find((item) => String(item?.id || '') === id)
+      if (!group) return 0
+      const selected = new Set(Array.isArray(this.form.visibleTags) ? this.form.visibleTags : [])
+      return (Array.isArray(group.tags) ? group.tags : []).filter((tag) => selected.has(tag)).length
     },
 
     toggleVisibleTag(tag = '') {
@@ -1037,7 +1059,7 @@ _doChooseLocation() {
         return
       }
       if (!this.form.sceneId || !this.form.typeId) {
-        uni.showToast({ title: '请选择活动场景和活动形式', icon: 'none' })
+        uni.showToast({ title: '请选择活动场景和活动类型', icon: 'none' })
         return
       }
       if (!['free', 'aa', 'paid'].includes(this.form.chargeType)) {
@@ -1132,7 +1154,7 @@ _doChooseLocation() {
             IDENTITY_CHECK_REQUIRED: '当前账号需补充身份核验',
             INVALID_TITLE: '标题格式有误',
             INVALID_SCENE: '请选择有效活动场景',
-            INVALID_TYPE: '请选择有效活动形式',
+            INVALID_TYPE: '请选择有效活动类型',
             INVALID_CHARGE_TYPE: '收费方式不合法',
             INVALID_FEE_AMOUNT: '付费金额不合法',
             CONTACT_REQUIRED: '请至少填写1项联系方式',
@@ -1211,9 +1233,9 @@ _doChooseLocation() {
   font-size: 24rpx;
   color: #667085;
 }
-.visible-tags-toggle {
+.visible-tags-summary-sub {
   font-size: 24rpx;
-  color: #1A3C5E;
+  color: #98A2B3;
 }
 .selected-visible-tags {
   margin-top: 10rpx;
@@ -1237,11 +1259,21 @@ _doChooseLocation() {
 .visible-tag-group + .visible-tag-group {
   margin-top: 16rpx;
 }
+.visible-tag-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4rpx 0 10rpx;
+}
 .visible-tag-group-title {
   display: block;
-  margin-bottom: 8rpx;
   font-size: 24rpx;
-  color: #475467;
+  font-weight: 600;
+  color: #344054;
+}
+.visible-tag-group-meta {
+  font-size: 22rpx;
+  color: #1A3C5E;
 }
 .visible-tag-list {
   display: flex;
