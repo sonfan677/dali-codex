@@ -1510,8 +1510,16 @@ export default {
         topActivityGoal: [],
         topChargingMode: [],
         topRiskBase: [],
+        topKeywordRules: [],
         topRegionLayer: [],
         topDistribution: [],
+        triggerCounts: {
+          isOutdoor: 0,
+          isAlcohol: 0,
+          isChildren: 0,
+          isPet: 0,
+          isApprovalRequired: 0,
+        },
       },
       activityList: [],
       actionLogList: [],
@@ -2594,10 +2602,20 @@ export default {
         return list.length ? list.join(' / ') : '暂无'
       }
       const ov = this.opsTagOverview || {}
+      const trigger = ov.triggerCounts || {}
+      const triggerText = [
+        `户外(${Number(trigger.isOutdoor || 0)})`,
+        `酒精(${Number(trigger.isAlcohol || 0)})`,
+        `儿童(${Number(trigger.isChildren || 0)})`,
+        `宠物(${Number(trigger.isPet || 0)})`,
+        `审核制(${Number(trigger.isApprovalRequired || 0)})`,
+      ].join(' / ')
       const lines = [
         { key: 'goal', label: '活动目标', value: formatLine(ov.topActivityGoal) },
         { key: 'charge', label: '收费模式', value: formatLine(ov.topChargingMode) },
         { key: 'risk', label: '风险等级', value: formatLine(ov.topRiskBase) },
+        { key: 'keyword', label: '关键词命中', value: formatLine(ov.topKeywordRules) },
+        { key: 'trigger', label: '风险触发器', value: triggerText },
         { key: 'region', label: '地域层级', value: formatLine(ov.topRegionLayer) },
         { key: 'distribution', label: '分发属性', value: formatLine(ov.topDistribution) },
         { key: 'core', label: '核心标签', value: formatLine(ov.topCoreTags) },
@@ -3638,8 +3656,16 @@ export default {
           topActivityGoal: [],
           topChargingMode: [],
           topRiskBase: [],
+          topKeywordRules: [],
           topRegionLayer: [],
           topDistribution: [],
+          triggerCounts: {
+            isOutdoor: 0,
+            isAlcohol: 0,
+            isChildren: 0,
+            isPet: 0,
+            isApprovalRequired: 0,
+          },
         }
         this.activityList = res.activityList || []
         this.actionLogList = res.actionLogList || []

@@ -136,8 +136,16 @@ function buildOpsTagOverview(activityList = []) {
       topActivityGoal: [],
       topChargingMode: [],
       topRiskBase: [],
+      topKeywordRules: [],
       topRegionLayer: [],
       topDistribution: [],
+      triggerCounts: {
+        isOutdoor: 0,
+        isAlcohol: 0,
+        isChildren: 0,
+        isPet: 0,
+        isApprovalRequired: 0,
+      },
     }
   }
 
@@ -145,8 +153,16 @@ function buildOpsTagOverview(activityList = []) {
   const goalCounter = {}
   const chargeCounter = {}
   const riskCounter = {}
+  const keywordCounter = {}
   const regionCounter = {}
   const distributionCounter = {}
+  const triggerCounts = {
+    isOutdoor: 0,
+    isAlcohol: 0,
+    isChildren: 0,
+    isPet: 0,
+    isApprovalRequired: 0,
+  }
 
   let tagged = 0
   activityList.forEach((item) => {
@@ -157,8 +173,15 @@ function buildOpsTagOverview(activityList = []) {
     addCounter(goalCounter, profile?.dimensions?.activityGoal)
     addCounter(chargeCounter, profile?.dimensions?.commercial?.chargingMode)
     addCounter(riskCounter, profile?.dimensions?.risk?.base)
+    addCounter(keywordCounter, (profile?.keywordEnhancement?.hits || []).map((item) => item?.label || ''))
     addCounter(regionCounter, profile?.dimensions?.region?.cityLayer)
     addCounter(distributionCounter, profile?.dimensions?.operation?.distribution)
+    const flags = profile?.riskTriggerFlags || {}
+    if (flags.isOutdoor) triggerCounts.isOutdoor += 1
+    if (flags.isAlcohol) triggerCounts.isAlcohol += 1
+    if (flags.isChildren) triggerCounts.isChildren += 1
+    if (flags.isPet) triggerCounts.isPet += 1
+    if (flags.isApprovalRequired) triggerCounts.isApprovalRequired += 1
   })
 
   return {
@@ -169,8 +192,10 @@ function buildOpsTagOverview(activityList = []) {
     topActivityGoal: counterRows(goalCounter, 8),
     topChargingMode: counterRows(chargeCounter, 8),
     topRiskBase: counterRows(riskCounter, 8),
+    topKeywordRules: counterRows(keywordCounter, 8),
     topRegionLayer: counterRows(regionCounter, 8),
     topDistribution: counterRows(distributionCounter, 8),
+    triggerCounts,
   }
 }
 

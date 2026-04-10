@@ -95,8 +95,12 @@ exports.main = async (event) => {
     address: nextAddress,
   }
   const opsTagProfile = buildOpsTagProfile({
+    title: activity.title,
+    description: activity.description,
     sceneId: activity.sceneId,
+    sceneName: activity.sceneName,
     typeId: activity.typeId,
+    typeName: activity.typeName,
     categoryId: activity.categoryId,
     chargeType: activity.chargeType || activity.pricing?.chargeType || 'free',
     feeAmount: Number(activity.feeAmount ?? activity.pricing?.feeAmount ?? 0),

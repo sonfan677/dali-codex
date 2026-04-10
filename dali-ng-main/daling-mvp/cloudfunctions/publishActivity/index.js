@@ -866,8 +866,12 @@ exports.main = async (event, context) => {
     ? new Date(now + finalFormationWindow * 60 * 1000)
     : null
   const opsTagProfile = buildOpsTagProfile({
+    title: title.trim(),
+    description: description.trim(),
     sceneId: finalSceneId,
+    sceneName: finalSceneName,
     typeId: finalTypeId,
+    typeName: finalTypeName,
     categoryId: finalCategoryId,
     chargeType: finalChargeType,
     feeAmount: finalFeeAmount,

@@ -1,4 +1,4 @@
-const OPS_TAG_VERSION = 'structured_v1'
+const OPS_TAG_VERSION = 'structured_keyword_v1'
 
 const OUTDOOR_SCENE_SET = new Set(['local_explore', 'outdoor_nature', 'festival_theme'])
 const INDOOR_SCENE_SET = new Set(['learning_sharing', 'workshop_experience', 'music_performance'])
@@ -71,6 +71,100 @@ const OBJECTIVE_MAP = {
   品牌曝光: '品牌传播型',
   资源连接: '商业合作型',
 }
+
+const KEYWORD_RULES = [
+  {
+    code: 'social_sensitive',
+    label: '交友敏感',
+    keywords: ['交友', '单身', '脱单'],
+    score: 12,
+    effects: {
+      risk: {
+        order: ['交友敏感', '私密社交风险'],
+        governance: ['易涉虚假交友', '需限制联系方式直出'],
+      },
+      operation: {
+        userStructure: ['强筛选属性'],
+      },
+    },
+  },
+  {
+    code: 'alcohol_related',
+    label: '酒精相关风险',
+    keywords: ['酒局', '微醺', '精酿', '清吧', '酒吧', '喝酒'],
+    score: 16,
+    effects: {
+      risk: {
+        safety: ['酒精相关风险'],
+        governance: ['易涉收费争议'],
+      },
+      operation: {
+        contentAttribute: ['氛围驱动'],
+      },
+    },
+  },
+  {
+    code: 'outdoor_motion',
+    label: '户外运动风险',
+    keywords: ['徒步', '骑行', '露营', '越野', '登山', '桨板'],
+    score: 10,
+    effects: {
+      risk: {
+        safety: ['户外运动风险'],
+        emergency: ['需天气预案', '需紧急联系人'],
+      },
+      region: {
+        venue: ['室外', '自然场地'],
+      },
+    },
+  },
+  {
+    code: 'open_fire',
+    label: '明火风险',
+    keywords: ['火把', '篝火', '明火', '焰火'],
+    score: 14,
+    effects: {
+      risk: {
+        safety: ['明火风险', '天气敏感风险'],
+        emergency: ['需天气预案', '需取消预案'],
+      },
+    },
+  },
+  {
+    code: 'yunnan_heritage',
+    label: '云南民俗/非遗主题',
+    keywords: ['三月街', '火把节', '白族', '扎染', '非遗', '绕三灵', '甲马', '瓦猫'],
+    score: 3,
+    effects: {
+      region: {
+        yunnanTheme: ['三月街主题', '火把节主题', '白族文化主题', '非遗体验主题'],
+      },
+      operation: {
+        contentAttribute: ['节庆驱动', '内容驱动'],
+      },
+      commercial: {
+        commercialValue: ['高内容传播价值', '高品牌曝光价值'],
+      },
+    },
+  },
+  {
+    code: 'brand_sponsor',
+    label: '品牌联名/赞助',
+    keywords: ['联名', '赞助', '品牌合作', '合作品牌'],
+    score: 2,
+    effects: {
+      commercial: {
+        chargingMode: ['赞助支持', '联名合作'],
+        monetizationPath: ['品牌赞助'],
+        commercialValue: ['高联名潜力', '高赞助潜力'],
+        supplySide: ['品牌驱动', '官方适合介入'],
+      },
+      operation: {
+        officialOpsValue: ['适合官方联办', '适合平台招商'],
+      },
+    },
+  },
+]
 
 function normalizeText(value = '') {
   return String(value || '').trim()
@@ -346,6 +440,12 @@ function resolveRisk({
 
   return {
     score,
+    triggers: {
+      isOutdoor,
+      isAlcohol,
+      isChildren: hasChildren,
+      isPet: hasPet,
+    },
     base: base.slice(0, 3),
     safety: safety.slice(0, 4),
     order: order.slice(0, 4),
@@ -410,6 +510,171 @@ function resolveRegion({
     transport: transport.slice(0, 3),
     people: people.slice(0, 3),
     yunnanTheme: yunnanTheme.slice(0, 4),
+  }
+}
+
+function keywordHit(textLower = '', keywords = []) {
+  if (!textLower) return []
+  return uniq((Array.isArray(keywords) ? keywords : [])
+    .map((kw) => String(kw || '').trim())
+    .filter((kw) => kw && textLower.includes(kw.toLowerCase())))
+}
+
+function riskBaseByScore(score = 0, safetyTags = []) {
+  const n = Number(score || 0)
+  const base = []
+  if (n >= 45) pushTags(base, ['高风险', '需人工审核'])
+  else if (n >= 25) pushTags(base, ['中风险', '需二次确认'])
+  else pushTags(base, ['低风险'])
+  const safety = uniq(safeArray(safetyTags))
+  if (n >= 45 && (safety.includes('户外运动风险') || safety.includes('水域风险') || safety.includes('明火风险'))) {
+    pushTags(base, ['需线下核验'])
+  }
+  return base.slice(0, 3)
+}
+
+function safeArray(value) {
+  return Array.isArray(value) ? value : []
+}
+
+function clampDimensions(dimensions = {}) {
+  const cloned = JSON.parse(JSON.stringify(dimensions || {}))
+  cloned.activityGoal = uniq(cloned.activityGoal).slice(0, 3)
+  cloned.contentDriver = uniq(cloned.contentDriver).slice(0, 3)
+
+  const c = cloned.commercial || {}
+  c.chargingMode = uniq(c.chargingMode).slice(0, 4)
+  c.monetizationPath = uniq(c.monetizationPath).slice(0, 6)
+  c.commercialValue = uniq(c.commercialValue).slice(0, 6)
+  c.supplySide = uniq(c.supplySide).slice(0, 6)
+  c.costStructure = uniq(c.costStructure).slice(0, 6)
+  cloned.commercial = c
+
+  const o = cloned.operation || {}
+  o.objective = uniq(o.objective).slice(0, 4)
+  o.launchDifficulty = uniq(o.launchDifficulty).slice(0, 4)
+  o.formingDifficulty = uniq(o.formingDifficulty).slice(0, 4)
+  o.frequency = uniq(o.frequency).slice(0, 4)
+  o.distribution = uniq(o.distribution).slice(0, 6)
+  o.userStructure = uniq(o.userStructure).slice(0, 6)
+  o.officialOpsValue = uniq(o.officialOpsValue).slice(0, 4)
+  o.contentAttribute = uniq(o.contentAttribute).slice(0, 5)
+  cloned.operation = o
+
+  const r = cloned.risk || {}
+  r.triggers = {
+    isOutdoor: !!r?.triggers?.isOutdoor,
+    isAlcohol: !!r?.triggers?.isAlcohol,
+    isChildren: !!r?.triggers?.isChildren,
+    isPet: !!r?.triggers?.isPet,
+  }
+  r.safety = uniq(r.safety).slice(0, 6)
+  r.order = uniq(r.order).slice(0, 6)
+  r.governance = uniq(r.governance).slice(0, 6)
+  r.emergency = uniq(r.emergency).slice(0, 6)
+  const score = Number(r.score || 0)
+  r.base = riskBaseByScore(score, r.safety)
+  cloned.risk = r
+
+  const g = cloned.region || {}
+  g.cityLayer = uniq(g.cityLayer).slice(0, 3)
+  g.venue = uniq(g.venue).slice(0, 6)
+  g.vibe = uniq(g.vibe).slice(0, 4)
+  g.transport = uniq(g.transport).slice(0, 4)
+  g.people = uniq(g.people).slice(0, 4)
+  g.yunnanTheme = uniq(g.yunnanTheme).slice(0, 6)
+  cloned.region = g
+
+  return cloned
+}
+
+function buildRiskTriggerFlags(dimensions = {}, requireApproval = false) {
+  const safetyTags = uniq(safeArray(dimensions?.risk?.safety))
+  const triggerByRisk = {
+    isOutdoor: !!dimensions?.risk?.triggers?.isOutdoor || safetyTags.includes('户外运动风险'),
+    isAlcohol: !!dimensions?.risk?.triggers?.isAlcohol || safetyTags.includes('酒精相关风险'),
+    isChildren: !!dimensions?.risk?.triggers?.isChildren || safetyTags.includes('儿童参与风险'),
+    isPet: !!dimensions?.risk?.triggers?.isPet || safetyTags.includes('宠物参与风险'),
+    isApprovalRequired: !!requireApproval,
+  }
+  return triggerByRisk
+}
+
+function applyKeywordEnhancement(dimensions = {}, input = {}) {
+  const textChunks = [
+    input.title,
+    input.description,
+    input.address,
+    input.sceneName,
+    input.typeName,
+  ].map((item) => normalizeText(item)).filter(Boolean)
+  const text = textChunks.join(' | ')
+  const textLower = text.toLowerCase()
+  const hits = []
+  let scoreDelta = 0
+
+  const next = JSON.parse(JSON.stringify(dimensions || {}))
+  KEYWORD_RULES.forEach((rule) => {
+    const matched = keywordHit(textLower, rule.keywords)
+    if (!matched.length) return
+    hits.push({
+      code: rule.code,
+      label: rule.label,
+      keywords: matched.slice(0, 4),
+    })
+    scoreDelta += Number(rule.score || 0)
+    const effects = rule.effects || {}
+    pushTags(next.activityGoal, effects.activityGoal || [])
+    pushTags(next.contentDriver, effects.contentDriver || [])
+
+    if (effects.commercial) {
+      next.commercial = next.commercial || {}
+      pushTags(next.commercial.chargingMode, effects.commercial.chargingMode || [])
+      pushTags(next.commercial.monetizationPath, effects.commercial.monetizationPath || [])
+      pushTags(next.commercial.commercialValue, effects.commercial.commercialValue || [])
+      pushTags(next.commercial.supplySide, effects.commercial.supplySide || [])
+      pushTags(next.commercial.costStructure, effects.commercial.costStructure || [])
+    }
+    if (effects.operation) {
+      next.operation = next.operation || {}
+      pushTags(next.operation.objective, effects.operation.objective || [])
+      pushTags(next.operation.launchDifficulty, effects.operation.launchDifficulty || [])
+      pushTags(next.operation.formingDifficulty, effects.operation.formingDifficulty || [])
+      pushTags(next.operation.frequency, effects.operation.frequency || [])
+      pushTags(next.operation.distribution, effects.operation.distribution || [])
+      pushTags(next.operation.userStructure, effects.operation.userStructure || [])
+      pushTags(next.operation.officialOpsValue, effects.operation.officialOpsValue || [])
+      pushTags(next.operation.contentAttribute, effects.operation.contentAttribute || [])
+    }
+    if (effects.risk) {
+      next.risk = next.risk || {}
+      pushTags(next.risk.safety, effects.risk.safety || [])
+      pushTags(next.risk.order, effects.risk.order || [])
+      pushTags(next.risk.governance, effects.risk.governance || [])
+      pushTags(next.risk.emergency, effects.risk.emergency || [])
+      pushTags(next.risk.base, effects.risk.base || [])
+    }
+    if (effects.region) {
+      next.region = next.region || {}
+      pushTags(next.region.cityLayer, effects.region.cityLayer || [])
+      pushTags(next.region.venue, effects.region.venue || [])
+      pushTags(next.region.vibe, effects.region.vibe || [])
+      pushTags(next.region.transport, effects.region.transport || [])
+      pushTags(next.region.people, effects.region.people || [])
+      pushTags(next.region.yunnanTheme, effects.region.yunnanTheme || [])
+    }
+  })
+
+  next.risk = next.risk || {}
+  const baseScore = Number(next.risk.score || 0)
+  next.risk.score = Math.max(0, Math.min(100, baseScore + scoreDelta))
+  const clamped = clampDimensions(next)
+
+  return {
+    dimensions: clamped,
+    scoreDelta,
+    hits,
+    textUsed: text,
   }
 }
 
@@ -484,7 +749,7 @@ function buildOpsTagProfile(input = {}) {
     areaTag,
   })
 
-  const dimensions = {
+  const baseDimensions = {
     activityGoal: activityGoal.slice(0, 3),
     contentDriver: contentDriver.slice(0, 3),
     commercial,
@@ -492,12 +757,15 @@ function buildOpsTagProfile(input = {}) {
     risk,
     region,
   }
+  const keywordResult = applyKeywordEnhancement(baseDimensions, input)
+  const dimensions = keywordResult.dimensions
+  const riskTriggerFlags = buildRiskTriggerFlags(dimensions, requireApproval)
   const coreTags = buildCoreTags(dimensions)
-  const flatTags = uniq(flattenTags(dimensions)).slice(0, 120)
+  const flatTags = uniq(flattenTags(dimensions)).slice(0, 140)
 
   return {
     version: OPS_TAG_VERSION,
-    mode: 'structured_fields',
+    mode: 'structured_fields+keyword_rules',
     generatedAtMs: Date.now(),
     sourceFields: {
       sceneId,
@@ -514,8 +782,20 @@ function buildOpsTagProfile(input = {}) {
       cityId,
       areaTag,
       hasLocation,
+      isOutdoor: riskTriggerFlags.isOutdoor,
+      isAlcohol: riskTriggerFlags.isAlcohol,
+      isChildren: riskTriggerFlags.isChildren,
+      isPet: riskTriggerFlags.isPet,
+      isApprovalRequired: riskTriggerFlags.isApprovalRequired,
+    },
+    keywordEnhancement: {
+      enabled: true,
+      hitCount: keywordResult.hits.length,
+      scoreDelta: keywordResult.scoreDelta,
+      hits: keywordResult.hits,
     },
     dimensions,
+    riskTriggerFlags,
     coreTags,
     flatTags,
   }

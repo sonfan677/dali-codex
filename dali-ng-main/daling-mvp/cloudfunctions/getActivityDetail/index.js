@@ -342,6 +342,9 @@ function safeArray(value) {
 
 function buildAdminOpsTagSummary(profile = null) {
   if (!profile || typeof profile !== 'object') return null
+  const keywordHits = safeArray(profile?.keywordEnhancement?.hits)
+    .map((item) => String(item?.label || '').trim())
+    .filter(Boolean)
   return {
     version: String(profile.version || ''),
     coreTags: safeArray(profile.coreTags).slice(0, 6),
@@ -350,6 +353,16 @@ function buildAdminOpsTagSummary(profile = null) {
     riskBase: safeArray(profile?.dimensions?.risk?.base).slice(0, 3),
     regionLayer: safeArray(profile?.dimensions?.region?.cityLayer).slice(0, 3),
     distribution: safeArray(profile?.dimensions?.operation?.distribution).slice(0, 4),
+    keywordRuleHits: [...new Set(keywordHits)].slice(0, 6),
+    keywordHitCount: Number(profile?.keywordEnhancement?.hitCount || 0),
+    keywordScoreDelta: Number(profile?.keywordEnhancement?.scoreDelta || 0),
+    riskTriggerFlags: {
+      isOutdoor: !!profile?.riskTriggerFlags?.isOutdoor,
+      isAlcohol: !!profile?.riskTriggerFlags?.isAlcohol,
+      isChildren: !!profile?.riskTriggerFlags?.isChildren,
+      isPet: !!profile?.riskTriggerFlags?.isPet,
+      isApprovalRequired: !!profile?.riskTriggerFlags?.isApprovalRequired,
+    },
     generatedAtMs: Number(profile.generatedAtMs || 0) || 0,
   }
 }

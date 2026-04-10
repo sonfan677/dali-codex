@@ -751,11 +751,21 @@ export default {
 
     adminOpsTagSections() {
       const summary = this.adminInsight?.opsTagSummary || {}
+      const triggerFlags = summary.riskTriggerFlags || {}
+      const triggerTags = [
+        triggerFlags.isOutdoor ? '是否户外=是' : '',
+        triggerFlags.isAlcohol ? '是否酒精=是' : '',
+        triggerFlags.isChildren ? '是否儿童=是' : '',
+        triggerFlags.isPet ? '是否宠物=是' : '',
+        triggerFlags.isApprovalRequired ? '是否审核制=是' : '',
+      ].filter(Boolean)
       const defs = [
         { key: 'coreTags', label: '核心标签', tags: Array.isArray(summary.coreTags) ? summary.coreTags : [] },
         { key: 'activityGoal', label: '活动目标', tags: Array.isArray(summary.activityGoal) ? summary.activityGoal : [] },
         { key: 'chargingMode', label: '收费模式', tags: Array.isArray(summary.chargingMode) ? summary.chargingMode : [] },
         { key: 'riskBase', label: '风险等级', tags: Array.isArray(summary.riskBase) ? summary.riskBase : [] },
+        { key: 'riskTriggerFlags', label: '布尔风险触发器', tags: triggerTags },
+        { key: 'keywordRuleHits', label: '关键词命中', tags: Array.isArray(summary.keywordRuleHits) ? summary.keywordRuleHits : [] },
         { key: 'regionLayer', label: '地域层级', tags: Array.isArray(summary.regionLayer) ? summary.regionLayer : [] },
         { key: 'distribution', label: '分发属性', tags: Array.isArray(summary.distribution) ? summary.distribution : [] },
       ]
