@@ -257,6 +257,51 @@ const USER_VISIBLE_TAG_ALLOW_SET = new Set([
   '室内活动', '适合拍照', '有吃有喝',
 ])
 
+const SOCIAL_ENERGY_BY_SCENE = {
+  social_networking: 'e',
+  music_performance: 'e',
+  market_popups: 'e',
+  learning_sharing: 'i',
+  workshop_experience: 'i',
+}
+
+const SOCIAL_ENERGY_BY_TYPE = {
+  friend_making: 'e',
+  singles_social: 'e',
+  women_social: 'e',
+  entrepreneur_meetup: 'e',
+  industry_mixer: 'e',
+  industry_wine_social: 'e',
+  resource_matching: 'e',
+  host_meetup: 'e',
+  private_circle: 'e',
+  dj_party: 'e',
+  open_mic: 'e',
+  bar_gathering: 'e',
+  random_buddy: 'e',
+  live_music: 'e',
+  folk_live: 'e',
+  creative_market: 'e',
+  food_market: 'e',
+  coffee_market: 'e',
+  stall_recruitment: 'e',
+  book_club: 'i',
+  lecture: 'i',
+  public_class: 'i',
+  guest_sharing: 'i',
+  themed_salon: 'i',
+  roundtable: 'i',
+  knowledge_qa: 'i',
+  writing_workshop: 'i',
+  painting_workshop: 'i',
+  pottery_workshop: 'i',
+  movie_screening: 'i',
+  video_screening: 'i',
+  poetry_night: 'i',
+  meditation_yoga_workshop: 'i',
+  healing_workshop: 'i',
+}
+
 function normalizeCategoryId(categoryId = '') {
   const safe = String(categoryId || '').trim().toLowerCase()
   return LEGACY_CATEGORY_ID_MAP[safe] || safe || 'other'
@@ -324,6 +369,36 @@ function normalizeVisibleTags(visibleTags = [], max = 12) {
     unique.push(tag)
   })
   return unique.slice(0, Math.max(0, Number(max) || 12))
+}
+
+function normalizeSocialEnergy(value = '') {
+  const safe = String(value || '').trim().toLowerCase()
+  if (safe === 'i' || safe === 'e' || safe === 'balanced') return safe
+  return ''
+}
+
+function getSocialEnergyLabel(value = '') {
+  const safe = normalizeSocialEnergy(value)
+  if (safe === 'i') return '偏I友好'
+  if (safe === 'e') return '偏E友好'
+  return '都可以'
+}
+
+function inferSocialEnergy({ sceneId = '', typeId = '', title = '', description = '' } = {}) {
+  const typeBased = normalizeSocialEnergy(SOCIAL_ENERGY_BY_TYPE[String(typeId || '').trim()] || '')
+  if (typeBased) return typeBased
+  const sceneBased = normalizeSocialEnergy(SOCIAL_ENERGY_BY_SCENE[String(sceneId || '').trim()] || '')
+  if (sceneBased) return sceneBased
+
+  const haystack = [title, description]
+    .map((item) => String(item || '').trim().toLowerCase())
+    .filter(Boolean)
+    .join(' ')
+  const extrovertKeywords = ['交友', '扩列', '派对', '酒局', '微醺', '蹦迪', '开麦', 'live', '社交']
+  if (extrovertKeywords.some((kw) => haystack.includes(kw))) return 'e'
+  const introvertKeywords = ['读书', '观影', '手作', '冥想', '瑜伽', '安静', '深聊', '写作', '疗愈']
+  if (introvertKeywords.some((kw) => haystack.includes(kw))) return 'i'
+  return 'balanced'
 }
 
 // 大理白族自治州发布范围（近似地理围栏，后续可改为配置化 polygon）
@@ -737,6 +812,7 @@ exports.main = async (event, context) => {
     marketLink = null,
     chargeType = 'free',
     feeAmount = 0,
+    socialEnergy = '',
     allowWaitlist = false,
     requireApproval = false,
     contactPhone = '',
@@ -761,6 +837,13 @@ exports.main = async (event, context) => {
   const finalTypeName = String(sceneType?.typeName || typeName || '').trim()
   const finalCategoryId = normalizeCategoryId(sceneType?.categoryId || categoryId || 'other')
   const finalVisibleTags = normalizeVisibleTags(visibleTags, 12)
+  const finalSocialEnergy = normalizeSocialEnergy(socialEnergy) || inferSocialEnergy({
+    sceneId: finalSceneId,
+    typeId: finalTypeId,
+    title,
+    description,
+  })
+  const finalSocialEnergyLabel = getSocialEnergyLabel(finalSocialEnergy)
   const normalizedCustomCategoryLabel = normalizeCustomCategoryLabel(customCategoryLabel)
   const rawThemeIds = Array.isArray(themeIds) ? themeIds : []
   const hasInvalidTheme = rawThemeIds.some((item) => {
@@ -899,6 +982,8 @@ exports.main = async (event, context) => {
       sceneName: finalSceneName,
       typeId: finalTypeId,
       typeName: finalTypeName,
+      socialEnergy: finalSocialEnergy,
+      socialEnergyLabel: finalSocialEnergyLabel,
       themeIds: finalThemeIds,
       userVisibleTags: finalVisibleTags,
       categoryId: finalCategoryId,
@@ -1032,6 +1117,8 @@ exports.main = async (event, context) => {
     sceneName: finalSceneName,
     typeId: finalTypeId,
     typeName: finalTypeName,
+    socialEnergy: finalSocialEnergy,
+    socialEnergyLabel: finalSocialEnergyLabel,
     chargeType: finalChargeType,
     feeAmount: finalFeeAmount,
     opsTagVersion: OPS_TAG_VERSION,

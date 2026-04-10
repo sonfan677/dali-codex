@@ -93,6 +93,7 @@
               <text class="arrow">›</text>
             </view>
           </picker>
+          <text class="hint">系统判定社交偏好：{{ inferredSocialEnergyLabel }}</text>
         </view>
 
         <!-- 地点 -->
@@ -311,6 +312,48 @@
             placeholder="请输入用户名"
           />
         </view>
+        <view class="profile-extra">
+          <view class="profile-extra-field">
+            <text class="profile-extra-label">社交偏好</text>
+            <picker
+              mode="selector"
+              :range="socialPreferencePickerRange"
+              :value="profileDraftSocialPreferenceIndex"
+              @change="onProfileSocialPreferenceChange"
+            >
+              <view class="picker-row">
+                <text class="picker-value">{{ socialPreferencePickerRange[profileDraftSocialPreferenceIndex] }}</text>
+                <text class="arrow">›</text>
+              </view>
+            </picker>
+          </view>
+          <view class="profile-extra-field">
+            <text class="profile-extra-label">居住身份</text>
+            <picker
+              mode="selector"
+              :range="residencyTypePickerRange"
+              :value="profileDraftResidencyTypeIndex"
+              @change="onProfileResidencyTypeChange"
+            >
+              <view class="picker-row">
+                <text class="picker-value">{{ residencyTypePickerRange[profileDraftResidencyTypeIndex] }}</text>
+                <text class="arrow">›</text>
+              </view>
+            </picker>
+          </view>
+          <view class="profile-extra-field">
+            <text class="profile-extra-label">身份标签（最多3个）</text>
+            <view class="profile-tag-list">
+              <text
+                v-for="tag in identityTagOptions"
+                :key="`publish-profile-tag-${tag.id}`"
+                class="profile-tag-item"
+                :class="{ 'profile-tag-item--active': profileDraftIdentityTags.includes(tag.id) }"
+                @tap="toggleProfileIdentityTag(tag.id)"
+              >{{ tag.label }}</text>
+            </view>
+          </view>
+        </view>
         <button class="phone-bind-confirm" @tap="saveProfileAndContinuePublish">保存并继续</button>
         <text class="phone-bind-cancel" @tap="closeProfileDialog">稍后再说</text>
       </view>
@@ -338,9 +381,17 @@
 import { callCloud } from '@/utils/cloud.js'
 import { useUserStore } from '@/stores/user.js'
 import {
+  getSocialEnergyLabel,
   PUBLISH_SCENE_OPTIONS,
+  USER_IDENTITY_TAG_OPTIONS,
+  USER_RESIDENCY_TYPE_OPTIONS,
+  USER_SOCIAL_PREFERENCE_OPTIONS,
   getCategoryLabel,
   getTypesByScene,
+  inferActivitySocialEnergy,
+  normalizeIdentityTags,
+  normalizeResidencyType,
+  normalizeSocialPreference,
   resolveCategoryBySceneType,
   resolveSceneTypeFromLegacyFields,
 } from '@/utils/activityMeta.js'
@@ -409,6 +460,12 @@ export default {
       showPhoneBindDialog: false,
       profileDraftNickname: '',
       profileDraftAvatar: '',
+      socialPreferenceOptions: USER_SOCIAL_PREFERENCE_OPTIONS,
+      residencyTypeOptions: USER_RESIDENCY_TYPE_OPTIONS,
+      identityTagOptions: USER_IDENTITY_TAG_OPTIONS,
+      profileDraftSocialPreference: 'unknown',
+      profileDraftResidencyType: 'unknown',
+      profileDraftIdentityTags: [],
       scrollTop: 0,
       minParticipantsDisplay: '',
       form: {
@@ -483,6 +540,39 @@ export default {
       const total = Array.isArray(this.form?.visibleTags) ? this.form.visibleTags.length : 0
       if (!total) return '用户可见标签（选填）'
       return `用户可见标签（选填） · 已选 ${total} 个`
+    },
+
+    socialPreferencePickerRange() {
+      return this.socialPreferenceOptions.map((item) => item.label)
+    },
+
+    profileDraftSocialPreferenceIndex() {
+      const idx = this.socialPreferenceOptions.findIndex((item) => item.id === this.profileDraftSocialPreference)
+      return idx >= 0 ? idx : 0
+    },
+
+    residencyTypePickerRange() {
+      return this.residencyTypeOptions.map((item) => item.label)
+    },
+
+    profileDraftResidencyTypeIndex() {
+      const idx = this.residencyTypeOptions.findIndex((item) => item.id === this.profileDraftResidencyType)
+      return idx >= 0 ? idx : 0
+    },
+
+    inferredSocialEnergyId() {
+      return inferActivitySocialEnergy({
+        sceneId: this.form.sceneId,
+        sceneName: this.form.sceneName,
+        typeId: this.form.typeId,
+        typeName: this.form.typeName,
+        title: this.form.title,
+        description: this.form.description,
+      })
+    },
+
+    inferredSocialEnergyLabel() {
+      return getSocialEnergyLabel(this.inferredSocialEnergyId)
     },
   },
 
@@ -925,8 +1015,14 @@ _doChooseLocation() {
       const gd = getApp().globalData || {}
       const nickname = String(gd.nickname || this.userStore.nickname || '').trim()
       const avatarUrl = String(gd.avatarUrl || this.userStore.avatarUrl || '').trim()
+      const socialPreference = normalizeSocialPreference(gd.socialPreference || this.userStore.socialPreference || 'unknown')
+      const residencyType = normalizeResidencyType(gd.residencyType || this.userStore.residencyType || 'unknown')
+      const identityTags = normalizeIdentityTags(gd.identityTags || this.userStore.identityTags || [], 3)
       this.profileDraftNickname = nickname
       this.profileDraftAvatar = avatarUrl
+      this.profileDraftSocialPreference = socialPreference
+      this.profileDraftResidencyType = residencyType
+      this.profileDraftIdentityTags = identityTags
     },
     closeProfileDialog() {
       this.showProfileDialog = false
@@ -934,9 +1030,32 @@ _doChooseLocation() {
     onPublishChooseAvatar(e) {
       this.profileDraftAvatar = String(e?.detail?.avatarUrl || '').trim()
     },
+    onProfileSocialPreferenceChange(e) {
+      const idx = Number(e?.detail?.value || 0)
+      const option = this.socialPreferenceOptions[idx] || this.socialPreferenceOptions[0]
+      this.profileDraftSocialPreference = normalizeSocialPreference(option?.id || 'unknown')
+    },
+    onProfileResidencyTypeChange(e) {
+      const idx = Number(e?.detail?.value || 0)
+      const option = this.residencyTypeOptions[idx] || this.residencyTypeOptions[0]
+      this.profileDraftResidencyType = normalizeResidencyType(option?.id || 'unknown')
+    },
+    toggleProfileIdentityTag(tagId = '') {
+      const safe = String(tagId || '').trim()
+      if (!safe) return
+      const current = Array.isArray(this.profileDraftIdentityTags) ? [...this.profileDraftIdentityTags] : []
+      const exists = current.includes(safe)
+      const next = exists
+        ? current.filter((item) => item !== safe)
+        : [...current, safe]
+      this.profileDraftIdentityTags = normalizeIdentityTags(next, 3)
+    },
     async saveProfileAndContinuePublish() {
       const nickname = String(this.profileDraftNickname || '').trim()
       const avatarUrl = String(this.profileDraftAvatar || '').trim()
+      const socialPreference = normalizeSocialPreference(this.profileDraftSocialPreference)
+      const residencyType = normalizeResidencyType(this.profileDraftResidencyType)
+      const identityTags = normalizeIdentityTags(this.profileDraftIdentityTags, 3)
       if (!avatarUrl) {
         uni.showToast({ title: '请先设置头像', icon: 'none' })
         return
@@ -945,8 +1064,22 @@ _doChooseLocation() {
         uni.showToast({ title: '请先填写用户名', icon: 'none' })
         return
       }
+      if (socialPreference === 'unknown') {
+        uni.showToast({ title: '请先选择社交偏好', icon: 'none' })
+        return
+      }
+      if (residencyType === 'unknown') {
+        uni.showToast({ title: '请先选择居住身份', icon: 'none' })
+        return
+      }
       try {
-        const res = await callCloud('login', { nickname, avatarUrl })
+        const res = await callCloud('login', {
+          nickname,
+          avatarUrl,
+          socialPreference,
+          residencyType,
+          identityTags,
+        })
         if (!res?.success) {
           uni.showToast({ title: '保存资料失败，请重试', icon: 'none' })
           return
@@ -954,8 +1087,14 @@ _doChooseLocation() {
         const gd = getApp().globalData || {}
         gd.nickname = nickname
         gd.avatarUrl = avatarUrl
+        gd.socialPreference = socialPreference
+        gd.residencyType = residencyType
+        gd.identityTags = identityTags
         this.userStore.nickname = nickname
         this.userStore.avatarUrl = avatarUrl
+        this.userStore.socialPreference = socialPreference
+        this.userStore.residencyType = residencyType
+        this.userStore.identityTags = identityTags
         this.showProfileDialog = false
         uni.showToast({ title: '资料已完善', icon: 'success' })
         setTimeout(() => {
@@ -1105,6 +1244,7 @@ _doChooseLocation() {
           sceneName:        this.form.sceneName,
           typeId:           this.form.typeId,
           typeName:         this.form.typeName,
+          socialEnergy:     this.inferredSocialEnergyId,
           chargeType:       this.form.chargeType,
           feeAmount,
           allowWaitlist:    !!this.form.allowWaitlist,
@@ -1453,6 +1593,39 @@ _doChooseLocation() {
   padding: 0 18rpx;
   font-size: 26rpx;
   color: #1a1a1a;
+}
+.profile-extra {
+  margin-top: 16rpx;
+  border-radius: 12rpx;
+  background: #f8fafc;
+  padding: 14rpx 14rpx 8rpx;
+}
+.profile-extra-field {
+  margin-bottom: 10rpx;
+}
+.profile-extra-label {
+  display: block;
+  font-size: 22rpx;
+  color: #667085;
+  margin-bottom: 6rpx;
+}
+.profile-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10rpx;
+}
+.profile-tag-item {
+  padding: 7rpx 14rpx;
+  border-radius: 999rpx;
+  font-size: 22rpx;
+  color: #475467;
+  background: #fff;
+  border: 1rpx solid #e4e7ec;
+}
+.profile-tag-item--active {
+  color: #1a3c5e;
+  border-color: #1a3c5e;
+  background: #eaf2fb;
 }
 
 .bottom-bar {

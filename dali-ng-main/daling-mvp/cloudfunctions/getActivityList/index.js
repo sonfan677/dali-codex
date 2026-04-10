@@ -236,6 +236,51 @@ const CATEGORY_TO_SCENE_TYPE = {
   other: { sceneId: 'casual_gathering', typeId: 'random_buddy' },
 }
 
+const SOCIAL_ENERGY_BY_SCENE = {
+  social_networking: 'e',
+  music_performance: 'e',
+  market_popups: 'e',
+  learning_sharing: 'i',
+  workshop_experience: 'i',
+}
+
+const SOCIAL_ENERGY_BY_TYPE = {
+  friend_making: 'e',
+  singles_social: 'e',
+  women_social: 'e',
+  entrepreneur_meetup: 'e',
+  industry_mixer: 'e',
+  industry_wine_social: 'e',
+  resource_matching: 'e',
+  host_meetup: 'e',
+  private_circle: 'e',
+  dj_party: 'e',
+  open_mic: 'e',
+  bar_gathering: 'e',
+  random_buddy: 'e',
+  live_music: 'e',
+  folk_live: 'e',
+  creative_market: 'e',
+  food_market: 'e',
+  coffee_market: 'e',
+  stall_recruitment: 'e',
+  book_club: 'i',
+  lecture: 'i',
+  public_class: 'i',
+  guest_sharing: 'i',
+  themed_salon: 'i',
+  roundtable: 'i',
+  knowledge_qa: 'i',
+  writing_workshop: 'i',
+  painting_workshop: 'i',
+  pottery_workshop: 'i',
+  movie_screening: 'i',
+  video_screening: 'i',
+  poetry_night: 'i',
+  meditation_yoga_workshop: 'i',
+  healing_workshop: 'i',
+}
+
 function normalizeCategoryId(categoryId = '') {
   const safe = String(categoryId || '').trim().toLowerCase()
   return LEGACY_CATEGORY_ID_MAP[safe] || safe || 'other'
@@ -317,6 +362,35 @@ async function loadCityConfig(cityId = 'dali') {
 
 function normalizeKeyword(val) {
   return String(val || '').trim().toLowerCase()
+}
+
+function normalizeSocialEnergy(value = '') {
+  const safe = String(value || '').trim().toLowerCase()
+  if (safe === 'i' || safe === 'e' || safe === 'balanced') return safe
+  return 'all'
+}
+
+function getSocialEnergyLabel(value = '') {
+  const safe = String(value || '').trim().toLowerCase()
+  if (safe === 'i') return '偏I友好'
+  if (safe === 'e') return '偏E友好'
+  return '都可以'
+}
+
+function inferSocialEnergy({ sceneId = '', typeId = '', title = '', description = '' } = {}) {
+  const typeBased = String(SOCIAL_ENERGY_BY_TYPE[String(typeId || '').trim()] || '').trim().toLowerCase()
+  if (typeBased === 'i' || typeBased === 'e') return typeBased
+  const sceneBased = String(SOCIAL_ENERGY_BY_SCENE[String(sceneId || '').trim()] || '').trim().toLowerCase()
+  if (sceneBased === 'i' || sceneBased === 'e') return sceneBased
+  const haystack = [title, description]
+    .map((item) => String(item || '').trim().toLowerCase())
+    .filter(Boolean)
+    .join(' ')
+  const extrovertKeywords = ['交友', '扩列', '派对', '酒局', '微醺', '蹦迪', '开麦', 'live', '社交']
+  if (extrovertKeywords.some((kw) => haystack.includes(kw))) return 'e'
+  const introvertKeywords = ['读书', '观影', '手作', '冥想', '瑜伽', '安静', '深聊', '写作', '疗愈']
+  if (introvertKeywords.some((kw) => haystack.includes(kw))) return 'i'
+  return 'balanced'
 }
 
 function getDistance(lat1, lng1, lat2, lng2) {
@@ -474,6 +548,7 @@ exports.main = async (event, context) => {
   const {
     radius,
     keyword = '',
+    socialEnergy = 'all',
     sceneId = 'all',
     categoryId = 'all',
     queryMode = 'nearby',
@@ -490,6 +565,7 @@ exports.main = async (event, context) => {
     Number.isFinite(inputRadius) && inputRadius > 0 ? inputRadius : defaultRadius
   )
   const normalizedKeyword = normalizeKeyword(keyword)
+  const normalizedSocialEnergy = normalizeSocialEnergy(socialEnergy)
   const keywordTokens = normalizedKeyword.split(/\s+/).filter(Boolean)
   const normalizedCategoryId = String(categoryId || 'all').toLowerCase() === 'all'
     ? 'all'
@@ -533,6 +609,15 @@ exports.main = async (event, context) => {
       })
       const finalSceneId = sceneType.sceneId
       const finalTypeId = sceneType.typeId
+      const normalizedItemSocialEnergy = normalizeSocialEnergy(a.socialEnergy)
+      const finalSocialEnergy = normalizedItemSocialEnergy === 'all'
+        ? inferSocialEnergy({
+          sceneId: finalSceneId,
+          typeId: finalTypeId,
+          title: a.title,
+          description: a.description,
+        })
+        : normalizedItemSocialEnergy
       return {
         ...a,
         categoryId: normalizedItemCategoryId,
@@ -541,6 +626,8 @@ exports.main = async (event, context) => {
         sceneName: a.sceneName || sceneType.sceneName || '未分类场景',
         typeId: finalTypeId,
         typeName: a.typeName || sceneType.typeName || '未分类',
+        socialEnergy: finalSocialEnergy,
+        socialEnergyLabel: getSocialEnergyLabel(finalSocialEnergy),
         _distance: Number.isFinite(Number(a?.location?.lat)) && Number.isFinite(Number(a?.location?.lng))
           ? getDistance(centerLat, centerLng, Number(a.location.lat), Number(a.location.lng))
           : null,
@@ -560,6 +647,9 @@ exports.main = async (event, context) => {
         return false
       }
       if (!isSceneDirectMatch && isCategoryDirectMatch && normalizeCategoryId(a.categoryId || 'other') !== normalizedCategoryId) {
+        return false
+      }
+      if (normalizedSocialEnergy !== 'all' && String(a.socialEnergy || '') !== normalizedSocialEnergy) {
         return false
       }
       if (!keywordTokens.length) return true
@@ -641,6 +731,7 @@ exports.main = async (event, context) => {
       radius: safeRadius,
       sceneId: normalizedSceneId,
       categoryId: normalizedCategoryId,
+      socialEnergy: normalizedSocialEnergy,
       keyword: normalizedKeyword,
       sortBy: normalizedSortBy,
     },

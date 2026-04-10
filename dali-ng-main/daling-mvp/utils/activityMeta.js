@@ -321,6 +321,185 @@ export const DISTANCE_FILTER_OPTIONS = [
   { id: 'r_1000', label: '1000km', type: 'radius', radius: 1000000 },
 ]
 
+export const USER_SOCIAL_PREFERENCE_OPTIONS = [
+  { id: 'unknown', label: '未设置' },
+  { id: 'introvert', label: '偏I（安静小圈）' },
+  { id: 'extrovert', label: '偏E（热闹扩列）' },
+  { id: 'balanced', label: '都可以' },
+]
+
+export const USER_RESIDENCY_TYPE_OPTIONS = [
+  { id: 'unknown', label: '未设置' },
+  { id: 'visitor', label: '游客' },
+  { id: 'nomad', label: '旅居者' },
+  { id: 'local', label: '本地人' },
+]
+
+export const USER_IDENTITY_TAG_OPTIONS = [
+  { id: 'homestay_owner', label: '民宿老板' },
+  { id: 'host', label: '主理人' },
+  { id: 'merchant', label: '商家' },
+  { id: 'student', label: '学生' },
+  { id: 'freelancer', label: '自由职业者' },
+  { id: 'office_worker', label: '上班族' },
+  { id: 'creator', label: '内容创作者' },
+  { id: 'parent', label: '亲子家长' },
+  { id: 'pet_owner', label: '养宠人' },
+  { id: 'other', label: '其他' },
+]
+
+const USER_SOCIAL_PREFERENCE_LABEL_MAP = USER_SOCIAL_PREFERENCE_OPTIONS.reduce((acc, item) => {
+  acc[item.id] = item.label
+  return acc
+}, {})
+
+const USER_RESIDENCY_TYPE_LABEL_MAP = USER_RESIDENCY_TYPE_OPTIONS.reduce((acc, item) => {
+  acc[item.id] = item.label
+  return acc
+}, {})
+
+const USER_IDENTITY_TAG_LABEL_MAP = USER_IDENTITY_TAG_OPTIONS.reduce((acc, item) => {
+  acc[item.id] = item.label
+  return acc
+}, {})
+
+const USER_IDENTITY_TAG_ID_SET = new Set(USER_IDENTITY_TAG_OPTIONS.map((item) => item.id))
+
+export const SOCIAL_ENERGY_OPTIONS = [
+  { id: 'all', label: '社交偏好' },
+  { id: 'i', label: '偏I友好' },
+  { id: 'e', label: '偏E友好' },
+  { id: 'balanced', label: '都可以' },
+]
+
+const SOCIAL_ENERGY_LABEL_MAP = {
+  i: '偏I友好',
+  e: '偏E友好',
+  balanced: '都可以',
+}
+
+const SOCIAL_ENERGY_BY_SCENE = {
+  social_networking: 'e',
+  music_performance: 'e',
+  market_popups: 'e',
+  learning_sharing: 'i',
+  workshop_experience: 'i',
+}
+
+const SOCIAL_ENERGY_TYPE_OVERRIDE = {
+  friend_making: 'e',
+  singles_social: 'e',
+  women_social: 'e',
+  entrepreneur_meetup: 'e',
+  industry_mixer: 'e',
+  industry_wine_social: 'e',
+  resource_matching: 'e',
+  host_meetup: 'e',
+  private_circle: 'e',
+  dj_party: 'e',
+  open_mic: 'e',
+  bar_gathering: 'e',
+  random_buddy: 'e',
+  live_music: 'e',
+  folk_live: 'e',
+  creative_market: 'e',
+  food_market: 'e',
+  coffee_market: 'e',
+  stall_recruitment: 'e',
+  book_club: 'i',
+  lecture: 'i',
+  public_class: 'i',
+  guest_sharing: 'i',
+  themed_salon: 'i',
+  roundtable: 'i',
+  knowledge_qa: 'i',
+  writing_workshop: 'i',
+  painting_workshop: 'i',
+  pottery_workshop: 'i',
+  movie_screening: 'i',
+  video_screening: 'i',
+  poetry_night: 'i',
+  meditation_yoga_workshop: 'i',
+  healing_workshop: 'i',
+}
+
+export function normalizeSocialPreference(value = '') {
+  const safe = String(value || '').trim()
+  if (safe === 'introvert' || safe === 'extrovert' || safe === 'balanced') return safe
+  return 'unknown'
+}
+
+export function getSocialPreferenceLabel(value = '') {
+  return USER_SOCIAL_PREFERENCE_LABEL_MAP[normalizeSocialPreference(value)] || USER_SOCIAL_PREFERENCE_LABEL_MAP.unknown
+}
+
+export function normalizeResidencyType(value = '') {
+  const safe = String(value || '').trim()
+  if (safe === 'visitor' || safe === 'nomad' || safe === 'local') return safe
+  return 'unknown'
+}
+
+export function getResidencyTypeLabel(value = '') {
+  return USER_RESIDENCY_TYPE_LABEL_MAP[normalizeResidencyType(value)] || USER_RESIDENCY_TYPE_LABEL_MAP.unknown
+}
+
+export function normalizeIdentityTags(values = [], max = 3) {
+  const unique = []
+  ;(Array.isArray(values) ? values : []).forEach((item) => {
+    const safe = String(item || '').trim()
+    if (!safe || !USER_IDENTITY_TAG_ID_SET.has(safe) || unique.includes(safe)) return
+    unique.push(safe)
+  })
+  return unique.slice(0, Math.max(0, Number(max) || 3))
+}
+
+export function getIdentityTagLabel(value = '') {
+  const safe = String(value || '').trim()
+  return USER_IDENTITY_TAG_LABEL_MAP[safe] || ''
+}
+
+export function getIdentityTagLabels(values = [], max = 3) {
+  return normalizeIdentityTags(values, max)
+    .map((item) => USER_IDENTITY_TAG_LABEL_MAP[item] || '')
+    .filter(Boolean)
+}
+
+export function normalizeSocialEnergy(value = '') {
+  const safe = String(value || '').trim().toLowerCase()
+  if (safe === 'i' || safe === 'e' || safe === 'balanced') return safe
+  return ''
+}
+
+export function getSocialEnergyLabel(value = '') {
+  const safe = normalizeSocialEnergy(value)
+  if (!safe) return '都可以'
+  return SOCIAL_ENERGY_LABEL_MAP[safe] || '都可以'
+}
+
+export function inferActivitySocialEnergy(input = {}) {
+  const typeId = String(input?.typeId || '').trim()
+  const fromType = normalizeSocialEnergy(SOCIAL_ENERGY_TYPE_OVERRIDE[typeId] || '')
+  if (fromType) return fromType
+
+  const sceneId = String(input?.sceneId || '').trim()
+  const fromScene = normalizeSocialEnergy(SOCIAL_ENERGY_BY_SCENE[sceneId] || '')
+  if (fromScene) return fromScene
+
+  const text = [input?.title, input?.description, input?.typeName, input?.sceneName]
+    .map((item) => String(item || '').trim())
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase()
+
+  const extrovertHints = ['交友', '扩列', '派对', '酒局', '微醺', '蹦迪', '开麦', 'live', '社交']
+  if (extrovertHints.some((kw) => text.includes(kw))) return 'e'
+
+  const introvertHints = ['读书', '观影', '手作', '冥想', '瑜伽', '安静', '深聊', '写作', '疗愈']
+  if (introvertHints.some((kw) => text.includes(kw))) return 'i'
+
+  return 'balanced'
+}
+
 export function normalizeCategoryId(categoryId) {
   const safe = String(categoryId || '').trim().toLowerCase()
   return LEGACY_CATEGORY_ID_MAP[safe] || safe || 'other'

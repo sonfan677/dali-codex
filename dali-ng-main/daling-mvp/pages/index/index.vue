@@ -48,6 +48,13 @@
         </view>
       </view>
 
+      <view class="filter-dropdown-row filter-dropdown-row--secondary">
+        <view class="dropdown-btn dropdown-btn--single" :class="{ 'dropdown-btn--active': socialEnergyFilterId !== 'all' }" @tap="openSocialEnergyFilter">
+          <text class="dropdown-btn-text">{{ socialEnergyFilterLabel }}</text>
+          <text class="dropdown-btn-arrow">▾</text>
+        </view>
+      </view>
+
       <text class="filter-hint">{{ filterHintText }}</text>
     </view>
 
@@ -127,10 +134,13 @@ import {
   DISCOVERY_SCENE_FILTER_OPTIONS,
   DISTANCE_FILTER_OPTIONS,
   getCategoryLabel,
+  getSocialEnergyLabel,
   getSceneLabel,
+  inferActivitySocialEnergy,
   normalizeCategoryId,
   normalizeSceneId,
   resolveSceneTypeFromLegacyFields,
+  SOCIAL_ENERGY_OPTIONS,
 } from '@/utils/activityMeta.js'
 
 const DEFAULT_CENTER = {
@@ -242,6 +252,8 @@ export default {
       distanceFilterId: '',
       dateFilterId: 'all',
       statusFilterId: 'all',
+      socialEnergyFilterId: 'all',
+      socialEnergyFilterOptions: SOCIAL_ENERGY_OPTIONS,
       dateFilterAnchorMs: Date.now(),
       selectorVisible: false,
       selectorType: '',
@@ -270,7 +282,8 @@ export default {
         this.categoryFilterId !== 'all' ||
         !!this.distanceFilterId ||
         this.dateFilterId !== 'all' ||
-        this.statusFilterId !== 'all'
+        this.statusFilterId !== 'all' ||
+        this.socialEnergyFilterId !== 'all'
       )
     },
 
@@ -328,6 +341,7 @@ export default {
       if (this.distanceFilterId) bits.push(this.distanceFilterLabel)
       if (this.dateFilterId !== 'all') bits.push(this.dateFilterLabel)
       if (this.statusFilterId !== 'all') bits.push(this.statusFilterLabel)
+      if (this.socialEnergyFilterId !== 'all') bits.push(this.socialEnergyFilterLabel)
       return bits.length ? `筛选模式：${bits.join(' · ')}` : '未设置搜索或筛选条件'
     },
 
@@ -368,6 +382,12 @@ export default {
       if (this.statusFilterId === 'all') return '状态'
       const item = this.statusFilterOptions.find((opt) => opt.id === this.statusFilterId)
       return item?.label || '状态'
+    },
+
+    socialEnergyFilterLabel() {
+      if (this.socialEnergyFilterId === 'all') return '社交偏好'
+      const item = this.socialEnergyFilterOptions.find((opt) => opt.id === this.socialEnergyFilterId)
+      return item?.label || '社交偏好'
     },
 
     listStyle() {
@@ -572,6 +592,7 @@ export default {
       this.distanceFilterId = ''
       this.dateFilterId = 'all'
       this.statusFilterId = 'all'
+      this.socialEnergyFilterId = 'all'
     },
 
     getDistanceScopeConfig(mode = this.lastQueryMode) {
@@ -599,6 +620,9 @@ export default {
         ? this.categoryFilterId
         : 'all'
       const queryKeyword = useSearch ? this.appliedKeyword : ''
+      const querySocialEnergy = (!useSearch && this.socialEnergyFilterId !== 'all')
+        ? this.socialEnergyFilterId
+        : 'all'
 
       return {
         cityId: 'dali',
@@ -609,6 +633,7 @@ export default {
         sortBy: scope.sortBy || 'default',
         sceneId: querySceneId,
         categoryId: 'all',
+        socialEnergy: querySocialEnergy,
         keyword: queryKeyword,
         limit: 500,
       }
@@ -622,14 +647,27 @@ export default {
         categoryId,
         title: item?.title,
       })
+      const resolvedTypeId = item?.typeId || sceneType.typeId
+      const resolvedTypeName = item?.typeName || sceneType.typeName || '未分类'
+      const resolvedSceneName = item?.sceneName || sceneType.sceneName || getSceneLabel(sceneType.sceneId)
+      const resolvedSocialEnergy = item?.socialEnergy || inferActivitySocialEnergy({
+        sceneId: sceneType.sceneId,
+        typeId: resolvedTypeId,
+        typeName: resolvedTypeName,
+        sceneName: resolvedSceneName,
+        title: item?.title,
+        description: item?.description,
+      })
       return {
         ...item,
         categoryId,
         categoryLabel: item?.categoryLabel || getCategoryLabel(categoryId),
         sceneId: sceneType.sceneId,
-        sceneName: item?.sceneName || sceneType.sceneName || getSceneLabel(sceneType.sceneId),
-        typeId: item?.typeId || sceneType.typeId,
-        typeName: item?.typeName || sceneType.typeName || '未分类',
+        sceneName: resolvedSceneName,
+        typeId: resolvedTypeId,
+        typeName: resolvedTypeName,
+        socialEnergy: resolvedSocialEnergy,
+        socialEnergyLabel: item?.socialEnergyLabel || getSocialEnergyLabel(resolvedSocialEnergy),
       }
     },
 
@@ -732,6 +770,12 @@ export default {
       return list
     },
 
+    applySocialEnergyFilter(list = []) {
+      const selected = String(this.socialEnergyFilterId || 'all')
+      if (selected === 'all') return list
+      return list.filter((item) => String(item.socialEnergy || '') === selected)
+    },
+
     applySorting(list = []) {
       const distanceOpt = this.distanceFilterOptions.find((item) => item.id === this.distanceFilterId)
       if (distanceOpt && distanceOpt.type === 'sort') {
@@ -783,6 +827,7 @@ export default {
         result = this.applyDistanceFilter(result)
         result = this.applyDateFilter(result)
         result = this.applyStatusFilter(result)
+        result = this.applySocialEnergyFilter(result)
       }
 
       return this.applySorting(result)
@@ -846,6 +891,7 @@ export default {
       if (this.selectorType === 'distance') this.distanceFilterId = option.id
       if (this.selectorType === 'date') this.dateFilterId = option.id
       if (this.selectorType === 'status') this.statusFilterId = option.id
+      if (this.selectorType === 'social_energy') this.socialEnergyFilterId = option.id
       this.selectorValue = option.id
       this.closeFilterSelector()
       await this.reloadActivitiesByContext()
@@ -905,6 +951,15 @@ export default {
         title: '状态',
         value: this.statusFilterId,
         options: this.statusFilterOptions,
+      })
+    },
+
+    openSocialEnergyFilter() {
+      this.openFilterSelector({
+        type: 'social_energy',
+        title: '社交偏好',
+        value: this.socialEnergyFilterId,
+        options: this.socialEnergyFilterOptions,
       })
     },
 
@@ -1147,6 +1202,11 @@ export default {
   gap: 10rpx;
 }
 
+.filter-dropdown-row--secondary {
+  margin-top: 10rpx;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+}
+
 .dropdown-btn {
   min-height: 64rpx;
   border-radius: 12rpx;
@@ -1156,6 +1216,15 @@ export default {
   align-items: center;
   justify-content: space-between;
   padding: 0 12rpx;
+}
+
+.dropdown-btn--single {
+  justify-content: flex-start;
+  gap: 12rpx;
+}
+
+.dropdown-btn--single .dropdown-btn-text {
+  max-width: none;
 }
 
 .dropdown-btn--active {

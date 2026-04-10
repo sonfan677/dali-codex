@@ -4,6 +4,18 @@ const db = cloud.database()
 const _ = db.command
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000
 const VERIFY_AUTO_APPROVE_DEFAULT_MINUTES = 10
+const USER_IDENTITY_TAG_SET = new Set([
+  'homestay_owner',
+  'host',
+  'merchant',
+  'student',
+  'freelancer',
+  'office_worker',
+  'creator',
+  'parent',
+  'pet_owner',
+  'other',
+])
 
 function calcUserRiskScore(user = {}) {
   const noShowCount = Number(user.noShowCount || 0)
@@ -17,6 +29,28 @@ function calcUserRiskScore(user = {}) {
     - locationAnomalyCount * 5
     - overloadPublishPenalty
   return Math.max(0, Math.min(100, Math.round(score)))
+}
+
+function normalizeSocialPreference(value = '') {
+  const safe = String(value || '').trim()
+  if (safe === 'introvert' || safe === 'extrovert' || safe === 'balanced') return safe
+  return 'unknown'
+}
+
+function normalizeResidencyType(value = '') {
+  const safe = String(value || '').trim()
+  if (safe === 'visitor' || safe === 'nomad' || safe === 'local') return safe
+  return 'unknown'
+}
+
+function normalizeIdentityTags(values = [], max = 3) {
+  const unique = []
+  ;(Array.isArray(values) ? values : []).forEach((item) => {
+    const safe = String(item || '').trim()
+    if (!safe || !USER_IDENTITY_TAG_SET.has(safe) || unique.includes(safe)) return
+    unique.push(safe)
+  })
+  return unique.slice(0, Math.max(0, Number(max) || 3))
 }
 
 function toChinaDateKey(input = Date.now()) {
@@ -147,6 +181,9 @@ function buildReservedUserPatch(user = {}, cityId, todayKey) {
   if (typeof user.phoneVerified !== 'boolean') patch.phoneVerified = false
   if (!user.mobileBindStatus) patch.mobileBindStatus = 'unbound'
   if (typeof user.mobileBoundAt === 'undefined') patch.mobileBoundAt = null
+  if (!user.socialPreference) patch.socialPreference = 'unknown'
+  if (!user.residencyType) patch.residencyType = 'unknown'
+  if (!Array.isArray(user.identityTags)) patch.identityTags = []
   if (typeof user.userRiskScore !== 'number') patch.userRiskScore = calcUserRiskScore(user)
   if (typeof user.identityCheckRequired !== 'boolean') patch.identityCheckRequired = false
   if (!user.identityCheckStatus) patch.identityCheckStatus = 'none'
@@ -201,6 +238,9 @@ exports.main = async (event, context) => {
         phoneVerified: false,
         mobileBindStatus: 'unbound',
         mobileBoundAt: null,
+        socialPreference: normalizeSocialPreference(event.socialPreference),
+        residencyType: normalizeResidencyType(event.residencyType),
+        identityTags: normalizeIdentityTags(event.identityTags, 3),
         userRiskScore: 100,
         identityCheckRequired: false,
         identityCheckStatus: 'none',
@@ -252,6 +292,9 @@ exports.main = async (event, context) => {
       phoneVerified: false,
       mobileBindStatus: 'unbound',
       mobileBoundAt: null,
+      socialPreference: normalizeSocialPreference(event.socialPreference),
+      residencyType: normalizeResidencyType(event.residencyType),
+      identityTags: normalizeIdentityTags(event.identityTags, 3),
       userRiskScore: 100,
       identityCheckRequired: false,
       identityCheckStatus: 'none',
@@ -284,12 +327,28 @@ exports.main = async (event, context) => {
     userRiskScore: calcUserRiskScore(runtimeUser),
   }
 
-  if (event.nickname || event.avatarUrl) {
+  const profilePatch = {}
+  if (Object.prototype.hasOwnProperty.call(event || {}, 'nickname')) {
+    profilePatch.nickname = event.nickname || runtimeUser.nickname || ''
+  }
+  if (Object.prototype.hasOwnProperty.call(event || {}, 'avatarUrl')) {
+    profilePatch.avatarUrl = event.avatarUrl || runtimeUser.avatarUrl || ''
+  }
+  if (Object.prototype.hasOwnProperty.call(event || {}, 'socialPreference')) {
+    profilePatch.socialPreference = normalizeSocialPreference(event.socialPreference)
+  }
+  if (Object.prototype.hasOwnProperty.call(event || {}, 'residencyType')) {
+    profilePatch.residencyType = normalizeResidencyType(event.residencyType)
+  }
+  if (Object.prototype.hasOwnProperty.call(event || {}, 'identityTags')) {
+    profilePatch.identityTags = normalizeIdentityTags(event.identityTags, 3)
+  }
+
+  if (Object.keys(profilePatch).length > 0) {
     await db.collection('users').where({ _openid: OPENID }).update({
       data: {
         ...basePatch,
-        nickname: event.nickname || runtimeUser.nickname,
-        avatarUrl: event.avatarUrl || runtimeUser.avatarUrl,
+        ...profilePatch,
       }
     })
   } else {
@@ -298,13 +357,14 @@ exports.main = async (event, context) => {
     })
   }
 
-  const nickname = event.nickname || runtimeUser.nickname || ''
-  const avatarUrl = event.avatarUrl || runtimeUser.avatarUrl || ''
   const mergedUser = {
     ...runtimeUser,
     ...reservedPatch,
+    ...profilePatch,
     cityId: runtimeUser.cityId || cityId,
   }
+  const nickname = mergedUser.nickname || ''
+  const avatarUrl = mergedUser.avatarUrl || ''
   const subscriptions = normalizeSubscriptions(mergedUser.subscriptions)
 
   return {
@@ -316,6 +376,9 @@ exports.main = async (event, context) => {
     phoneVerified: !!mergedUser.phoneVerified,
     mobileBindStatus: mergedUser.mobileBindStatus || (mergedUser.phoneVerified ? 'bound' : 'unbound'),
     mobileBoundAt: mergedUser.mobileBoundAt || null,
+    socialPreference: normalizeSocialPreference(mergedUser.socialPreference),
+    residencyType: normalizeResidencyType(mergedUser.residencyType),
+    identityTags: normalizeIdentityTags(mergedUser.identityTags, 3),
     userRiskScore: Number.isFinite(Number(mergedUser.userRiskScore))
       ? Number(mergedUser.userRiskScore)
       : calcUserRiskScore(mergedUser),

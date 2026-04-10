@@ -6,6 +6,7 @@
       <text v-if="activity.isRecommended" class="tag tag--recommend">官方推荐</text>
       <text v-if="activity.isVerified" class="tag tag--verified">已实名</text>
       <text class="tag tag--category">{{ categoryLabel }}</text>
+      <text class="tag tag--social">{{ socialEnergyLabel }}</text>
       <text class="tag tag--trust">{{ trustStars }} {{ trustIdentity }}</text>
       <text
         v-for="tag in trustTags"
@@ -40,7 +41,7 @@
 
 <script>
 import { getDistance, distanceToText, getTimeStatus, formationTimeLeft } from '@/utils/distance.js'
-import { getCategoryLabel, getSceneLabel } from '@/utils/activityMeta.js'
+import { getCategoryLabel, getSceneLabel, getSocialEnergyLabel, inferActivitySocialEnergy } from '@/utils/activityMeta.js'
 
 export default {
   name: 'ActivityCard',
@@ -133,6 +134,19 @@ export default {
       if (this.activity?.categoryLabel) return this.activity.categoryLabel
       return getCategoryLabel(this.activity?.categoryId || 'other')
     },
+
+    socialEnergyLabel() {
+      const socialEnergy = String(this.activity?.socialEnergy || '').trim()
+      if (socialEnergy) return this.activity?.socialEnergyLabel || getSocialEnergyLabel(socialEnergy)
+      return getSocialEnergyLabel(inferActivitySocialEnergy({
+        sceneId: this.activity?.sceneId,
+        sceneName: this.activity?.sceneName,
+        typeId: this.activity?.typeId,
+        typeName: this.activity?.typeName,
+        title: this.activity?.title,
+        description: this.activity?.description,
+      }))
+    },
   }
 }
 </script>
@@ -159,6 +173,7 @@ export default {
 .tag--recommend { background: #FFF3CD; color: #856404; }
 .tag--verified  { background: #EEF7EE; color: #1E7145; }
 .tag--category  { background: #F0F7FF; color: #1E5EA8; }
+.tag--social    { background: #F2F4F7; color: #344054; }
 .tag--trust     { background: #FFF7E8; color: #8B5E00; }
 .tag--risk      { background: #FFF0F0; color: #B03A3A; }
 .tag--distance  { background: #EEF4FB; color: #1A3C5E; }

@@ -26,6 +26,17 @@
               {{ pendingBadgeText }}
             </text>
           </view>
+          <view class="persona-row">
+            <text class="persona-chip">社交偏好：{{ socialPreferenceText }}</text>
+            <text class="persona-chip">身份：{{ residencyTypeText }}</text>
+          </view>
+          <view v-if="identityTagTextList.length" class="persona-row">
+            <text
+              v-for="tag in identityTagTextList"
+              :key="`mine-tag-${tag}`"
+              class="persona-chip persona-chip--sub"
+            >{{ tag }}</text>
+          </view>
         </view>
         <view class="stats">
           <view class="stat-item">
@@ -59,6 +70,59 @@
       </view>
 
       <!-- Tab 切换 -->
+      <view class="profile-edit-wrap">
+        <button class="profile-edit-btn" @tap="openProfileEditor">编辑我的资料</button>
+      </view>
+
+      <view v-if="showProfileEditor" class="profile-edit-mask" @tap="closeProfileEditor">
+        <view class="profile-edit-dialog" @tap.stop>
+          <text class="profile-edit-title">编辑用户信息</text>
+          <view class="profile-edit-row">
+            <button class="profile-avatar-btn" open-type="chooseAvatar" @chooseavatar="onProfileEditorChooseAvatar">
+              <image v-if="profileEditDraft.avatarUrl" class="profile-avatar-img" :src="profileEditDraft.avatarUrl" mode="aspectFill" />
+              <text v-else class="profile-avatar-tip">设置头像</text>
+            </button>
+            <input v-model="profileEditDraft.nickname" class="profile-edit-input" maxlength="20" placeholder="请输入用户名" />
+          </view>
+
+          <view class="profile-edit-field">
+            <text class="profile-edit-label">社交偏好</text>
+            <picker mode="selector" :range="socialPreferencePickerRange" :value="profileEditSocialPreferenceIndex" @change="onProfileEditSocialPreferenceChange">
+              <view class="picker-row">
+                <text class="picker-value">{{ socialPreferencePickerRange[profileEditSocialPreferenceIndex] }}</text>
+                <text class="arrow">›</text>
+              </view>
+            </picker>
+          </view>
+
+          <view class="profile-edit-field">
+            <text class="profile-edit-label">居住身份</text>
+            <picker mode="selector" :range="residencyTypePickerRange" :value="profileEditResidencyTypeIndex" @change="onProfileEditResidencyTypeChange">
+              <view class="picker-row">
+                <text class="picker-value">{{ residencyTypePickerRange[profileEditResidencyTypeIndex] }}</text>
+                <text class="arrow">›</text>
+              </view>
+            </picker>
+          </view>
+
+          <view class="profile-edit-field">
+            <text class="profile-edit-label">身份标签（最多3个）</text>
+            <view class="profile-tag-list">
+              <text
+                v-for="item in identityTagOptions"
+                :key="`mine-edit-tag-${item.id}`"
+                class="profile-tag-item"
+                :class="{ 'profile-tag-item--active': profileEditDraft.identityTags.includes(item.id) }"
+                @tap="toggleProfileEditIdentityTag(item.id)"
+              >{{ item.label }}</text>
+            </view>
+          </view>
+
+          <button class="profile-edit-confirm" @tap="saveProfileEditor">保存</button>
+          <text class="profile-edit-cancel" @tap="closeProfileEditor">取消</text>
+        </view>
+      </view>
+
       <view class="tabs">
         <view
           class="tab"
@@ -150,6 +214,17 @@
 
 <script>
 import { callCloud } from '@/utils/cloud.js'
+import {
+  USER_IDENTITY_TAG_OPTIONS,
+  USER_RESIDENCY_TYPE_OPTIONS,
+  USER_SOCIAL_PREFERENCE_OPTIONS,
+  getIdentityTagLabels,
+  getResidencyTypeLabel,
+  getSocialPreferenceLabel,
+  normalizeIdentityTags,
+  normalizeResidencyType,
+  normalizeSocialPreference,
+} from '@/utils/activityMeta.js'
 
 export default {
   data() {
@@ -167,6 +242,9 @@ export default {
         phoneVerified: false,
         mobileBindStatus: 'unbound',
         mobileBoundAt: null,
+        socialPreference: 'unknown',
+        residencyType: 'unknown',
+        identityTags: [],
         userRiskScore: 100,
         identityCheckRequired: false,
         identityCheckStatus: 'none',
@@ -183,6 +261,17 @@ export default {
       publishCount: 0,
       joinCount: 0,
       isAdmin: false,
+      showProfileEditor: false,
+      socialPreferenceOptions: USER_SOCIAL_PREFERENCE_OPTIONS,
+      residencyTypeOptions: USER_RESIDENCY_TYPE_OPTIONS,
+      identityTagOptions: USER_IDENTITY_TAG_OPTIONS,
+      profileEditDraft: {
+        nickname: '',
+        avatarUrl: '',
+        socialPreference: 'unknown',
+        residencyType: 'unknown',
+        identityTags: [],
+      },
     }
   },
 
@@ -202,6 +291,29 @@ export default {
       const ratio = Number(this.userInfo.historicalCompletionRate)
       if (!Number.isFinite(ratio)) return '--'
       return `${Math.round(ratio * 100)}%`
+    },
+    socialPreferenceText() {
+      return getSocialPreferenceLabel(this.userInfo.socialPreference)
+    },
+    residencyTypeText() {
+      return getResidencyTypeLabel(this.userInfo.residencyType)
+    },
+    identityTagTextList() {
+      return getIdentityTagLabels(this.userInfo.identityTags, 3)
+    },
+    socialPreferencePickerRange() {
+      return this.socialPreferenceOptions.map((item) => item.label)
+    },
+    residencyTypePickerRange() {
+      return this.residencyTypeOptions.map((item) => item.label)
+    },
+    profileEditSocialPreferenceIndex() {
+      const idx = this.socialPreferenceOptions.findIndex((item) => item.id === this.profileEditDraft.socialPreference)
+      return idx >= 0 ? idx : 0
+    },
+    profileEditResidencyTypeIndex() {
+      const idx = this.residencyTypeOptions.findIndex((item) => item.id === this.profileEditDraft.residencyType)
+      return idx >= 0 ? idx : 0
     },
   },
 
@@ -245,6 +357,9 @@ export default {
             phoneVerified: !!user.phoneVerified,
             mobileBindStatus: user.mobileBindStatus || (user.phoneVerified ? 'bound' : 'unbound'),
             mobileBoundAt: user.mobileBoundAt || null,
+            socialPreference: user.socialPreference || 'unknown',
+            residencyType: user.residencyType || 'unknown',
+            identityTags: Array.isArray(user.identityTags) ? user.identityTags : [],
             userRiskScore: this.calcUserRiskScore(user),
             identityCheckRequired: !!user.identityCheckRequired,
             identityCheckStatus: user.identityCheckStatus || 'none',
@@ -268,6 +383,9 @@ export default {
           getApp().globalData.phoneVerified = !!user.phoneVerified
           getApp().globalData.mobileBindStatus = user.mobileBindStatus || (user.phoneVerified ? 'bound' : 'unbound')
           getApp().globalData.mobileBoundAt = user.mobileBoundAt || null
+          getApp().globalData.socialPreference = user.socialPreference || 'unknown'
+          getApp().globalData.residencyType = user.residencyType || 'unknown'
+          getApp().globalData.identityTags = Array.isArray(user.identityTags) ? user.identityTags : []
           getApp().globalData.userRiskScore = this.calcUserRiskScore(user)
           getApp().globalData.identityCheckRequired = !!user.identityCheckRequired
           getApp().globalData.identityCheckStatus = user.identityCheckStatus || 'none'
@@ -292,6 +410,101 @@ export default {
         - locationAnomalyCount * 5
         - overloadPublishPenalty
       return Math.max(0, Math.min(100, Math.round(score)))
+    },
+
+    openProfileEditor() {
+      this.profileEditDraft = {
+        nickname: String(this.userInfo.nickname || '').trim(),
+        avatarUrl: String(this.userInfo.avatarUrl || '').trim(),
+        socialPreference: normalizeSocialPreference(this.userInfo.socialPreference),
+        residencyType: normalizeResidencyType(this.userInfo.residencyType),
+        identityTags: normalizeIdentityTags(this.userInfo.identityTags, 3),
+      }
+      this.showProfileEditor = true
+    },
+
+    closeProfileEditor() {
+      this.showProfileEditor = false
+    },
+
+    onProfileEditorChooseAvatar(e) {
+      this.profileEditDraft = {
+        ...this.profileEditDraft,
+        avatarUrl: String(e?.detail?.avatarUrl || '').trim(),
+      }
+    },
+
+    onProfileEditSocialPreferenceChange(e) {
+      const idx = Number(e?.detail?.value || 0)
+      const option = this.socialPreferenceOptions[idx] || this.socialPreferenceOptions[0]
+      this.profileEditDraft = {
+        ...this.profileEditDraft,
+        socialPreference: normalizeSocialPreference(option?.id || 'unknown'),
+      }
+    },
+
+    onProfileEditResidencyTypeChange(e) {
+      const idx = Number(e?.detail?.value || 0)
+      const option = this.residencyTypeOptions[idx] || this.residencyTypeOptions[0]
+      this.profileEditDraft = {
+        ...this.profileEditDraft,
+        residencyType: normalizeResidencyType(option?.id || 'unknown'),
+      }
+    },
+
+    toggleProfileEditIdentityTag(tagId = '') {
+      const safe = String(tagId || '').trim()
+      if (!safe) return
+      const current = Array.isArray(this.profileEditDraft.identityTags) ? [...this.profileEditDraft.identityTags] : []
+      const exists = current.includes(safe)
+      const next = exists
+        ? current.filter((item) => item !== safe)
+        : [...current, safe]
+      this.profileEditDraft = {
+        ...this.profileEditDraft,
+        identityTags: normalizeIdentityTags(next, 3),
+      }
+    },
+
+    async saveProfileEditor() {
+      const nickname = String(this.profileEditDraft.nickname || '').trim()
+      const avatarUrl = String(this.profileEditDraft.avatarUrl || '').trim()
+      const socialPreference = normalizeSocialPreference(this.profileEditDraft.socialPreference)
+      const residencyType = normalizeResidencyType(this.profileEditDraft.residencyType)
+      const identityTags = normalizeIdentityTags(this.profileEditDraft.identityTags, 3)
+      if (!nickname) {
+        uni.showToast({ title: '请填写用户名', icon: 'none' })
+        return
+      }
+      if (!avatarUrl) {
+        uni.showToast({ title: '请设置头像', icon: 'none' })
+        return
+      }
+      try {
+        const res = await callCloud('login', {
+          nickname,
+          avatarUrl,
+          socialPreference,
+          residencyType,
+          identityTags,
+        })
+        if (!res?.success) {
+          uni.showToast({ title: '保存失败，请重试', icon: 'none' })
+          return
+        }
+        getApp().globalData = getApp().globalData || {}
+        getApp().globalData.nickname = nickname
+        getApp().globalData.avatarUrl = avatarUrl
+        getApp().globalData.socialPreference = socialPreference
+        getApp().globalData.residencyType = residencyType
+        getApp().globalData.identityTags = identityTags
+        this.showProfileEditor = false
+        await this.loadUserInfo()
+        uni.showToast({ title: '资料已更新', icon: 'success' })
+      } catch (e) {
+        console.error('保存用户资料失败', e)
+        uni.showToast({ title: '保存失败，请稍后重试', icon: 'none' })
+      }
     },
 
 	goAdmin() {
@@ -416,6 +629,22 @@ export default {
 .badge { font-size: 22rpx; padding: 4rpx 16rpx; border-radius: 20rpx; }
 .badge--verified { background: rgba(255,255,255,0.2); color: white; }
 .badge--pending  { background: rgba(255,255,255,0.15); color: rgba(255,255,255,0.8); }
+.persona-row {
+  margin-top: 10rpx;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10rpx;
+}
+.persona-chip {
+  font-size: 20rpx;
+  color: #fff;
+  padding: 4rpx 12rpx;
+  border-radius: 999rpx;
+  background: rgba(255, 255, 255, 0.18);
+}
+.persona-chip--sub {
+  background: rgba(255, 255, 255, 0.12);
+}
 
 .stats { display: flex; gap: 32rpx; }
 .stat-item { display: flex; flex-direction: column; align-items: center; gap: 4rpx; }
@@ -427,6 +656,141 @@ export default {
   display: flex;
   background: white;
   border-bottom: 1rpx solid #f0f0f0;
+}
+
+.profile-edit-wrap {
+  padding: 16rpx;
+}
+.profile-edit-btn {
+  width: 100%;
+  height: 74rpx;
+  line-height: 74rpx;
+  border-radius: 12rpx;
+  border: 1rpx solid #d8e3f0;
+  background: #fff;
+  color: #1a3c5e;
+  font-size: 26rpx;
+}
+.profile-edit-btn::after { border: none; }
+.profile-edit-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.profile-edit-dialog {
+  width: 84%;
+  background: #fff;
+  border-radius: 18rpx;
+  padding: 30rpx 28rpx 24rpx;
+}
+.profile-edit-title {
+  display: block;
+  font-size: 30rpx;
+  font-weight: 700;
+  color: #1a1a1a;
+}
+.profile-edit-row {
+  margin-top: 16rpx;
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+}
+.profile-avatar-btn {
+  width: 96rpx;
+  height: 96rpx;
+  border-radius: 50%;
+  border: none;
+  background: #eef4fb;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.profile-avatar-btn::after { border: none; }
+.profile-avatar-img {
+  width: 100%;
+  height: 100%;
+}
+.profile-avatar-tip {
+  font-size: 22rpx;
+  color: #1a3c5e;
+}
+.profile-edit-input {
+  flex: 1;
+  height: 72rpx;
+  border-radius: 10rpx;
+  background: #f5f7fa;
+  padding: 0 16rpx;
+  font-size: 26rpx;
+  color: #1a1a1a;
+}
+.profile-edit-field {
+  margin-top: 12rpx;
+}
+.profile-edit-label {
+  display: block;
+  font-size: 22rpx;
+  color: #667085;
+  margin-bottom: 6rpx;
+}
+.picker-row {
+  min-height: 64rpx;
+  border-radius: 10rpx;
+  background: #f5f7fa;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14rpx;
+}
+.picker-value {
+  font-size: 24rpx;
+  color: #111827;
+}
+.arrow {
+  font-size: 28rpx;
+  color: #98a2b3;
+}
+.profile-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10rpx;
+}
+.profile-tag-item {
+  padding: 7rpx 14rpx;
+  border-radius: 999rpx;
+  font-size: 22rpx;
+  color: #475467;
+  background: #fff;
+  border: 1rpx solid #e4e7ec;
+}
+.profile-tag-item--active {
+  color: #1a3c5e;
+  border-color: #1a3c5e;
+  background: #eaf2fb;
+}
+.profile-edit-confirm {
+  margin-top: 20rpx;
+  width: 100%;
+  height: 82rpx;
+  line-height: 82rpx;
+  border-radius: 12rpx;
+  background: #1a3c5e;
+  color: #fff;
+  border: none;
+}
+.profile-edit-confirm::after { border: none; }
+.profile-edit-cancel {
+  margin-top: 14rpx;
+  display: block;
+  text-align: center;
+  font-size: 24rpx;
+  color: #98a2b3;
 }
 .tab {
   flex: 1; text-align: center;

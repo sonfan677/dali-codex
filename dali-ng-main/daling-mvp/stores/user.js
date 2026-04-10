@@ -13,6 +13,9 @@ export const useUserStore = defineStore('user', {
     phoneVerified: false,
     mobileBindStatus: 'unbound',
     mobileBoundAt: null,
+    socialPreference: 'unknown',
+    residencyType: 'unknown',
+    identityTags: [],
     userRiskScore: 100,
     identityCheckRequired: false,
     identityCheckStatus: 'none',
@@ -31,6 +34,9 @@ export const useUserStore = defineStore('user', {
       this.phoneVerified = !!res.phoneVerified
       this.mobileBindStatus = res.mobileBindStatus || (res.phoneVerified ? 'bound' : 'unbound')
       this.mobileBoundAt = res.mobileBoundAt || null
+      this.socialPreference = res.socialPreference || 'unknown'
+      this.residencyType = res.residencyType || 'unknown'
+      this.identityTags = Array.isArray(res.identityTags) ? res.identityTags : []
       this.userRiskScore = Number.isFinite(Number(res.userRiskScore)) ? Number(res.userRiskScore) : 100
       this.identityCheckRequired = !!res.identityCheckRequired
       this.identityCheckStatus = res.identityCheckStatus || 'none'
@@ -53,6 +59,9 @@ export const useUserStore = defineStore('user', {
       gd.phoneVerified = !!this.phoneVerified
       gd.mobileBindStatus = this.mobileBindStatus || (this.phoneVerified ? 'bound' : 'unbound')
       gd.mobileBoundAt = this.mobileBoundAt || null
+      gd.socialPreference = this.socialPreference || 'unknown'
+      gd.residencyType = this.residencyType || 'unknown'
+      gd.identityTags = Array.isArray(this.identityTags) ? this.identityTags : []
       gd.userRiskScore = Number.isFinite(Number(this.userRiskScore)) ? Number(this.userRiskScore) : 100
       gd.identityCheckRequired = !!this.identityCheckRequired
       gd.identityCheckStatus = this.identityCheckStatus || 'none'
@@ -107,6 +116,9 @@ export const useUserStore = defineStore('user', {
       this.phoneVerified = false
       this.mobileBindStatus = 'unbound'
       this.mobileBoundAt = null
+      this.socialPreference = 'unknown'
+      this.residencyType = 'unknown'
+      this.identityTags = []
       this.userRiskScore = 100
       this.identityCheckRequired = false
       this.identityCheckStatus = 'none'

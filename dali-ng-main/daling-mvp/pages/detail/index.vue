@@ -408,6 +408,48 @@
             placeholder="请输入用户名"
           />
         </view>
+        <view class="profile-extra">
+          <view class="profile-extra-field">
+            <text class="profile-extra-label">社交偏好</text>
+            <picker
+              mode="selector"
+              :range="socialPreferencePickerRange"
+              :value="joinProfileDraftSocialPreferenceIndex"
+              @change="onJoinSocialPreferenceChange"
+            >
+              <view class="picker-row">
+                <text class="picker-value">{{ socialPreferencePickerRange[joinProfileDraftSocialPreferenceIndex] }}</text>
+                <text class="arrow">›</text>
+              </view>
+            </picker>
+          </view>
+          <view class="profile-extra-field">
+            <text class="profile-extra-label">居住身份</text>
+            <picker
+              mode="selector"
+              :range="residencyTypePickerRange"
+              :value="joinProfileDraftResidencyTypeIndex"
+              @change="onJoinResidencyTypeChange"
+            >
+              <view class="picker-row">
+                <text class="picker-value">{{ residencyTypePickerRange[joinProfileDraftResidencyTypeIndex] }}</text>
+                <text class="arrow">›</text>
+              </view>
+            </picker>
+          </view>
+          <view class="profile-extra-field">
+            <text class="profile-extra-label">身份标签（最多3个）</text>
+            <view class="profile-tag-list">
+              <text
+                v-for="tag in identityTagOptions"
+                :key="`join-profile-tag-${tag.id}`"
+                class="profile-tag-item"
+                :class="{ 'profile-tag-item--active': joinProfileDraftIdentityTags.includes(tag.id) }"
+                @tap="toggleJoinIdentityTag(tag.id)"
+              >{{ tag.label }}</text>
+            </view>
+          </view>
+        </view>
         <button class="phone-bind-confirm" @tap="saveJoinProfileAndContinue">保存并继续报名</button>
         <text class="phone-bind-cancel" @tap="closeJoinProfileDialog">稍后再说</text>
       </view>
@@ -439,7 +481,16 @@
 <script>
 import { callCloud } from '@/utils/cloud.js'
 import { getTimeStatus, formationTimeLeft } from '@/utils/distance.js'
-import { getCategoryLabel, getSceneLabel } from '@/utils/activityMeta.js'
+import {
+  getCategoryLabel,
+  getSceneLabel,
+  USER_IDENTITY_TAG_OPTIONS,
+  USER_RESIDENCY_TYPE_OPTIONS,
+  USER_SOCIAL_PREFERENCE_OPTIONS,
+  normalizeIdentityTags,
+  normalizeResidencyType,
+  normalizeSocialPreference,
+} from '@/utils/activityMeta.js'
 
 export default {
   data() {
@@ -470,6 +521,12 @@ export default {
       showJoinPhoneBindDialog: false,
       joinProfileDraftNickname: '',
       joinProfileDraftAvatar: '',
+      socialPreferenceOptions: USER_SOCIAL_PREFERENCE_OPTIONS,
+      residencyTypeOptions: USER_RESIDENCY_TYPE_OPTIONS,
+      identityTagOptions: USER_IDENTITY_TAG_OPTIONS,
+      joinProfileDraftSocialPreference: 'unknown',
+      joinProfileDraftResidencyType: 'unknown',
+      joinProfileDraftIdentityTags: [],
       pendingJoinAfterPhoneBind: false,
       pendingJoinAfterProfile: false,
     }
@@ -815,6 +872,24 @@ export default {
       if (this.joinStatus === 'waitlist') return '候补转为报名成功后可留言互动'
       if (!this.hasJoined) return '报名后可留言互动'
       return '当前不可留言'
+    },
+
+    socialPreferencePickerRange() {
+      return this.socialPreferenceOptions.map((item) => item.label)
+    },
+
+    joinProfileDraftSocialPreferenceIndex() {
+      const idx = this.socialPreferenceOptions.findIndex((item) => item.id === this.joinProfileDraftSocialPreference)
+      return idx >= 0 ? idx : 0
+    },
+
+    residencyTypePickerRange() {
+      return this.residencyTypeOptions.map((item) => item.label)
+    },
+
+    joinProfileDraftResidencyTypeIndex() {
+      const idx = this.residencyTypeOptions.findIndex((item) => item.id === this.joinProfileDraftResidencyType)
+      return idx >= 0 ? idx : 0
     },
   },
 
@@ -1220,6 +1295,9 @@ export default {
       const gd = getApp().globalData || {}
       this.joinProfileDraftNickname = String(gd.nickname || '').trim()
       this.joinProfileDraftAvatar = String(gd.avatarUrl || '').trim()
+      this.joinProfileDraftSocialPreference = normalizeSocialPreference(gd.socialPreference || 'unknown')
+      this.joinProfileDraftResidencyType = normalizeResidencyType(gd.residencyType || 'unknown')
+      this.joinProfileDraftIdentityTags = normalizeIdentityTags(gd.identityTags || [], 3)
     },
     closeJoinProfileDialog() {
       this.showJoinProfileDialog = false
@@ -1228,9 +1306,32 @@ export default {
     onJoinChooseAvatar(e) {
       this.joinProfileDraftAvatar = String(e?.detail?.avatarUrl || '').trim()
     },
+    onJoinSocialPreferenceChange(e) {
+      const idx = Number(e?.detail?.value || 0)
+      const option = this.socialPreferenceOptions[idx] || this.socialPreferenceOptions[0]
+      this.joinProfileDraftSocialPreference = normalizeSocialPreference(option?.id || 'unknown')
+    },
+    onJoinResidencyTypeChange(e) {
+      const idx = Number(e?.detail?.value || 0)
+      const option = this.residencyTypeOptions[idx] || this.residencyTypeOptions[0]
+      this.joinProfileDraftResidencyType = normalizeResidencyType(option?.id || 'unknown')
+    },
+    toggleJoinIdentityTag(tagId = '') {
+      const safe = String(tagId || '').trim()
+      if (!safe) return
+      const current = Array.isArray(this.joinProfileDraftIdentityTags) ? [...this.joinProfileDraftIdentityTags] : []
+      const exists = current.includes(safe)
+      const next = exists
+        ? current.filter((item) => item !== safe)
+        : [...current, safe]
+      this.joinProfileDraftIdentityTags = normalizeIdentityTags(next, 3)
+    },
     async saveJoinProfileAndContinue() {
       const nickname = String(this.joinProfileDraftNickname || '').trim()
       const avatarUrl = String(this.joinProfileDraftAvatar || '').trim()
+      const socialPreference = normalizeSocialPreference(this.joinProfileDraftSocialPreference)
+      const residencyType = normalizeResidencyType(this.joinProfileDraftResidencyType)
+      const identityTags = normalizeIdentityTags(this.joinProfileDraftIdentityTags, 3)
       if (!avatarUrl) {
         uni.showToast({ title: '请先设置头像', icon: 'none' })
         return
@@ -1239,8 +1340,22 @@ export default {
         uni.showToast({ title: '请先填写用户名', icon: 'none' })
         return
       }
+      if (socialPreference === 'unknown') {
+        uni.showToast({ title: '请先选择社交偏好', icon: 'none' })
+        return
+      }
+      if (residencyType === 'unknown') {
+        uni.showToast({ title: '请先选择居住身份', icon: 'none' })
+        return
+      }
       try {
-        const res = await callCloud('login', { nickname, avatarUrl })
+        const res = await callCloud('login', {
+          nickname,
+          avatarUrl,
+          socialPreference,
+          residencyType,
+          identityTags,
+        })
         if (!res?.success) {
           uni.showToast({ title: '保存资料失败，请重试', icon: 'none' })
           return
@@ -1248,6 +1363,9 @@ export default {
         const gd = getApp().globalData || {}
         gd.nickname = nickname
         gd.avatarUrl = avatarUrl
+        gd.socialPreference = socialPreference
+        gd.residencyType = residencyType
+        gd.identityTags = identityTags
         this.showJoinProfileDialog = false
         uni.showToast({ title: '资料已完善', icon: 'success' })
         if (this.pendingJoinAfterProfile) {
@@ -2200,6 +2318,39 @@ export default {
   padding: 0 18rpx;
   font-size: 26rpx;
   color: #1a1a1a;
+}
+.profile-extra {
+  margin-top: 16rpx;
+  border-radius: 12rpx;
+  background: #f8fafc;
+  padding: 14rpx 14rpx 8rpx;
+}
+.profile-extra-field {
+  margin-bottom: 10rpx;
+}
+.profile-extra-label {
+  display: block;
+  font-size: 22rpx;
+  color: #667085;
+  margin-bottom: 6rpx;
+}
+.profile-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10rpx;
+}
+.profile-tag-item {
+  padding: 7rpx 14rpx;
+  border-radius: 999rpx;
+  font-size: 22rpx;
+  color: #475467;
+  background: #fff;
+  border: 1rpx solid #e4e7ec;
+}
+.profile-tag-item--active {
+  color: #1a3c5e;
+  border-color: #1a3c5e;
+  background: #eaf2fb;
 }
 
 .bottom-bar {

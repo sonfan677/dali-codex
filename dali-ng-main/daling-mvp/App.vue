@@ -23,6 +23,9 @@ export default {
         getApp().globalData.phoneVerified = !!res.phoneVerified
         getApp().globalData.mobileBindStatus = res.mobileBindStatus || (res.phoneVerified ? 'bound' : 'unbound')
         getApp().globalData.mobileBoundAt = res.mobileBoundAt || null
+        getApp().globalData.socialPreference = res.socialPreference || 'unknown'
+        getApp().globalData.residencyType = res.residencyType || 'unknown'
+        getApp().globalData.identityTags = Array.isArray(res.identityTags) ? res.identityTags : []
         getApp().globalData.userRiskScore = Number.isFinite(Number(res.userRiskScore)) ? Number(res.userRiskScore) : 100
         getApp().globalData.identityCheckRequired = !!res.identityCheckRequired
         getApp().globalData.identityCheckStatus = res.identityCheckStatus || 'none'
