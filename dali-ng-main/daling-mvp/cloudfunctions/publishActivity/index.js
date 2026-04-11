@@ -61,6 +61,7 @@ const SCENE_LABEL_MAP = {
   family_pet: '亲子宠物',
   public_welfare: '公益社区',
   nomad_city: '旅居同城',
+  other_scene: '其它',
   festival_theme: '节庆主题',
 }
 
@@ -210,6 +211,7 @@ const TYPE_OPTIONS_BY_SCENE = {
     { id: 'coliving_community', name: '共居社区活动', categoryId: 'social' },
     { id: 'local_integration', name: '在地融入活动', categoryId: 'social' },
   ],
+  other_scene: [],
   festival_theme: [
     { id: 'march_street_theme', name: '三月街主题活动', categoryId: 'culture' },
     { id: 'torch_festival_theme', name: '火把节主题活动', categoryId: 'culture' },
@@ -240,7 +242,7 @@ const CATEGORY_TO_SCENE_TYPE = {
   photo: { sceneId: 'local_explore', typeId: 'photo_walk' },
   wellness: { sceneId: 'workshop_experience', typeId: 'healing_workshop' },
   social: { sceneId: 'social_networking', typeId: 'friend_making' },
-  other: { sceneId: 'casual_gathering', typeId: 'random_buddy' },
+  other: { sceneId: 'other_scene', typeId: '' },
 }
 
 const THEME_ID_SET = new Set([
@@ -306,6 +308,9 @@ const USER_MAX_THEME_COUNT = 1
 const OFFICIAL_MAX_THEME_COUNT = 6
 const DEFAULT_USER_MAX_PARTICIPANTS_LIMIT = 30
 const PUBLISH_REVIEW_PENDING_STATUS = 'PUBLISH_PENDING'
+const CUSTOM_SCENE_ID = 'other_scene'
+const CUSTOM_SCENE_TYPE_STATS_COLLECTION = 'sceneCustomTypeStats'
+const CUSTOM_TYPE_ID_PREFIX = 'custom_type'
 const FESTIVAL_THEME_COLLECTION_CANDIDATES = ['festivalThemes', 'officialFestivalThemes']
 const MAX_FESTIVAL_THEME_TAGS = 5
 
@@ -397,7 +402,13 @@ function getTypeDef(sceneId = '', typeId = '') {
   return list.find((item) => item.id === safeTypeId) || null
 }
 
-function resolveSceneTypeForPublish({ sceneId = '', typeId = '', categoryId = '' } = {}) {
+function resolveSceneTypeForPublish({
+  sceneId = '',
+  typeId = '',
+  categoryId = '',
+  customTypeName = '',
+  typeName = '',
+} = {}) {
   const rawSceneId = String(sceneId || '').trim()
   const safeSceneId = normalizeSceneId(rawSceneId)
   if (rawSceneId && !safeSceneId) {
@@ -408,6 +419,31 @@ function resolveSceneTypeForPublish({ sceneId = '', typeId = '', categoryId = ''
   }
 
   if (safeSceneId) {
+    if (safeSceneId === CUSTOM_SCENE_ID) {
+      const finalCustomTypeName = normalizeCustomTypeName(customTypeName || typeName)
+      if (!finalCustomTypeName || finalCustomTypeName.length < 2) {
+        return { error: 'INVALID_CUSTOM_TYPE' }
+      }
+      if (finalCustomTypeName.length > 20) {
+        return { error: 'CUSTOM_TYPE_TOO_LONG' }
+      }
+      const duplicateTypeName = resolveDuplicateTypeName(finalCustomTypeName)
+      if (duplicateTypeName) {
+        return {
+          error: 'DUPLICATE_CUSTOM_TYPE',
+          duplicateTypeName,
+        }
+      }
+      return {
+        sceneId: safeSceneId,
+        sceneName: SCENE_LABEL_MAP[safeSceneId] || '未分类场景',
+        typeId: buildCustomTypeId(finalCustomTypeName),
+        typeName: finalCustomTypeName,
+        customTypeName: finalCustomTypeName,
+        isCustomSceneType: true,
+        categoryId: 'other',
+      }
+    }
     const typeDef = getTypeDef(safeSceneId, typeId)
     if (!typeDef || !String(typeId || '').trim()) return { error: 'INVALID_TYPE' }
     return {
@@ -422,6 +458,15 @@ function resolveSceneTypeForPublish({ sceneId = '', typeId = '', categoryId = ''
   const normalizedCategoryId = normalizeCategoryId(categoryId || 'other')
   const fallback = CATEGORY_TO_SCENE_TYPE[normalizedCategoryId] || CATEGORY_TO_SCENE_TYPE.other
   const fallbackSceneId = fallback.sceneId
+  if (fallbackSceneId === CUSTOM_SCENE_ID) {
+    return {
+      sceneId: fallbackSceneId,
+      sceneName: SCENE_LABEL_MAP[fallbackSceneId] || '未分类场景',
+      typeId: '',
+      typeName: '其它',
+      categoryId: 'other',
+    }
+  }
   const fallbackTypeDef = getTypeDef(fallbackSceneId, fallback.typeId)
   return {
     sceneId: fallbackSceneId,
@@ -514,6 +559,47 @@ function normalizeCategoryText(value = '') {
     .replace(/[·•・,，。!！?？:：;；、'"`~～\-—_（）()【】\[\]\/\\]/g, '')
 }
 
+function normalizeCustomTypeName(value = '') {
+  return String(value || '').trim().replace(/\s+/g, ' ')
+}
+
+function normalizeTypeCompareText(value = '') {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '')
+    .replace(/[·•・,，。!！?？:：;；、'"`~～\-—_（）()【】\[\]\/\\]/g, '')
+}
+
+function buildBuiltinTypeNameMap() {
+  return Object.keys(TYPE_OPTIONS_BY_SCENE).reduce((acc, sceneId) => {
+    if (sceneId === CUSTOM_SCENE_ID) return acc
+    const list = TYPE_OPTIONS_BY_SCENE[sceneId] || []
+    list.forEach((item) => {
+      const name = String(item?.name || '').trim()
+      const key = normalizeTypeCompareText(name)
+      if (!name || !key || acc[key]) return
+      acc[key] = name
+    })
+    return acc
+  }, {})
+}
+
+const BUILTIN_TYPE_NAME_MAP = buildBuiltinTypeNameMap()
+
+function resolveDuplicateTypeName(customTypeName = '') {
+  const key = normalizeTypeCompareText(customTypeName)
+  if (!key) return ''
+  return BUILTIN_TYPE_NAME_MAP[key] || ''
+}
+
+function buildCustomTypeId(customTypeName = '') {
+  const safe = normalizeCustomTypeName(customTypeName)
+  if (!safe) return ''
+  const hex = Buffer.from(safe, 'utf8').toString('hex').slice(0, 24)
+  return `${CUSTOM_TYPE_ID_PREFIX}_${hex || Date.now().toString(36)}`
+}
+
 function resolveDuplicateCategoryLabel(customLabel = '') {
   const normalized = normalizeCategoryText(customLabel)
   if (!normalized) return ''
@@ -569,6 +655,55 @@ async function recordCustomCategoryStat({
     })
   } catch (e) {
     console.error('记录自定义分类统计失败', e)
+  }
+}
+
+async function recordCustomSceneTypeStat({
+  cityId = 'dali',
+  sceneId = CUSTOM_SCENE_ID,
+  customTypeName = '',
+  activityId = '',
+  publisherId = '',
+} = {}) {
+  const latestTypeName = normalizeCustomTypeName(customTypeName)
+  const normalizedTypeName = normalizeTypeCompareText(latestTypeName)
+  if (!latestTypeName || !normalizedTypeName) return
+  try {
+    const { data } = await db.collection(CUSTOM_SCENE_TYPE_STATS_COLLECTION)
+      .where({ cityId, sceneId, normalizedTypeName })
+      .limit(1)
+      .get()
+    const existed = Array.isArray(data) ? data[0] : null
+    if (existed?._id) {
+      await db.collection(CUSTOM_SCENE_TYPE_STATS_COLLECTION).doc(existed._id).update({
+        data: {
+          publishCount: _.inc(1),
+          latestTypeName,
+          lastActivityId: activityId || existed.lastActivityId || '',
+          lastPublisherId: publisherId || existed.lastPublisherId || '',
+          lastUsedAt: db.serverDate(),
+          updatedAt: db.serverDate(),
+        },
+      })
+      return
+    }
+    await db.collection(CUSTOM_SCENE_TYPE_STATS_COLLECTION).add({
+      data: {
+        cityId,
+        sceneId,
+        normalizedTypeName,
+        latestTypeName,
+        publishCount: 1,
+        firstUsedAt: db.serverDate(),
+        lastUsedAt: db.serverDate(),
+        lastActivityId: activityId || '',
+        lastPublisherId: publisherId || '',
+        createdAt: db.serverDate(),
+        updatedAt: db.serverDate(),
+      },
+    })
+  } catch (e) {
+    console.error('记录其它场景自定义类型统计失败', e)
   }
 }
 
@@ -995,6 +1130,7 @@ exports.main = async (event, context) => {
     sceneName = '',
     typeId = '',
     typeName = '',
+    customTypeName = '',
     themeIds = [],
     visibleTags = [],
     lat,
@@ -1022,9 +1158,22 @@ exports.main = async (event, context) => {
   const finalCityId = cityConfig.cityId
   const latNum = Number(lat)
   const lngNum = Number(lng)
-  const sceneType = resolveSceneTypeForPublish({ sceneId, typeId, categoryId })
+  const sceneType = resolveSceneTypeForPublish({ sceneId, typeId, categoryId, customTypeName, typeName })
   if (sceneType?.error === 'INVALID_SCENE') {
     return { success: false, error: 'INVALID_SCENE', message: '活动场景不合法' }
+  }
+  if (sceneType?.error === 'INVALID_CUSTOM_TYPE') {
+    return { success: false, error: 'INVALID_CUSTOM_TYPE', message: '自定义活动类型不合法' }
+  }
+  if (sceneType?.error === 'CUSTOM_TYPE_TOO_LONG') {
+    return { success: false, error: 'CUSTOM_TYPE_TOO_LONG', message: '自定义活动类型最多20字' }
+  }
+  if (sceneType?.error === 'DUPLICATE_CUSTOM_TYPE') {
+    return {
+      success: false,
+      error: 'DUPLICATE_CUSTOM_TYPE',
+      message: `自定义活动类型与现有类型“${sceneType.duplicateTypeName || ''}”重复`,
+    }
   }
   if (sceneType?.error === 'INVALID_TYPE') {
     return { success: false, error: 'INVALID_TYPE', message: '活动类型不合法' }
@@ -1033,6 +1182,8 @@ exports.main = async (event, context) => {
   const finalSceneName = String(sceneType?.sceneName || sceneName || '').trim()
   const finalTypeId = String(sceneType?.typeId || '').trim()
   const finalTypeName = String(sceneType?.typeName || typeName || '').trim()
+  const finalCustomTypeName = normalizeCustomTypeName(sceneType?.customTypeName || '')
+  const isCustomSceneType = !!sceneType?.isCustomSceneType
   const finalCategoryId = normalizeCategoryId(sceneType?.categoryId || categoryId || 'other')
   const finalVisibleTags = normalizeVisibleTags(visibleTags, 12)
   const finalSocialEnergy = normalizeSocialEnergy(socialEnergy) || inferSocialEnergy({
@@ -1075,10 +1226,13 @@ exports.main = async (event, context) => {
   if (!CATEGORY_MAP[finalCategoryId]) {
     return { success: false, error: 'INVALID_CATEGORY', message: '活动分类不合法' }
   }
-  if (finalCategoryId === 'other' && !normalizedCustomCategoryLabel) {
+  const finalCategoryCustomLabel = isCustomSceneType
+    ? finalCustomTypeName
+    : normalizedCustomCategoryLabel
+  if (finalCategoryId === 'other' && !finalCategoryCustomLabel) {
     return { success: false, error: 'INVALID_CUSTOM_CATEGORY', message: '选择“其它”时请填写具体分类' }
   }
-  if (finalCategoryId === 'other') {
+  if (finalCategoryId === 'other' && !isCustomSceneType) {
     const duplicateLabel = resolveDuplicateCategoryLabel(normalizedCustomCategoryLabel)
     if (duplicateLabel) {
       return {
@@ -1237,7 +1391,9 @@ exports.main = async (event, context) => {
       userVisibleTags: finalVisibleTags,
       categoryId: finalCategoryId,
       categoryLabel: finalCategoryLabel,
-      categoryCustomLabel: finalCategoryId === 'other' ? normalizedCustomCategoryLabel : '',
+      categoryCustomLabel: finalCategoryId === 'other' ? finalCategoryCustomLabel : '',
+      isCustomSceneType,
+      customTypeName: isCustomSceneType ? finalCustomTypeName : '',
       coverImage: '',
       cityId: finalCityId,
       location: {
@@ -1378,6 +1534,15 @@ exports.main = async (event, context) => {
       publisherId: OPENID,
     })
   }
+  if (isCustomSceneType && finalCustomTypeName) {
+    recordCustomSceneTypeStat({
+      cityId: finalCityId,
+      sceneId: finalSceneId,
+      customTypeName: finalCustomTypeName,
+      activityId: result._id,
+      publisherId: OPENID,
+    })
+  }
 
   return {
     success: true,
@@ -1387,6 +1552,8 @@ exports.main = async (event, context) => {
     sceneName: finalSceneName,
     typeId: finalTypeId,
     typeName: finalTypeName,
+    isCustomSceneType,
+    customTypeName: isCustomSceneType ? finalCustomTypeName : '',
     socialEnergy: finalSocialEnergy,
     socialEnergyLabel: finalSocialEnergyLabel,
     chargeType: finalChargeType,

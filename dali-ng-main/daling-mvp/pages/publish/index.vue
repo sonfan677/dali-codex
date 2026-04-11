@@ -80,7 +80,7 @@
         </view>
 
         <!-- 类型 -->
-        <view class="field">
+        <view v-if="!isCustomSceneSelected" class="field">
           <text class="label">活动类型 *</text>
           <picker
             mode="selector"
@@ -94,6 +94,17 @@
             </view>
           </picker>
           <text class="hint">系统判定社交偏好：{{ inferredSocialEnergyLabel }}</text>
+        </view>
+        <view v-else class="field">
+          <text class="label">活动类型（自定义）*</text>
+          <input
+            class="input"
+            v-model="form.customTypeName"
+            placeholder="例如：城市寻宝 / 露台音乐夜（2-20字）"
+            maxlength="20"
+          />
+          <text class="hint">该活动会在发现页“场景=其它”中展示</text>
+          <text v-if="customTypeDuplicateLabel" class="hint hint-error">与现有类型“{{ customTypeDuplicateLabel }}”重复，请直接选择已有类型</text>
         </view>
 
         <!-- 地点 -->
@@ -382,7 +393,9 @@ import { callCloud } from '@/utils/cloud.js'
 import { useUserStore } from '@/stores/user.js'
 import {
   getSocialEnergyLabel,
+  normalizeCustomTypeName,
   PUBLISH_SCENE_OPTIONS,
+  resolveDuplicateTypeName,
   USER_IDENTITY_TAG_OPTIONS,
   USER_RESIDENCY_TYPE_OPTIONS,
   USER_SOCIAL_PREFERENCE_OPTIONS,
@@ -481,6 +494,7 @@ export default {
         sceneName: defaultSceneLabel,
         typeId: defaultType.id,
         typeName: defaultType.name,
+        customTypeName: '',
         maxParticipants: null,
         chargeType: 'free',
         feeAmount: '',
@@ -523,6 +537,17 @@ export default {
 
     selectedSceneLabel() {
       return String(this.form.sceneName || '未选择')
+    },
+
+    isCustomSceneSelected() {
+      return String(this.form.sceneId || '').trim() === 'other_scene'
+    },
+
+    customTypeDuplicateLabel() {
+      if (!this.isCustomSceneSelected) return ''
+      const customName = normalizeCustomTypeName(this.form.customTypeName || '')
+      if (!customName) return ''
+      return resolveDuplicateTypeName(customName)
     },
 
     typePickerRange() {
@@ -620,6 +645,9 @@ export default {
       this.sceneIndex = finalSceneIndex
       this.form.sceneId = finalScene.id
       this.form.sceneName = finalScene.label
+      if (String(finalScene.id || '').trim() !== 'other_scene') {
+        this.form.customTypeName = ''
+      }
       this.typeOptions = types
 
       let nextTypeIndex = types.findIndex((item) => item.id === String(typeId || '').trim())
@@ -873,6 +901,9 @@ export default {
       const idx = Number(e.detail.value || 0)
       const selected = this.sceneOptions[idx] || this.sceneOptions[0]
       this.syncSceneAndType(selected?.id || '', '')
+      if (String(selected?.id || '').trim() !== 'other_scene') {
+        this.form.customTypeName = ''
+      }
     },
 
     onTypeChange(e) {
@@ -1197,7 +1228,18 @@ _doChooseLocation() {
         uni.showToast({ title: '请选择开始时间', icon: 'none' })
         return
       }
-      if (!this.form.sceneId || !this.form.typeId) {
+      const normalizedCustomTypeName = normalizeCustomTypeName(this.form.customTypeName || '')
+      if (this.isCustomSceneSelected) {
+        if (!normalizedCustomTypeName || normalizedCustomTypeName.length < 2) {
+          uni.showToast({ title: '请填写2-20字活动类型', icon: 'none' })
+          return
+        }
+        if (this.customTypeDuplicateLabel) {
+          uni.showToast({ title: `与“${this.customTypeDuplicateLabel}”重复`, icon: 'none' })
+          return
+        }
+      }
+      if (!this.form.sceneId || (!this.isCustomSceneSelected && !this.form.typeId)) {
         uni.showToast({ title: '请选择活动场景和活动类型', icon: 'none' })
         return
       }
@@ -1242,8 +1284,9 @@ _doChooseLocation() {
           visibleTags,
           sceneId:          this.form.sceneId,
           sceneName:        this.form.sceneName,
-          typeId:           this.form.typeId,
-          typeName:         this.form.typeName,
+          typeId:           this.isCustomSceneSelected ? '' : this.form.typeId,
+          typeName:         this.isCustomSceneSelected ? normalizedCustomTypeName : this.form.typeName,
+          customTypeName:   this.isCustomSceneSelected ? normalizedCustomTypeName : '',
           socialEnergy:     this.inferredSocialEnergyId,
           chargeType:       this.form.chargeType,
           feeAmount,
@@ -1303,6 +1346,9 @@ _doChooseLocation() {
             INVALID_SCENE: '请选择有效活动场景',
             SCENE_NOT_SELECTABLE: '节庆主题由系统自动匹配，无需手动选择',
             INVALID_TYPE: '请选择有效活动类型',
+            INVALID_CUSTOM_TYPE: '请输入有效的自定义类型',
+            CUSTOM_TYPE_TOO_LONG: '自定义类型最多20字',
+            DUPLICATE_CUSTOM_TYPE: '自定义类型与现有类型重复',
             INVALID_CHARGE_TYPE: '收费方式不合法',
             INVALID_FEE_AMOUNT: '付费金额不合法',
             CONTACT_REQUIRED: '请至少填写1项联系方式',

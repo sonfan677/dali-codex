@@ -1438,6 +1438,33 @@
               </view>
             </view>
 
+            <view class="trend-category-panel">
+              <text class="export-config-title">“其它”场景自定义类型统计</text>
+              <text class="export-tip">
+                累计类型 {{ customSceneTypeStats.totalTypeCount }} · 累计发布 {{ customSceneTypeStats.totalPublishCount }}
+              </text>
+              <view v-if="!customSceneTypeStats.topRows || customSceneTypeStats.topRows.length === 0" class="empty">
+                <text class="empty-text">暂无自定义类型数据</text>
+              </view>
+              <view v-else class="trend-mini-bars">
+                <view
+                  v-for="row in customSceneTypeStats.topRows"
+                  :key="`custom-scene-type-${row.id || row.typeName}`"
+                  class="trend-mini-row"
+                >
+                  <text class="trend-mini-label">{{ row.typeName }}</text>
+                  <view class="trend-mini-track">
+                    <view
+                      class="trend-mini-fill"
+                      :style="{ width: trendMetricBarWidth(row.publishCount) }"
+                    />
+                  </view>
+                  <text class="trend-mini-value">{{ row.publishCount }}</text>
+                </view>
+                <text class="export-tip">最近使用：{{ customSceneTypeStats.topRows[0] && customSceneTypeStats.topRows[0].lastUsedAt ? formatTime(customSceneTypeStats.topRows[0].lastUsedAt) : '--' }}</text>
+              </view>
+            </view>
+
             <view class="export-actions">
               <button class="mini-btn mini-btn--ghost" @tap="copyTrendInsight">复制看板解读</button>
             </view>
@@ -1709,6 +1736,12 @@ export default {
           isPet: 0,
           isApprovalRequired: 0,
         },
+      },
+      customSceneTypeStats: {
+        totalTypeCount: 0,
+        totalPublishCount: 0,
+        topRows: [],
+        loadedAt: null,
       },
       opsInsightCards: [],
       userSegmentOverview: {
@@ -4266,6 +4299,12 @@ export default {
             isPet: 0,
             isApprovalRequired: 0,
           },
+        }
+        this.customSceneTypeStats = res.customSceneTypeStats || {
+          totalTypeCount: 0,
+          totalPublishCount: 0,
+          topRows: [],
+          loadedAt: null,
         }
         this.opsInsightCards = Array.isArray(res.opsInsightCards) ? res.opsInsightCards : []
         this.opsWeeklyBrief = res.opsWeeklyBrief || {

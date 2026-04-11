@@ -160,6 +160,7 @@ const COMMON_SCENE_ID_SET = new Set([
   'family_pet',
   'public_welfare',
   'nomad_city',
+  'other_scene',
   'festival_theme',
 ])
 
@@ -715,7 +716,7 @@ export default {
       if (selected === 'other') {
         return list.filter((item) => {
           const sid = String(item.sceneId || '')
-          return !sid || !COMMON_SCENE_ID_SET.has(sid)
+          return sid === 'other_scene' || !sid || !COMMON_SCENE_ID_SET.has(sid)
         })
       }
       return list.filter((item) => String(item.sceneId || '') === selected)

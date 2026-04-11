@@ -35,6 +35,7 @@ const SCENE_LABEL_MAP = {
   family_pet: '亲子宠物',
   public_welfare: '公益社区',
   nomad_city: '旅居同城',
+  other_scene: '其它',
   festival_theme: '节庆主题',
 }
 
@@ -184,6 +185,7 @@ const TYPE_OPTIONS_BY_SCENE = {
     { id: 'coliving_community', name: '共居社区活动' },
     { id: 'local_integration', name: '在地融入活动' },
   ],
+  other_scene: [],
   festival_theme: [
     { id: 'march_street_theme', name: '三月街主题活动' },
     { id: 'torch_festival_theme', name: '火把节主题活动' },
@@ -214,7 +216,7 @@ const CATEGORY_TO_SCENE_TYPE = {
   photo: { sceneId: 'local_explore', typeId: 'photo_walk' },
   wellness: { sceneId: 'workshop_experience', typeId: 'healing_workshop' },
   social: { sceneId: 'social_networking', typeId: 'friend_making' },
-  other: { sceneId: 'casual_gathering', typeId: 'random_buddy' },
+  other: { sceneId: 'other_scene', typeId: '' },
 }
 
 function normalizeCategoryId(categoryId = '') {
@@ -239,6 +241,16 @@ function resolveSceneTypeFromLegacyFields(input = {}) {
   const normalizedCategoryId = normalizeCategoryId(input?.categoryId || 'other')
   const fallback = CATEGORY_TO_SCENE_TYPE[normalizedCategoryId] || CATEGORY_TO_SCENE_TYPE.other
   const finalSceneId = sceneIdFromInput || fallback.sceneId
+  if (finalSceneId === 'other_scene') {
+    const customTypeName = String(input?.typeName || input?.categoryCustomLabel || '').trim()
+    const customTypeId = String(input?.typeId || '').trim() || (customTypeName ? `custom_${customTypeName}` : '')
+    return {
+      sceneId: finalSceneId,
+      sceneName: SCENE_LABEL_MAP[finalSceneId] || '未分类场景',
+      typeId: customTypeId,
+      typeName: customTypeName || '其它',
+    }
+  }
   const resolvedType = resolveTypeForScene(finalSceneId, input?.typeId) || resolveTypeForScene(finalSceneId, fallback.typeId)
   return {
     sceneId: finalSceneId,
@@ -411,6 +423,8 @@ exports.main = async (event) => {
   const sceneType = resolveSceneTypeFromLegacyFields({
     sceneId: activity.sceneId,
     typeId: activity.typeId,
+    typeName: activity.typeName,
+    categoryCustomLabel: activity.categoryCustomLabel,
     categoryId,
   })
   const enrichedActivity = {

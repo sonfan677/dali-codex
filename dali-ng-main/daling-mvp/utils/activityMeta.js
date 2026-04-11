@@ -16,6 +16,7 @@ export const ACTIVITY_SCENE_DEFINITIONS = [
   { id: 'family_pet', label: '亲子宠物', desc: '家庭、儿童、宠物友好活动', iconHint: '小孩/宠物' },
   { id: 'public_welfare', label: '公益社区', desc: '志愿、环保、社区共建、交换', iconHint: '爱心/树叶' },
   { id: 'nomad_city', label: '旅居同城', desc: '新来大理、旅居融入、数字游民等', iconHint: '小屋/行李箱' },
+  { id: 'other_scene', label: '其它', desc: '未归入固定场景，类型可自定义填写', iconHint: '更多/自定义' },
   { id: 'festival_theme', label: '节庆主题', desc: '三月街、火把节、节日和时令主题', iconHint: '火把/灯笼' },
 ]
 
@@ -165,6 +166,7 @@ export const ACTIVITY_TYPE_OPTIONS_BY_SCENE = {
     { id: 'coliving_community', name: '共居社区活动', categoryId: 'social' },
     { id: 'local_integration', name: '在地融入活动', categoryId: 'social' },
   ],
+  other_scene: [],
   festival_theme: [
     { id: 'march_street_theme', name: '三月街主题活动', categoryId: 'culture' },
     { id: 'torch_festival_theme', name: '火把节主题活动', categoryId: 'culture' },
@@ -287,7 +289,7 @@ const CATEGORY_TO_SCENE_TYPE = {
   photo: { sceneId: 'local_explore', typeId: 'photo_walk' },
   wellness: { sceneId: 'workshop_experience', typeId: 'healing_workshop' },
   social: { sceneId: 'social_networking', typeId: 'friend_making' },
-  other: { sceneId: 'casual_gathering', typeId: 'random_buddy' },
+  other: { sceneId: 'other_scene', typeId: '' },
 }
 
 const SCENE_DEFAULT_CATEGORY_MAP = {
@@ -302,6 +304,7 @@ const SCENE_DEFAULT_CATEGORY_MAP = {
   family_pet: 'social',
   public_welfare: 'social',
   nomad_city: 'social',
+  other_scene: 'other',
   festival_theme: 'culture',
 }
 
@@ -312,7 +315,6 @@ export const DISCOVERY_SCENE_FILTER_OPTIONS = [
   ...ACTIVITY_SCENE_DEFINITIONS
     .filter((item) => !SCENE_IDS_HIDDEN_IN_DISCOVERY_FILTER.has(String(item.id || '').trim()))
     .map((item) => ({ id: item.id, label: item.label })),
-  { id: 'other', label: '其它' },
 ]
 
 export const DISTANCE_FILTER_OPTIONS = [
@@ -392,6 +394,23 @@ const SOCIAL_ENERGY_BY_SCENE = {
   learning_sharing: 'i',
   workshop_experience: 'i',
 }
+
+const TYPE_COMPARE_SANITIZE_PATTERN = /[·•・,，。!！?？:：;；、'"`~～\-—_（）()【】\[\]\/\\]/g
+const BUILTIN_TYPE_ROWS = Object.keys(ACTIVITY_TYPE_OPTIONS_BY_SCENE).flatMap((sceneId) => {
+  if (sceneId === 'other_scene') return []
+  const list = ACTIVITY_TYPE_OPTIONS_BY_SCENE[sceneId] || []
+  return list.map((item) => ({
+    sceneId,
+    id: String(item?.id || '').trim(),
+    name: String(item?.name || '').trim(),
+  })).filter((item) => item.id && item.name)
+})
+const BUILTIN_TYPE_NAME_MATCH_MAP = BUILTIN_TYPE_ROWS.reduce((acc, item) => {
+  const key = normalizeTypeCompareText(item.name)
+  if (!key || acc[key]) return acc
+  acc[key] = item.name
+  return acc
+}, {})
 
 const SOCIAL_ENERGY_TYPE_OVERRIDE = {
   friend_making: 'e',
@@ -512,6 +531,24 @@ export function normalizeCategoryId(categoryId) {
   return LEGACY_CATEGORY_ID_MAP[safe] || safe || 'other'
 }
 
+export function normalizeCustomTypeName(value = '') {
+  return String(value || '').trim().replace(/\s+/g, ' ')
+}
+
+function normalizeTypeCompareText(value = '') {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '')
+    .replace(TYPE_COMPARE_SANITIZE_PATTERN, '')
+}
+
+export function resolveDuplicateTypeName(customTypeName = '') {
+  const key = normalizeTypeCompareText(customTypeName)
+  if (!key) return ''
+  return BUILTIN_TYPE_NAME_MATCH_MAP[key] || ''
+}
+
 export function getCategoryLabel(categoryId) {
   const normalized = normalizeCategoryId(categoryId)
   return ACTIVITY_CATEGORY_LABEL_MAP[normalized] || '其他'
@@ -535,6 +572,15 @@ export function getTypesByScene(sceneId = '') {
 export function resolveTypeForScene(sceneId = '', typeId = '') {
   const safeScene = normalizeSceneId(sceneId)
   if (!safeScene) return null
+  if (safeScene === 'other_scene') {
+    const safeType = String(typeId || '').trim()
+    if (!safeType) return null
+    return {
+      id: safeType,
+      name: safeType,
+      categoryId: 'other',
+    }
+  }
   const safeType = String(typeId || '').trim()
   if (safeType && TYPE_INDEX_BY_SCENE[safeScene]?.[safeType]) {
     return TYPE_INDEX_BY_SCENE[safeScene][safeType]
@@ -544,6 +590,7 @@ export function resolveTypeForScene(sceneId = '', typeId = '') {
 }
 
 export function resolveCategoryBySceneType(sceneId = '', typeId = '') {
+  if (String(sceneId || '').trim() === 'other_scene') return 'other'
   const type = resolveTypeForScene(sceneId, typeId)
   if (type?.categoryId) return type.categoryId
   const safeScene = normalizeSceneId(sceneId)
@@ -554,6 +601,16 @@ export function resolveCategoryBySceneType(sceneId = '', typeId = '') {
 export function resolveSceneTypeFromLegacyFields(input = {}) {
   const sceneIdFromInput = normalizeSceneId(input?.sceneId)
   const sceneId = sceneIdFromInput || CATEGORY_TO_SCENE_TYPE[normalizeCategoryId(input?.categoryId)]?.sceneId || 'casual_gathering'
+  if (sceneId === 'other_scene') {
+    const customTypeName = normalizeCustomTypeName(input?.typeName || input?.categoryCustomLabel || '')
+    const customTypeId = String(input?.typeId || '').trim() || (customTypeName ? `custom_${customTypeName}` : '')
+    return {
+      sceneId: 'other_scene',
+      sceneName: getSceneLabel('other_scene'),
+      typeId: customTypeId,
+      typeName: customTypeName || '其它',
+    }
+  }
   const resolvedType = resolveTypeForScene(sceneId, input?.typeId) || resolveTypeForScene(sceneId, '')
   const finalSceneId = sceneId
   const finalTypeId = String(resolvedType?.id || '')

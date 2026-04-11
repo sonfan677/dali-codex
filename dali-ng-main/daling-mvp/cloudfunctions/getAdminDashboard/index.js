@@ -319,6 +319,8 @@ function calcUserRiskScore(user = {}) {
 const VERIFY_AUTO_APPROVE_DEFAULT_MINUTES = 10
 const ANALYSIS_WINDOW_DAYS = 90
 const PARTICIPATION_ANALYSIS_LIMIT = 1200
+const CUSTOM_SCENE_ID = 'other_scene'
+const CUSTOM_SCENE_TYPE_STATS_COLLECTION = 'sceneCustomTypeStats'
 const AUTO_USER_SEGMENT_SYNC_ENABLED = String(process.env.AUTO_USER_SEGMENT_SYNC || 'on').toLowerCase() !== 'off'
 const MAX_SEGMENT_SYNC_PER_LOAD = 80
 const DEFAULT_SEGMENT_RULE_CONFIG = {
@@ -1087,6 +1089,50 @@ function buildOperationInsightCards(input = {}) {
   return cards
 }
 
+async function loadCustomSceneTypeStats(cityId = 'dali') {
+  try {
+    const { data } = await db.collection(CUSTOM_SCENE_TYPE_STATS_COLLECTION)
+      .where({ cityId, sceneId: CUSTOM_SCENE_ID })
+      .orderBy('publishCount', 'desc')
+      .limit(100)
+      .field({
+        _id: true,
+        latestTypeName: true,
+        normalizedTypeName: true,
+        publishCount: true,
+        firstUsedAt: true,
+        lastUsedAt: true,
+        lastActivityId: true,
+      })
+      .get()
+    const rows = (Array.isArray(data) ? data : [])
+      .map((item) => ({
+        id: String(item._id || ''),
+        typeName: String(item.latestTypeName || '').trim() || String(item.normalizedTypeName || '').trim(),
+        publishCount: Number(item.publishCount || 0),
+        firstUsedAt: item.firstUsedAt || null,
+        lastUsedAt: item.lastUsedAt || null,
+        lastActivityId: String(item.lastActivityId || '').trim(),
+      }))
+      .filter((item) => item.typeName)
+      .sort((a, b) => (b.publishCount !== a.publishCount ? b.publishCount - a.publishCount : a.typeName.localeCompare(b.typeName, 'zh-Hans-CN')))
+    const totalPublishCount = rows.reduce((sum, item) => sum + Number(item.publishCount || 0), 0)
+    return {
+      totalTypeCount: rows.length,
+      totalPublishCount,
+      topRows: rows.slice(0, 12),
+      loadedAt: new Date().toISOString(),
+    }
+  } catch (e) {
+    return {
+      totalTypeCount: 0,
+      totalPublishCount: 0,
+      topRows: [],
+      loadedAt: new Date().toISOString(),
+    }
+  }
+}
+
 function buildWeeklyBrief(input = {}) {
   const activities = Array.isArray(input.activityRows) ? input.activityRows : []
   const participations = Array.isArray(input.participationRows) ? input.participationRows : []
@@ -1711,6 +1757,7 @@ exports.main = async () => {
     participationRows: participationList,
     segmentList,
   })
+  const customSceneTypeStats = await loadCustomSceneTypeStats(meta.cityId)
   const opsPatrolSummary = latestOpsPatrol
     ? {
         level: latestOpsPatrol.patrolLevel || latestOpsPatrol.patrolSummary?.level || 'normal',
@@ -1772,6 +1819,7 @@ exports.main = async () => {
     reportList,
     pendingPublishList,
     opsTagOverview,
+    customSceneTypeStats,
     opsInsightCards,
     opsWeeklyBrief,
     opsAnomalyAlerts,
