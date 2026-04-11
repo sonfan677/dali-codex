@@ -61,6 +61,16 @@ async function fetchActivitiesByIds(ids = []) {
         currentParticipants: true,
         minParticipants: true,
         status: true,
+        publishReviewRequired: true,
+        publishReviewStatus: true,
+        publishReviewSubmittedAt: true,
+        publishReviewedAt: true,
+        publishReviewedBy: true,
+        publishReviewReason: true,
+        publishRiskLevel: true,
+        publishRiskReasonCodes: true,
+        publishForceManualReview: true,
+        isOfficial: true,
         isGroupFormation: true,
         formationStatus: true,
         isRecommended: true,
@@ -1296,7 +1306,7 @@ exports.main = async () => {
       })
       .get(),
     db.collection('activities')
-      .where({ status: _.in(['OPEN', 'FULL', 'ENDED', 'CANCELLED']) })
+      .where({ status: _.in(['OPEN', 'FULL', 'ENDED', 'CANCELLED', 'PUBLISH_PENDING', 'PUBLISH_REJECTED']) })
       .orderBy('createdAt', 'desc')
       .limit(200)
       .field({
@@ -1314,6 +1324,16 @@ exports.main = async () => {
         currentParticipants: true,
         minParticipants: true,
         status: true,
+        publishReviewRequired: true,
+        publishReviewStatus: true,
+        publishReviewSubmittedAt: true,
+        publishReviewedAt: true,
+        publishReviewedBy: true,
+        publishReviewReason: true,
+        publishRiskLevel: true,
+        publishRiskReasonCodes: true,
+        publishForceManualReview: true,
+        isOfficial: true,
         isGroupFormation: true,
         formationStatus: true,
         isRecommended: true,
@@ -1342,6 +1362,8 @@ exports.main = async () => {
           'ban',
           'resolve_report_hide',
           'resolve_report_ignore',
+          'approve_publish',
+          'reject_publish',
           'verify_auto_approved',
           'ops_patrol_run',
           'ops_patrol_alert',
@@ -1562,6 +1584,14 @@ exports.main = async () => {
     },
   }))
 
+  const pendingPublishList = enrichedActivityList
+    .filter((item) => {
+      const reviewStatus = String(item.publishReviewStatus || '').toLowerCase()
+      return reviewStatus === 'pending' || String(item.status || '') === 'PUBLISH_PENDING'
+    })
+    .sort((a, b) => toTimestamp(b.publishReviewSubmittedAt || b.createdAt) - toTimestamp(a.publishReviewSubmittedAt || a.createdAt))
+    .slice(0, 80)
+
   const actionLogList = rawActionLogs
     .map((item) => {
       const linkedActivityId = resolveActionLinkedActivityId(item)
@@ -1731,6 +1761,7 @@ exports.main = async () => {
       runs: opsPatrolRunList.slice(0, 8),
     },
     reportList,
+    pendingPublishList,
     opsTagOverview,
     opsInsightCards,
     opsWeeklyBrief,

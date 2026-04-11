@@ -375,6 +375,39 @@
           </view>
         </view>
 
+        <view class="card">
+          <view class="title-row">
+            <text class="card-title">待审核发布活动</text>
+            <text class="status-pill status-pill--pending">{{ displayPendingPublishTodoList.length }}</text>
+          </view>
+          <text class="card-openid">普通用户发布默认进入审核；管理员发布活动默认直发。</text>
+          <view v-if="displayPendingPublishTodoList.length === 0" class="empty empty--inline">
+            <text class="empty-text">{{ todoOnlyOverdue ? '暂无超时发布审核' : '暂无待审核发布活动' }}</text>
+          </view>
+          <view
+            v-for="item in displayPendingPublishTodoList"
+            :key="`publish_pending_${item._id}`"
+            class="todo-item"
+            :class="{ 'todo-item--overdue': item.isOverSla }"
+          >
+            <view class="title-row">
+              <text class="card-sub">{{ item.title || '未命名活动' }}</text>
+              <text class="card-openid">已等待 {{ item.waitHoursText }}</text>
+            </view>
+            <text class="card-openid">
+              发布者：{{ item.publisherNickname || '--' }} · 风险：{{ item.publishRiskLevel || 'normal' }}
+            </text>
+            <text class="card-openid">
+              状态：{{ statusText(item.status) }} · 提交：{{ formatTime(item.publishReviewSubmittedAt || item.createdAt) }}
+            </text>
+            <view class="card-actions">
+              <button class="action-btn action-btn--detail" @tap="goActivityDetail(item._id)">查看详情</button>
+              <button class="action-btn action-btn--approve" @tap="reviewPublishActivityQuick(item._id, 'approve_publish')">通过发布</button>
+              <button class="action-btn action-btn--reject" @tap="reviewPublishActivityQuick(item._id, 'reject_publish')">驳回发布</button>
+            </view>
+          </view>
+        </view>
+
         <view v-if="isLiteMode" class="todo-batch-toolbar">
           <button class="mini-btn mini-btn--ghost" @tap="toggleTodoAdvanced">
             {{ showTodoAdvanced ? '收起高级区' : '展开高级区（日报归档/SLA细分）' }}
@@ -519,6 +552,16 @@
                 class="action-btn action-btn--reject"
                 @tap="verifyUserQuick(item.raw._openid, 'reject_verify')"
               >一键驳回</button>
+              <button
+                v-if="item.type === 'publish'"
+                class="action-btn action-btn--approve"
+                @tap="reviewPublishActivityQuick(item.raw._id, 'approve_publish')"
+              >通过发布</button>
+              <button
+                v-if="item.type === 'publish'"
+                class="action-btn action-btn--reject"
+                @tap="reviewPublishActivityQuick(item.raw._id, 'reject_publish')"
+              >驳回发布</button>
               <button
                 v-if="item.type === 'activity' && !item.raw.isRecommended"
                 class="action-btn action-btn--recommend"
@@ -1123,12 +1166,22 @@
               @tap="goActivityDetail(item._id)"
             >查看详情</button>
             <button
-              v-if="!item.isRecommended"
+              v-if="item.status === 'PUBLISH_PENDING'"
+              class="action-btn action-btn--approve"
+              @tap="reviewPublishActivityQuick(item._id, 'approve_publish')"
+            >通过发布</button>
+            <button
+              v-if="item.status === 'PUBLISH_PENDING'"
+              class="action-btn action-btn--reject"
+              @tap="reviewPublishActivityQuick(item._id, 'reject_publish')"
+            >驳回发布</button>
+            <button
+              v-if="!item.isRecommended && ['OPEN', 'FULL'].includes(item.status)"
               class="action-btn action-btn--recommend"
               @tap="recommendActivity(item._id, 'recommend')"
             >推荐</button>
             <button
-              v-else
+              v-if="item.isRecommended && ['OPEN', 'FULL'].includes(item.status)"
               class="action-btn action-btn--unrecommend"
               @tap="recommendActivity(item._id, 'unrecommend')"
             >取消推荐</button>
@@ -1584,6 +1637,7 @@ export default {
         loadedAt: null,
       },
       reportList: [],
+      pendingPublishList: [],
       opsTagOverview: {
         total: 0,
         tagged: 0,
@@ -1863,6 +1917,36 @@ export default {
       return this.pendingVerifyTodoList.filter((item) => item.isOverSla)
     },
 
+    pendingPublishTodoList() {
+      const keyword = this.normalizeKeyword(this.searchKeyword)
+      const nowTs = Date.now()
+      return (this.pendingPublishList || [])
+        .map((item) => {
+          const submitTs = this.toTimestamp(item.publishReviewSubmittedAt || item.createdAt || item.updatedAt)
+          const waitHours = Number.isFinite(submitTs) ? Math.max(0, (nowTs - submitTs) / 3600000) : 0
+          return {
+            ...item,
+            waitHours,
+            waitHoursText: this.formatHoursText(waitHours),
+            isOverSla: waitHours >= this.todoSlaHours,
+            _searchText: [
+              item.title,
+              item.publisherNickname,
+              item._id,
+              item.location?.address,
+              item.publishRiskLevel,
+            ].join(' '),
+          }
+        })
+        .filter((item) => !keyword || String(item._searchText || '').toLowerCase().includes(keyword))
+        .sort((a, b) => this.toTimestamp(b.publishReviewSubmittedAt || b.createdAt) - this.toTimestamp(a.publishReviewSubmittedAt || a.createdAt))
+    },
+
+    displayPendingPublishTodoList() {
+      if (!this.todoOnlyOverdue) return this.pendingPublishTodoList
+      return this.pendingPublishTodoList.filter((item) => item.isOverSla)
+    },
+
     autoVerifyReviewTodoList() {
       const keyword = this.normalizeKeyword(this.searchKeyword)
       const nowTs = Date.now()
@@ -1919,6 +2003,7 @@ export default {
     todoTotalCount() {
       return this.pendingReportTodoList.length
         + this.pendingVerifyTodoList.length
+        + this.pendingPublishTodoList.length
         + this.autoVerifyReviewTodoList.length
         + this.upcomingActivityTodoList.length
     },
@@ -1926,6 +2011,7 @@ export default {
     todoViewTotalCount() {
       return this.displayPendingReportTodoList.length
         + this.displayPendingVerifyTodoList.length
+        + this.displayPendingPublishTodoList.length
         + this.displayAutoVerifyReviewTodoList.length
         + this.displayUpcomingActivityTodoList.length
     },
@@ -1933,6 +2019,7 @@ export default {
     overdueTodoCount() {
       return this.pendingReportTodoList.filter((item) => item.isOverSla).length
         + this.pendingVerifyTodoList.filter((item) => item.isOverSla).length
+        + this.pendingPublishTodoList.filter((item) => item.isOverSla).length
         + this.autoVerifyReviewTodoList.length
         + this.upcomingActivityTodoList.filter((item) => item.isUrgent).length
     },
@@ -1959,6 +2046,7 @@ export default {
         closedToday,
         overdueUnhandled: this.pendingReportTodoList.filter((item) => item.isOverSla).length
           + this.pendingVerifyTodoList.filter((item) => item.isOverSla).length
+          + this.pendingPublishTodoList.filter((item) => item.isOverSla).length
           + this.autoVerifyReviewTodoList.length,
         upcoming24h: this.upcomingActivityTodoList.length,
       }
@@ -2017,7 +2105,21 @@ export default {
         }
       })
 
-      return [...autoVerifyRows, ...reportRows, ...verifyRows, ...activityRows]
+      const publishRows = this.displayPendingPublishTodoList.map((item) => ({
+        queueId: `publish_${item._id}`,
+        type: 'publish',
+        typeLabel: '发布审核',
+        isRisk: item.isOverSla || String(item.publishRiskLevel || '').toLowerCase() === 'high',
+        urgencyText: `已等待 ${item.waitHoursText} · 风险 ${item.publishRiskLevel || 'normal'}`,
+        priorityScore: (item.isOverSla ? 290 : 180)
+          + (String(item.publishRiskLevel || '').toLowerCase() === 'high' ? 80 : 0)
+          + Math.round(Number(item.waitHours || 0)),
+        title: item.title || '待审核活动',
+        subTitle: `发布者：${item.publisherNickname || '--'} · 活动ID：${item._id ? `${item._id.slice(0, 12)}...` : '--'}`,
+        raw: item,
+      }))
+
+      return [...autoVerifyRows, ...reportRows, ...verifyRows, ...publishRows, ...activityRows]
         .sort((a, b) => b.priorityScore - a.priorityScore)
         .slice(0, 8)
     },
@@ -2033,6 +2135,10 @@ export default {
     overdueVerifyTodoCount() {
       return this.pendingVerifyTodoList.filter((item) => item.isOverSla).length
         + this.autoVerifyReviewTodoList.length
+    },
+
+    overduePublishTodoCount() {
+      return this.pendingPublishTodoList.filter((item) => item.isOverSla).length
     },
 
     urgentActivityTodoCount() {
@@ -2228,6 +2334,8 @@ export default {
       if (this.activeTab === 'activities') {
         return [
           { label: '全部', value: 'all' },
+          { label: '待发布审核', value: 'PUBLISH_PENDING' },
+          { label: '审核驳回', value: 'PUBLISH_REJECTED' },
           { label: '招募中', value: 'OPEN' },
           { label: '已满员', value: 'FULL' },
           { label: '已结束', value: 'ENDED' },
@@ -2249,6 +2357,8 @@ export default {
           { label: '分群切换', value: 'segment_auto_switch' },
           { label: '举报下架', value: 'resolve_report_hide' },
           { label: '举报忽略', value: 'resolve_report_ignore' },
+          { label: '发布通过', value: 'approve_publish' },
+          { label: '发布驳回', value: 'reject_publish' },
           { label: '巡检执行', value: 'ops_patrol_run' },
           { label: '巡检告警', value: 'ops_patrol_alert' },
         ]
@@ -3411,6 +3521,12 @@ export default {
         this.goActivityDetail(item.raw?._id)
         return
       }
+      if (item.type === 'publish') {
+        this.activeTab = 'activities'
+        this.activeFilter = 'PUBLISH_PENDING'
+        this.searchKeyword = item.raw?._id || ''
+        return
+      }
       if (item.type === 'verify' || item.type === 'verify_auto') {
         const openid = item.raw?._openid || ''
         this.activeTab = 'verify'
@@ -3556,6 +3672,8 @@ export default {
       const map = {
         verify: ['实名资料齐全，审核通过', '信息一致，允许发布活动'],
         reject_verify: ['资料不完整，请补充后重试', '信息不一致，暂不通过'],
+        approve_publish: ['活动内容合规，允许发布', '信息完整，审核通过上线'],
+        reject_publish: ['活动信息不完整，请补充后重提', '活动内容存在风险，暂不通过'],
         resolve_report_hide: ['举报成立，先下架复核', '内容违规，按规则下架处理'],
         resolve_report_ignore: ['举报不成立，已记录并忽略', '核查无异常，本次不处理'],
         recommend: ['活动质量高，进入推荐位', '符合运营主题，给予推荐'],
@@ -3730,7 +3848,7 @@ export default {
       this.saveTodoPreferences()
       uni.showModal({
         title: '风险待办提醒',
-        content: `当前有 ${this.overdueReportTodoCount} 条超时举报、${this.overdueVerifyTodoCount} 条超时认证、${this.urgentActivityTodoCount} 条紧急活动，请优先处理。`,
+        content: `当前有 ${this.overdueReportTodoCount} 条超时举报、${this.overdueVerifyTodoCount} 条超时认证、${this.overduePublishTodoCount} 条超时发布审核、${this.urgentActivityTodoCount} 条紧急活动，请优先处理。`,
         confirmText: '去处理',
         cancelText: '稍后',
         success: (res) => {
@@ -3786,6 +3904,7 @@ export default {
           runs: [],
         }
         this.reportList = res.reportList || []
+        this.pendingPublishList = res.pendingPublishList || []
         this.opsTagOverview = res.opsTagOverview || {
           total: 0,
           tagged: 0,
@@ -4122,6 +4241,61 @@ export default {
       }
     },
 
+    async reviewPublishActivity(activityId, action, presetReason = '') {
+      const actionText = action === 'approve_publish' ? '通过发布审核' : '驳回发布审核'
+      const execute = async (reasonText) => {
+        try {
+          const result = await callCloud('adminAction', {
+            action,
+            targetId: activityId,
+            targetType: 'activity',
+            reason: reasonText,
+            notifyAfterAction: false,
+          })
+          if (result?.success) {
+            uni.showToast({ title: result.message || '已完成审核', icon: 'success' })
+            await this.loadData()
+          } else {
+            uni.showToast({ title: result?.message || '操作失败', icon: 'none' })
+          }
+        } catch (e) {
+          uni.showToast({ title: '操作失败，请重试', icon: 'none' })
+        }
+      }
+
+      if (presetReason) {
+        uni.showModal({
+          title: `确认${actionText}？`,
+          content: `将使用模板原因：${presetReason}`,
+          success: async (res) => {
+            if (!res.confirm) return
+            await execute(presetReason)
+          },
+        })
+        return
+      }
+
+      uni.showModal({
+        title: `确认${actionText}？`,
+        editable: true,
+        placeholderText: '填写审核原因（至少2个字）',
+        success: async (res) => {
+          if (!res.confirm) return
+          if (!res.content || res.content.trim().length < 2) {
+            uni.showToast({ title: '请填写原因（至少2个字）', icon: 'none' })
+            return
+          }
+          await execute(res.content.trim())
+        },
+      })
+    },
+
+    async reviewPublishActivityQuick(activityId, action) {
+      const reason = this.getDefaultReasonTemplate(action)
+      if (!reason) return
+      await this.reviewPublishActivity(activityId, action, reason)
+    },
+
     // 审核认证（支持快捷模板）
     async verifyUser(openid, action, presetReason = '') {
       const actionText = action === 'verify' ? '通过认证' : '拒绝认证'
@@ -4378,7 +4552,14 @@ export default {
     },
 
     statusText(status) {
-      const map = { OPEN: '招募中', FULL: '已满员', ENDED: '已结束', CANCELLED: '已取消' }
+      const map = {
+        PUBLISH_PENDING: '待发布审核',
+        PUBLISH_REJECTED: '审核驳回',
+        OPEN: '招募中',
+        FULL: '已满员',
+        ENDED: '已结束',
+        CANCELLED: '已取消',
+      }
       return map[status] || status
     },
 
@@ -4431,6 +4612,8 @@ export default {
 
     activityStatusClass(status) {
       const map = {
+        PUBLISH_PENDING: 'status-pill--pending',
+        PUBLISH_REJECTED: 'status-pill--ignored',
         OPEN: 'status-pill--open',
         FULL: 'status-pill--full',
         ENDED: 'status-pill--ended',
@@ -4444,6 +4627,8 @@ export default {
         recommend: '设为推荐',
         unrecommend: '取消推荐',
         hide: '手动下架活动',
+        approve_publish: '通过发布审核',
+        reject_publish: '驳回发布审核',
         verify: '通过身份核验',
         reject_verify: '拒绝身份核验',
         verify_auto_approved: '系统自动通过（待复核）',
@@ -4487,6 +4672,7 @@ export default {
     resultToneClass(action) {
       const map = {
         recommend: 'status-pill--result-positive',
+        approve_publish: 'status-pill--result-positive',
         verify: 'status-pill--result-positive',
         verify_auto_approved: 'status-pill--result-neutral',
         unrecommend: 'status-pill--result-neutral',
@@ -4497,6 +4683,7 @@ export default {
         segment_auto_switch: 'status-pill--result-neutral',
         hide: 'status-pill--result-risk',
         ban: 'status-pill--result-risk',
+        reject_publish: 'status-pill--result-risk',
         reject_verify: 'status-pill--result-risk',
         resolve_report_hide: 'status-pill--result-risk',
         ops_patrol_alert: 'status-pill--result-risk',
@@ -4729,7 +4916,7 @@ export default {
     },
 
     buildTrendRows(periods = []) {
-      const highRiskActionSet = new Set(['hide', 'ban', 'resolve_report_hide', 'reject_verify', 'ops_patrol_alert'])
+      const highRiskActionSet = new Set(['hide', 'ban', 'resolve_report_hide', 'reject_verify', 'reject_publish', 'ops_patrol_alert'])
       const reportHandledStatusSet = new Set(['HANDLED', 'IGNORED'])
       const reportHandleActionSet = new Set(['resolve_report_hide', 'resolve_report_ignore'])
 
@@ -5062,7 +5249,14 @@ export default {
       } = this.getCurrentLogExportContext()
 
       const now = new Date()
-      const statusCounter = { OPEN: 0, FULL: 0, ENDED: 0, CANCELLED: 0 }
+      const statusCounter = {
+        PUBLISH_PENDING: 0,
+        PUBLISH_REJECTED: 0,
+        OPEN: 0,
+        FULL: 0,
+        ENDED: 0,
+        CANCELLED: 0,
+      }
       this.activityList.forEach((item) => {
         const s = item.status || 'OPEN'
         statusCounter[s] = (statusCounter[s] || 0) + 1
@@ -5118,6 +5312,8 @@ export default {
 
       append(['二、活动状态统计'])
       append(['状态', '数量'])
+      append(['PUBLISH_PENDING(待发布审核)', statusCounter.PUBLISH_PENDING || 0])
+      append(['PUBLISH_REJECTED(审核驳回)', statusCounter.PUBLISH_REJECTED || 0])
       append(['OPEN(招募中)', statusCounter.OPEN || 0])
       append(['FULL(已满员)', statusCounter.FULL || 0])
       append(['ENDED(已结束)', statusCounter.ENDED || 0])
@@ -5166,7 +5362,7 @@ export default {
       const append = (values = []) => lines.push(this.buildCsvLine(values))
       const now = new Date()
       const { exportLogList, exportRangeText, selectedFieldText } = this.getCurrentLogExportContext()
-      const highRiskActionSet = new Set(['hide', 'ban', 'resolve_report_hide', 'reject_verify', 'ops_patrol_alert'])
+      const highRiskActionSet = new Set(['hide', 'ban', 'resolve_report_hide', 'reject_verify', 'reject_publish', 'ops_patrol_alert'])
       const reportHandleActionSet = new Set(['resolve_report_hide', 'resolve_report_ignore'])
       const activityMap = this.activityList.reduce((acc, item) => {
         if (item && item._id) acc[item._id] = item

@@ -558,6 +558,8 @@ export default {
 
     statusText(status) {
       const map = {
+        PUBLISH_PENDING: '待审核发布',
+        PUBLISH_REJECTED: '审核驳回',
         OPEN:      '招募中',
         FULL:      '已满员',
         ENDED:     '已结束',
@@ -821,6 +823,8 @@ export default {
 }
 .item-count { font-size: 24rpx; color: #888; }
 .item-status { font-size: 22rpx; padding: 4rpx 12rpx; border-radius: 8rpx; }
+.status--PUBLISH_PENDING { background: #FFF3CD; color: #8B5E00; }
+.status--PUBLISH_REJECTED { background: #f1f3f5; color: #667085; }
 .status--OPEN      { background: #EEF7EE; color: #1E7145; }
 .status--FULL      { background: #EEF4FB; color: #1A3C5E; }
 .status--ENDED     { background: #f5f5f5; color: #999; }

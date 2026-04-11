@@ -311,6 +311,58 @@ exports.main = async (event) => {
       break
     }
 
+    case 'approve_publish':
+    case 'reject_publish': {
+      finalTargetType = finalTargetType || 'activity'
+      linkedActivityId = targetId
+      beforeState = await getActivitySnapshot(targetId)
+      if (!beforeState) {
+        return { success: false, error: 'NOT_FOUND', message: '活动不存在' }
+      }
+      if (adminRole === 'cityAdmin' && beforeState.cityId && beforeState.cityId !== adminCityId) {
+        return { success: false, error: 'CITY_SCOPE_DENIED', message: '无该城市权限' }
+      }
+
+      const publishReviewStatus = String(beforeState.publishReviewStatus || '').toLowerCase()
+      const isPendingPublish = publishReviewStatus === 'pending' || String(beforeState.status || '') === 'PUBLISH_PENDING'
+      if (!isPendingPublish) {
+        return { success: false, error: 'PUBLISH_REVIEW_NOT_PENDING', message: '该活动不在待审核状态' }
+      }
+
+      const nextPatch = action === 'approve_publish'
+        ? {
+            status: Number(beforeState.currentParticipants || 0) >= Number(beforeState.maxParticipants || 999)
+              ? 'FULL'
+              : 'OPEN',
+            publishReviewRequired: false,
+            publishReviewStatus: 'approved',
+            publishReviewedAt: db.serverDate(),
+            publishReviewedBy: OPENID,
+            publishReviewSource: 'admin_action',
+            publishReviewReason: normalizedReason,
+            updatedAt: db.serverDate(),
+          }
+        : {
+            status: 'PUBLISH_REJECTED',
+            publishReviewRequired: false,
+            publishReviewStatus: 'rejected',
+            publishReviewedAt: db.serverDate(),
+            publishReviewedBy: OPENID,
+            publishReviewSource: 'admin_action',
+            publishReviewReason: normalizedReason,
+            updatedAt: db.serverDate(),
+          }
+
+      await db.collection('activities').doc(targetId).update({ data: nextPatch })
+      afterState = await getActivitySnapshot(targetId)
+      result = {
+        message: action === 'approve_publish'
+          ? '活动已审核通过并发布'
+          : '活动已驳回'
+      }
+      break
+    }
+
     case 'verify':
     case 'reject_verify':
     case 'ban': {

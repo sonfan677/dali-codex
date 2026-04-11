@@ -58,6 +58,14 @@ exports.main = async (event, context) => {
       await transaction.rollback()
       return { success: false, error: 'NOT_OPEN', message: '活动已不接受报名' }
     }
+    if (String(activity.publishReviewStatus || '').trim().toLowerCase() === 'pending') {
+      await transaction.rollback()
+      return { success: false, error: 'PUBLISH_REVIEW_PENDING', message: '活动审核中，暂不可报名' }
+    }
+    if (String(activity.publishReviewStatus || '').trim().toLowerCase() === 'rejected') {
+      await transaction.rollback()
+      return { success: false, error: 'PUBLISH_REVIEW_REJECTED', message: '活动未通过审核，暂不可报名' }
+    }
     if (new Date(activity.endTime).getTime() <= Date.now()) {
       await transaction.rollback()
       return { success: false, error: 'ENDED', message: '活动已结束' }

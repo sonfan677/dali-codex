@@ -302,6 +302,82 @@ const SOCIAL_ENERGY_BY_TYPE = {
   healing_workshop: 'i',
 }
 
+const USER_MAX_THEME_COUNT = 1
+const OFFICIAL_MAX_THEME_COUNT = 6
+const DEFAULT_USER_MAX_PARTICIPANTS_LIMIT = 30
+const PUBLISH_REVIEW_PENDING_STATUS = 'PUBLISH_PENDING'
+
+const HIGH_RISK_TYPE_SET = new Set([
+  'singles_social',
+  'friend_making',
+  'women_social',
+  'private_circle',
+  'closed_small_group',
+  'bar_gathering',
+  'industry_wine_social',
+  'dj_party',
+  'paddle_water_sports',
+  'camping',
+  'light_trail_run',
+  'torch_festival_theme',
+])
+
+const HIGH_RISK_KEYWORDS = [
+  '交友', '单身', '脱单', '私密', '酒局', '微醺', '精酿', '夜骑', '徒步', '骑行', '露营', '篝火', '火把',
+]
+
+function parseAdminMeta(openid) {
+  const adminOpenids = (process.env.ADMIN_OPENIDS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+  return {
+    isAdmin: adminOpenids.includes(openid),
+  }
+}
+
+function resolveUserMaxParticipantsLimit() {
+  const raw = Number(process.env.USER_PUBLISH_MAX_PARTICIPANTS || DEFAULT_USER_MAX_PARTICIPANTS_LIMIT)
+  if (!Number.isFinite(raw) || raw <= 0) return DEFAULT_USER_MAX_PARTICIPANTS_LIMIT
+  return Math.max(1, Math.min(300, Math.round(raw)))
+}
+
+function resolvePublishRiskGate({
+  typeId = '',
+  title = '',
+  description = '',
+  opsTagProfile = null,
+} = {}) {
+  const reasonCodes = []
+  const safeTypeId = String(typeId || '').trim()
+  if (safeTypeId && HIGH_RISK_TYPE_SET.has(safeTypeId)) {
+    reasonCodes.push(`TYPE_${safeTypeId.toUpperCase()}`)
+  }
+
+  const text = `${String(title || '')} ${String(description || '')}`.toLowerCase()
+  if (HIGH_RISK_KEYWORDS.some((kw) => text.includes(String(kw).toLowerCase()))) {
+    reasonCodes.push('KEYWORD_HIGH_RISK')
+  }
+
+  const riskBaseTags = Array.isArray(opsTagProfile?.dimensions?.risk?.base)
+    ? opsTagProfile.dimensions.risk.base
+    : []
+  const hasRiskBaseHit = riskBaseTags.some((tag) => {
+    const t = String(tag || '').trim()
+    return ['中风险', '高风险', '需人工审核', '需二次确认', '需线下核验'].includes(t)
+  })
+  if (hasRiskBaseHit) {
+    reasonCodes.push('OPS_RISK_BASE')
+  }
+
+  const isHighRisk = reasonCodes.length > 0
+  return {
+    level: isHighRisk ? 'high' : 'normal',
+    forceManualReview: isHighRisk,
+    reasonCodes: [...new Set(reasonCodes)].slice(0, 8),
+  }
+}
+
 function normalizeCategoryId(categoryId = '') {
   const safe = String(categoryId || '').trim().toLowerCase()
   return LEGACY_CATEGORY_ID_MAP[safe] || safe || 'other'
@@ -751,32 +827,45 @@ async function markHighFrequencyOrganizerIfNeeded(openid = '') {
 
 exports.main = async (event, context) => {
   const { OPENID } = cloud.getWXContext()
+  const { isAdmin } = parseAdminMeta(OPENID)
 
   // 1. 校验身份核验状态
   const { data: users } = await db.collection('users')
     .where({ _openid: OPENID })
     .get()
 
-  if (!users.length) {
+  if (!users.length && !isAdmin) {
     return { success: false, error: 'NOT_VERIFIED', message: '请先完成身份核验' }
   }
 
-  let user = users[0]
-  const autoApproveResult = await maybeAutoApprovePendingVerify(user, OPENID)
-  if (autoApproveResult.autoApproved) {
-    user = {
-      ...user,
-      ...(autoApproveResult.userPatch || {}),
+  let user = users[0] || {
+    _id: '',
+    _openid: OPENID,
+    nickname: '',
+    avatarUrl: '',
+    isVerified: isAdmin,
+    verifyStatus: isAdmin ? 'approved' : 'none',
+    identityCheckRequired: false,
+    identityCheckStatus: 'none',
+    identityCheckReasons: [],
+  }
+  if (user?._id) {
+    const autoApproveResult = await maybeAutoApprovePendingVerify(user, OPENID)
+    if (autoApproveResult.autoApproved) {
+      user = {
+        ...user,
+        ...(autoApproveResult.userPatch || {}),
+      }
     }
   }
 
-  if (!user.isVerified) {
+  if (!isAdmin && !user.isVerified) {
     return { success: false, error: 'NOT_VERIFIED', message: '请先完成身份核验' }
   }
 
   const identityCheckRequired = !!user.identityCheckRequired
   const identityCheckStatus = String(user.identityCheckStatus || 'none')
-  if (identityCheckRequired && identityCheckStatus !== 'approved') {
+  if (!isAdmin && identityCheckRequired && identityCheckStatus !== 'approved') {
     return {
       success: false,
       error: 'IDENTITY_CHECK_REQUIRED',
@@ -853,7 +942,10 @@ exports.main = async (event, context) => {
   if (hasInvalidTheme) {
     return { success: false, error: 'INVALID_THEME', message: '活动主题不合法' }
   }
-  const finalThemeIds = normalizeThemeIds(rawThemeIds, 3)
+  const finalThemeIds = normalizeThemeIds(
+    rawThemeIds,
+    isAdmin ? OFFICIAL_MAX_THEME_COUNT : USER_MAX_THEME_COUNT
+  )
 
   // 2. 参数校验
   if (!title || title.trim().length === 0) {
@@ -915,6 +1007,15 @@ exports.main = async (event, context) => {
     return { success: false, error: 'INVALID_TIME', message: '请选择活动时间' }
   }
 
+  const requestedMaxParticipants = Number(maxParticipants)
+  const userMaxParticipantsLimit = resolveUserMaxParticipantsLimit()
+  let finalMaxParticipants = Number.isFinite(requestedMaxParticipants) && requestedMaxParticipants > 0
+    ? Math.round(requestedMaxParticipants)
+    : 999
+  if (!isAdmin) {
+    finalMaxParticipants = Math.min(finalMaxParticipants, userMaxParticipantsLimit)
+  }
+
   const now = Date.now()
   const startMs = new Date(startTime).getTime()
   const endMs   = new Date(endTime).getTime()
@@ -939,6 +1040,9 @@ exports.main = async (event, context) => {
   if (isGroupFormation && minParticipants < cityConfig.groupFormation.absoluteMinParticipants) {
     return { success: false, error: 'INVALID_MIN', message: '成团最低人数至少2人' }
   }
+  if (isGroupFormation && Number(minParticipants || 0) > Number(finalMaxParticipants || 0)) {
+    return { success: false, error: 'MIN_PARTICIPANTS_EXCEED_MAX', message: '最低成团人数不能大于活动最大人数' }
+  }
 
   const finalCategoryLabel = finalCategoryId === 'other'
     ? '其他'
@@ -958,7 +1062,7 @@ exports.main = async (event, context) => {
     categoryId: finalCategoryId,
     chargeType: finalChargeType,
     feeAmount: finalFeeAmount,
-    maxParticipants,
+    maxParticipants: finalMaxParticipants,
     requireApproval: finalRequireApproval,
     allowWaitlist: finalAllowWaitlist,
     isGroupFormation: !!isGroupFormation,
@@ -972,6 +1076,25 @@ exports.main = async (event, context) => {
   // 4. 写入数据库
   const trustProfile = buildTrustProfileForPublish(user)
   const baseEffectiveScore = getBaseEffectiveScore(trustProfile.trustLevel)
+  const publishRiskGate = resolvePublishRiskGate({
+    typeId: finalTypeId,
+    title,
+    description,
+    opsTagProfile,
+  })
+  const publishReviewStatus = isAdmin ? 'approved' : 'pending'
+  const publishReviewRequired = !isAdmin
+  const publishStatus = publishReviewStatus === 'approved'
+    ? 'OPEN'
+    : PUBLISH_REVIEW_PENDING_STATUS
+  const isOfficial = !!isAdmin
+  const publishReviewSource = isAdmin ? 'admin_publish' : 'user_submit'
+  const publisherNickname = String(user.nickname || '').trim() || (isAdmin ? '官方活动' : '搭里用户')
+  const participantCapApplied = !isAdmin && (
+    !Number.isFinite(requestedMaxParticipants) ||
+    requestedMaxParticipants <= 0 ||
+    requestedMaxParticipants > userMaxParticipantsLimit
+  )
 
   const result = await db.collection('activities').add({
     data: {
@@ -1003,7 +1126,7 @@ exports.main = async (event, context) => {
       },
       startTime: new Date(startTime),
       endTime:   new Date(endTime),
-      maxParticipants,
+      maxParticipants: finalMaxParticipants,
       minParticipants,
       currentParticipants: 0,
       chargeType: finalChargeType,
@@ -1019,7 +1142,20 @@ exports.main = async (event, context) => {
         allowWaitlist: finalAllowWaitlist,
         requireApproval: finalRequireApproval,
       },
-      status: 'OPEN',
+      status: publishStatus,
+      publishReviewRequired,
+      publishReviewStatus,
+      publishReviewSubmittedAt: db.serverDate(),
+      publishReviewSource,
+      publishReviewedAt: isAdmin ? db.serverDate() : null,
+      publishReviewedBy: isAdmin ? OPENID : '',
+      publishReviewReason: isAdmin ? '管理员发布，自动通过' : '待管理员审核',
+      publishRiskLevel: publishRiskGate.level,
+      publishRiskReasonCodes: publishRiskGate.reasonCodes,
+      publishForceManualReview: !isAdmin && publishRiskGate.forceManualReview,
+      isOfficial,
+      officialOwnerType: isOfficial ? 'platform_admin' : 'user',
+      officialThemeIds: isOfficial ? finalThemeIds : [],
       isGroupFormation,
       formationWindow: isGroupFormation ? finalFormationWindow : null,
       formationDeadline,
@@ -1074,9 +1210,9 @@ exports.main = async (event, context) => {
       riskAutoVersion: 'v1.0',
       modificationRiskScore: 0,
       publisherId: OPENID,
-      publisherNickname: user.nickname,
+      publisherNickname,
       publisherAvatar: user.avatarUrl,
-      isVerified: true,
+      isVerified: isAdmin ? true : !!user.isVerified,
       isRecommended: false,
       isMarketCompanion: !!normalizedMarketLink,
       marketLink: normalizedMarketLink
@@ -1099,7 +1235,9 @@ exports.main = async (event, context) => {
       updatedAt: db.serverDate(),
     }
   }).catch(() => {})
-  markHighFrequencyOrganizerIfNeeded(OPENID)
+  if (!isAdmin) {
+    markHighFrequencyOrganizerIfNeeded(OPENID)
+  }
   if (finalCategoryId === 'other' && normalizedCustomCategoryLabel) {
     recordCustomCategoryStat({
       cityId: finalCityId,
@@ -1121,8 +1259,16 @@ exports.main = async (event, context) => {
     socialEnergyLabel: finalSocialEnergyLabel,
     chargeType: finalChargeType,
     feeAmount: finalFeeAmount,
+    maxParticipants: finalMaxParticipants,
+    participantCapApplied,
     opsTagVersion: OPS_TAG_VERSION,
     opsTagCore: Array.isArray(opsTagProfile?.coreTags) ? opsTagProfile.coreTags : [],
+    publishReviewStatus,
+    publishReviewRequired,
+    publishStatus,
+    isOfficial,
+    publishRiskLevel: publishRiskGate.level,
+    publishRiskReasonCodes: publishRiskGate.reasonCodes,
     cityConfigVersion: cityConfig.version,
     serverTimestamp: Date.now(),
   }

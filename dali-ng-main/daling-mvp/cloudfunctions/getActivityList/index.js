@@ -530,6 +530,12 @@ function buildTrustProfile(activity, user, nowMs) {
   }
 }
 
+function isActivityPublishApproved(activity = {}) {
+  const reviewStatus = String(activity?.publishReviewStatus || '').trim().toLowerCase()
+  if (!reviewStatus) return true
+  return reviewStatus === 'approved'
+}
+
 exports.main = async (event, context) => {
   const targetCityId = String(event?.cityId || DEFAULT_CITY_CONFIG.cityId)
   const cityConfig = await loadCityConfig(targetCityId)
@@ -637,6 +643,7 @@ exports.main = async (event, context) => {
       }
     })
     .filter(a => {
+      if (!isActivityPublishApproved(a)) return false
       // 过滤：未结束 + 在用户选择半径内
       if (a._endMs <= nowMs) return false
       if (normalizedQueryMode === 'all') return true

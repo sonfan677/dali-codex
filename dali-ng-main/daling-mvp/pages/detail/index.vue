@@ -612,7 +612,13 @@ export default {
 
     disabledReason() {
       if (!this.activity) return ''
-      const map = { FULL: '已满员', ENDED: '已结束', CANCELLED: '已取消' }
+      const map = {
+        PUBLISH_PENDING: '活动审核中',
+        PUBLISH_REJECTED: '活动审核未通过',
+        FULL: '已满员',
+        ENDED: '已结束',
+        CANCELLED: '已取消',
+      }
       return map[this.activity.status] || '不可报名'
     },
 
@@ -897,7 +903,16 @@ export default {
     async loadDetail() {
       try {
         const res = await callCloud('getActivityDetail', { activityId: this.activityId })
-        if (!res || !res.success) throw new Error(res?.message || '活动不存在')
+        if (!res || !res.success) {
+          const code = String(res?.error || '').trim()
+          const msgMap = {
+            ACTIVITY_UNAVAILABLE: '活动审核中或暂不可查看',
+            ACTIVITY_NOT_FOUND: '活动不存在',
+          }
+          const err = new Error(res?.message || msgMap[code] || '活动不存在')
+          err.code = code
+          throw err
+        }
         this.activity = res.activity
         this.joinStatus = String(res.joinStatus || (res.hasJoined ? 'joined' : 'none'))
         this.hasJoined = this.joinStatus === 'joined'
@@ -911,7 +926,9 @@ export default {
         this.participantSort = 'newest'
         await this.loadComments()
       } catch(e) {
-        uni.showToast({ title: '活动不存在', icon: 'none' })
+        const code = String(e?.code || '').trim()
+        const title = code === 'ACTIVITY_UNAVAILABLE' ? '活动审核中或暂不可查看' : '活动不存在'
+        uni.showToast({ title, icon: 'none' })
         setTimeout(() => uni.navigateBack(), 1500)
       }
     },
@@ -1506,6 +1523,8 @@ export default {
             FULL:           '活动已满员',
             ENDED:          '活动已结束',
             NOT_OPEN:       '活动暂不接受报名',
+            PUBLISH_REVIEW_PENDING: '活动审核中，暂不可报名',
+            PUBLISH_REVIEW_REJECTED: '活动未通过审核，暂不可报名',
             OWN_ACTIVITY:   '不能报名自己的活动',
           }
           uni.showToast({ title: msgs[res.error] || '报名失败', icon: 'none' })

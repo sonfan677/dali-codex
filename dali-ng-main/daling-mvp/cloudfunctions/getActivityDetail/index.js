@@ -383,6 +383,18 @@ exports.main = async (event) => {
 
   const nowMs = Date.now()
   const activity = res.data
+  const isPublisher = activity.publisherId === OPENID
+  const publishReviewStatus = String(activity.publishReviewStatus || '').trim().toLowerCase()
+  const isPendingPublish = publishReviewStatus === 'pending' || String(activity.status || '') === 'PUBLISH_PENDING'
+  const isRejectedPublish = publishReviewStatus === 'rejected' || String(activity.status || '') === 'PUBLISH_REJECTED'
+  if (!isAdmin && !isPublisher && (isPendingPublish || isRejectedPublish)) {
+    return {
+      success: false,
+      error: 'ACTIVITY_UNAVAILABLE',
+      message: '该活动暂不可查看',
+    }
+  }
+
   const { data: users } = await db.collection('users')
     .where({ _openid: activity.publisherId })
     .limit(1)
@@ -438,7 +450,6 @@ exports.main = async (event) => {
     .get()
   const joinStatus = String(joinedList[0]?.status || 'none')
 
-  const isPublisher = activity.publisherId === OPENID
   const canSeeContact = isPublisher || isAdmin || joinStatus === 'joined'
   const sourceContactInfo = activity.contactInfo || {}
   const maskedContactInfo = canSeeContact

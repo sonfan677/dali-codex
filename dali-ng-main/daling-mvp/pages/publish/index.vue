@@ -1274,7 +1274,14 @@ _doChooseLocation() {
             : null,
         })
         if (res.success) {
-          uni.showToast({ title: '发布成功！', icon: 'success' })
+          const publishReviewStatus = String(res.publishReviewStatus || '').toLowerCase()
+          const baseText = publishReviewStatus === 'pending'
+            ? '已提交审核'
+            : (res.isOfficial ? '官方活动已发布' : '发布成功！')
+          const successText = res.participantCapApplied
+            ? `${baseText}（人数上限已按规则调整）`
+            : baseText
+          uni.showToast({ title: successText, icon: 'success' })
           setTimeout(() => uni.switchTab({ url: '/pages/index/index' }), 1500)
         } else {
           if (res.error === 'IDENTITY_CHECK_REQUIRED') {
@@ -1302,6 +1309,7 @@ _doChooseLocation() {
             START_PASSED:  '开始时间不能早于现在',
             INVALID_MIN:   '成团人数至少2人',
             INVALID_WINDOW:'成团时间窗口不合法',
+            MIN_PARTICIPANTS_EXCEED_MAX: '最低成团人数不能超过活动人数上限',
             OUT_OF_DALI_REGION: '活动地点需在大理白族自治州范围内',
             CITY_NOT_SUPPORTED: '当前仅支持在大理白族自治州发布活动',
           }
