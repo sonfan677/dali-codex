@@ -37,6 +37,29 @@ function parseAdminMeta(openid) {
   }
 }
 
+async function resolveAdminMeta(openid = '') {
+  const localMeta = parseAdminMeta(openid)
+  if (localMeta.isAdmin) return localMeta
+
+  // 容错：新函数若未配置管理员环境变量，回退复用 checkAdmin 的鉴权结果
+  try {
+    const ret = await cloud.callFunction({
+      name: 'checkAdmin',
+      data: {},
+    })
+    const result = ret?.result || {}
+    if (result?.success && result?.isAdmin) {
+      return {
+        isAdmin: true,
+        adminRole: String(result.adminRole || 'superAdmin').trim() || 'superAdmin',
+        adminCityId: String(result.cityId || DEFAULT_CITY_ID).trim() || DEFAULT_CITY_ID,
+      }
+    }
+  } catch (e) {}
+
+  return localMeta
+}
+
 function resolveCollectionName() {
   const preferred = String(process.env.FESTIVAL_THEME_COLLECTION || '').trim()
   if (preferred) return preferred
@@ -116,7 +139,7 @@ async function listThemes(cityId = DEFAULT_CITY_ID) {
 
 exports.main = async (event = {}) => {
   const { OPENID } = cloud.getWXContext()
-  const { isAdmin, adminRole, adminCityId } = parseAdminMeta(OPENID)
+  const { isAdmin, adminRole, adminCityId } = await resolveAdminMeta(OPENID)
   if (!isAdmin) return { success: false, error: 'UNAUTHORIZED', message: '无管理员权限' }
 
   const action = String(event.action || 'list').trim().toLowerCase()
@@ -223,4 +246,3 @@ exports.main = async (event = {}) => {
 
   return { success: false, error: 'INVALID_ACTION', message: '不支持的操作类型' }
 }
-
