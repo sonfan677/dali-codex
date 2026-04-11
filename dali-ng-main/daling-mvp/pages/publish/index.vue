@@ -1260,7 +1260,7 @@ _doChooseLocation() {
           address:          this.form.address,
           startTime:        new Date(this.form.startTimeMs).toISOString(),
           endTime:          new Date(this._getEndTimeMs()).toISOString(),
-          maxParticipants:  this.form.maxParticipants || 999,
+          maxParticipants:  this.form.maxParticipants || null,
           isGroupFormation: this.form.isGroupFormation,
           minParticipants:  this.form.isGroupFormation ? this.form.minParticipants : 0,
           formationWindow:  this.form.isGroupFormation ? this.formationWindowValues[this.formationWindowIndex] : 30,

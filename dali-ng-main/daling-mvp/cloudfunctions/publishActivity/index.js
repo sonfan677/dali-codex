@@ -893,7 +893,7 @@ exports.main = async (event, context) => {
     address = '',
     startTime,
     endTime,
-    maxParticipants = 999,
+    maxParticipants,
     isGroupFormation = false,
     minParticipants = 0,
     formationWindow,
@@ -1008,11 +1008,18 @@ exports.main = async (event, context) => {
   }
 
   const requestedMaxParticipants = Number(maxParticipants)
+  const hasExplicitMaxParticipants = (
+    maxParticipants !== null
+    && maxParticipants !== undefined
+    && String(maxParticipants).trim() !== ''
+    && Number.isFinite(requestedMaxParticipants)
+    && requestedMaxParticipants > 0
+  )
   const userMaxParticipantsLimit = resolveUserMaxParticipantsLimit()
-  let finalMaxParticipants = Number.isFinite(requestedMaxParticipants) && requestedMaxParticipants > 0
+  let finalMaxParticipants = hasExplicitMaxParticipants
     ? Math.round(requestedMaxParticipants)
     : 999
-  if (!isAdmin) {
+  if (!isAdmin && hasExplicitMaxParticipants) {
     finalMaxParticipants = Math.min(finalMaxParticipants, userMaxParticipantsLimit)
   }
 
@@ -1090,11 +1097,9 @@ exports.main = async (event, context) => {
   const isOfficial = !!isAdmin
   const publishReviewSource = isAdmin ? 'admin_publish' : 'user_submit'
   const publisherNickname = String(user.nickname || '').trim() || (isAdmin ? '官方活动' : '搭里用户')
-  const participantCapApplied = !isAdmin && (
-    !Number.isFinite(requestedMaxParticipants) ||
-    requestedMaxParticipants <= 0 ||
-    requestedMaxParticipants > userMaxParticipantsLimit
-  )
+  const participantCapApplied = !isAdmin
+    && hasExplicitMaxParticipants
+    && requestedMaxParticipants > userMaxParticipantsLimit
 
   const result = await db.collection('activities').add({
     data: {
