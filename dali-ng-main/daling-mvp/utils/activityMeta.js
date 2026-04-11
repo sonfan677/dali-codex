@@ -249,7 +249,12 @@ export const PUBLISH_CATEGORY_OPTIONS = CATEGORY_DEFINITIONS.map((item) => ({
   scene: item.scene,
 }))
 
-export const PUBLISH_SCENE_OPTIONS = ACTIVITY_SCENE_DEFINITIONS.map((item) => ({
+const SCENE_IDS_HIDDEN_IN_PUBLISH = new Set(['festival_theme'])
+const SCENE_IDS_HIDDEN_IN_DISCOVERY_FILTER = new Set(['festival_theme'])
+
+export const PUBLISH_SCENE_OPTIONS = ACTIVITY_SCENE_DEFINITIONS
+  .filter((item) => !SCENE_IDS_HIDDEN_IN_PUBLISH.has(String(item.id || '').trim()))
+  .map((item) => ({
   id: item.id,
   label: item.label,
   desc: item.desc,
@@ -304,7 +309,9 @@ export const DISCOVERY_SCENE_FILTER_OPTIONS = [
   { id: 'all', label: '全部' },
   { id: 'hot', label: '热门' },
   { id: 'official', label: '官方推荐' },
-  ...ACTIVITY_SCENE_DEFINITIONS.map((item) => ({ id: item.id, label: item.label })),
+  ...ACTIVITY_SCENE_DEFINITIONS
+    .filter((item) => !SCENE_IDS_HIDDEN_IN_DISCOVERY_FILTER.has(String(item.id || '').trim()))
+    .map((item) => ({ id: item.id, label: item.label })),
   { id: 'other', label: '其它' },
 ]
 

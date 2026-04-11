@@ -3,6 +3,122 @@ cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 const db = cloud.database()
 const _ = db.command
 const { buildOpsTagProfile } = require('./opsTagging')
+const DEFAULT_CITY_ID = 'dali'
+const FESTIVAL_THEME_COLLECTION_CANDIDATES = ['festivalThemes', 'officialFestivalThemes']
+
+function toChinaDayKeyByMs(input) {
+  const ms = Number(input)
+  if (!Number.isFinite(ms)) return ''
+  const date = new Date(ms + 8 * 60 * 60 * 1000)
+  const y = date.getUTCFullYear()
+  const m = `${date.getUTCMonth() + 1}`.padStart(2, '0')
+  const d = `${date.getUTCDate()}`.padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+function normalizeFestivalThemeTag(value = '') {
+  const safe = String(value || '').trim().replace(/\s+/g, '')
+  if (!safe) return ''
+  return safe.slice(0, 8)
+}
+
+function normalizeFestivalThemeTagList(input = [], max = 5) {
+  const source = Array.isArray(input)
+    ? input
+    : String(input || '').split(/[,\n，、;；]/g)
+  const next = []
+  source.forEach((item) => {
+    const safe = normalizeFestivalThemeTag(item)
+    if (!safe || next.includes(safe)) return
+    next.push(safe)
+  })
+  return next.slice(0, Math.max(0, Number(max) || 5))
+}
+
+function normalizeFestivalLocationKeywords(input = []) {
+  const source = Array.isArray(input)
+    ? input
+    : String(input || '').split(/[,\n，、;；]/g)
+  const next = []
+  source.forEach((item) => {
+    const safe = String(item || '').trim().toLowerCase().slice(0, 20)
+    if (!safe || next.includes(safe)) return
+    next.push(safe)
+  })
+  return next.slice(0, 6)
+}
+
+async function loadFestivalThemeRules(cityId = DEFAULT_CITY_ID) {
+  const safeCityId = String(cityId || DEFAULT_CITY_ID).trim() || DEFAULT_CITY_ID
+  const preferred = String(process.env.FESTIVAL_THEME_COLLECTION || '').trim()
+  const candidates = preferred
+    ? [preferred, ...FESTIVAL_THEME_COLLECTION_CANDIDATES]
+    : FESTIVAL_THEME_COLLECTION_CANDIDATES
+  for (let i = 0; i < candidates.length; i += 1) {
+    const collectionName = String(candidates[i] || '').trim()
+    if (!collectionName) continue
+    try {
+      const { data } = await db.collection(collectionName)
+        .where({
+          cityId: safeCityId,
+          isActive: _.neq(false),
+        })
+        .limit(120)
+        .field({
+          _id: true,
+          themeShortName: true,
+          shortName: true,
+          title: true,
+          startDayKey: true,
+          endDayKey: true,
+          locationKeywords: true,
+        })
+        .get()
+      const list = Array.isArray(data) ? data : []
+      return list
+        .map((item) => ({
+          id: String(item._id || '').trim(),
+          shortName: normalizeFestivalThemeTag(item.themeShortName || item.shortName || item.title || ''),
+          startDayKey: String(item.startDayKey || '').trim(),
+          endDayKey: String(item.endDayKey || '').trim(),
+          locationKeywords: normalizeFestivalLocationKeywords(item.locationKeywords || []),
+        }))
+        .filter((item) => item.shortName && item.startDayKey && item.endDayKey)
+        .sort((a, b) => String(a.startDayKey).localeCompare(String(b.startDayKey)))
+    } catch (e) {}
+  }
+  return []
+}
+
+function resolveFestivalThemeAutoMatch({
+  rules = [],
+  startDayKey = '',
+  title = '',
+  description = '',
+  address = '',
+} = {}) {
+  const safeDayKey = String(startDayKey || '').trim()
+  const haystack = `${String(title || '')} ${String(description || '')} ${String(address || '')}`.toLowerCase()
+  const tags = []
+  const ruleIds = []
+  ;(Array.isArray(rules) ? rules : []).forEach((rule) => {
+    if (!rule) return
+    const dateMatched = safeDayKey
+      && String(rule.startDayKey || '').trim()
+      && String(rule.endDayKey || '').trim()
+      && safeDayKey >= String(rule.startDayKey).trim()
+      && safeDayKey <= String(rule.endDayKey).trim()
+    const locationMatched = Array.isArray(rule.locationKeywords)
+      && rule.locationKeywords.some((keyword) => keyword && haystack.includes(String(keyword).toLowerCase()))
+    if (!dateMatched && !locationMatched) return
+    if (rule.shortName && !tags.includes(rule.shortName)) tags.push(rule.shortName)
+    if (rule.id && !ruleIds.includes(rule.id)) ruleIds.push(rule.id)
+  })
+  return {
+    tags: normalizeFestivalThemeTagList(tags, 5),
+    ruleIds: ruleIds.slice(0, 5),
+  }
+}
 
 function safeText(v) {
   return String(v || '').trim()
@@ -115,6 +231,22 @@ exports.main = async (event) => {
     lng: nextLng,
   })
 
+  const startDayKey = toChinaDayKeyByMs(newStartMs)
+  const festivalThemeRules = await loadFestivalThemeRules(activity.cityId || DEFAULT_CITY_ID)
+  const festivalThemeAutoMatch = resolveFestivalThemeAutoMatch({
+    rules: festivalThemeRules,
+    startDayKey,
+    title: activity.title,
+    description: activity.description,
+    address: nextAddress,
+  })
+  const festivalThemeTagsAuto = normalizeFestivalThemeTagList(festivalThemeAutoMatch.tags)
+  const festivalThemeTagsManual = normalizeFestivalThemeTagList(activity.festivalThemeTagsManual || [])
+  const festivalThemeTags = festivalThemeTagsManual.length > 0 ? festivalThemeTagsManual : festivalThemeTagsAuto
+  const festivalThemeSource = festivalThemeTagsManual.length > 0
+    ? 'manual'
+    : (festivalThemeTags.length > 0 ? 'auto' : 'none')
+
   await db.collection('activities').doc(activityId).update({
     data: {
       location: nextLocation,
@@ -123,6 +255,11 @@ exports.main = async (event) => {
       maxParticipants: finalMax,
       status: nextStatus,
       opsTagProfile,
+      festivalThemeTagsAuto,
+      festivalThemeTags,
+      festivalThemeSource,
+      festivalThemeMatchedRuleIds: festivalThemeAutoMatch.ruleIds,
+      festivalThemeMatchedAt: db.serverDate(),
       modificationRiskScore: _.inc(1),
       updatedAt: db.serverDate(),
     }
@@ -134,5 +271,7 @@ exports.main = async (event) => {
     status: nextStatus,
     maxParticipants: finalMax,
     location: nextLocation,
+    festivalThemeTags,
+    festivalThemeSource,
   }
 }

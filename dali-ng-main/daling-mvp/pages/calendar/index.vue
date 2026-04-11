@@ -1,7 +1,7 @@
 <template>
   <view class="page">
     <view class="market-board">
-      <text class="market-board-title">固定集市（公开免费）</text>
+      <text class="market-board-title">固定集市 / 节庆主题（公开信息）</text>
       <view v-if="marketRules.length === 0" class="market-board-empty">暂无固定集市配置</view>
       <view v-else class="market-mini-wrap">
         <view class="market-chip-row">
@@ -19,11 +19,11 @@
           <view class="market-expand-head">
             <text class="market-expand-title">{{ activeMarketRule.title }}</text>
           </view>
-          <text class="market-expand-line">频次：{{ activeMarketRule.scheduleText }}</text>
+          <text class="market-expand-line">{{ activeMarketRule.scheduleLabel || '频次' }}：{{ activeMarketRule.scheduleText }}</text>
           <text class="market-expand-line">地点：{{ activeMarketRule.location?.address || '地点待定' }}</text>
           <text class="market-expand-line">说明：{{ activeMarketRule.note || '无需报名，可直接前往。' }}</text>
         </view>
-        <text class="market-mini-tip">可切换集市并联动月历标签；下方可一键发起同行或参与已有同行</text>
+        <text class="market-mini-tip">可切换主题并联动月历标签；下方可一键发起同行或参与已有同行</text>
       </view>
     </view>
 
@@ -74,6 +74,7 @@
         <view class="legend-item"><text class="legend-pill legend-pill--recommended">官方推荐</text></view>
         <view class="legend-item"><text class="legend-pill legend-pill--preview">官方预告</text></view>
         <view class="legend-item"><text class="legend-pill legend-pill--market">固定集市</text></view>
+        <view class="legend-item"><text class="legend-pill legend-pill--festival">节庆主题</text></view>
       </view>
     </view>
 
@@ -100,16 +101,17 @@
             <text class="detail-meta">地点：{{ item.location?.address || '地点待定' }}</text>
             <text class="detail-meta">主理：{{ item.organizer || '官方运营' }}</text>
             <text v-if="item.source === 'market'" class="detail-note">无需报名，可直接前往；如要结伴，可发起同行活动。</text>
+            <text v-if="item.source === 'festival_theme'" class="detail-note">节庆主题窗口；可发起同行或参与已有同行。</text>
           </view>
           <view class="detail-actions">
             <button
-              v-if="item.source === 'market'"
+              v-if="item.source === 'market' || item.source === 'festival_theme'"
               class="action-btn action-btn--launch"
               size="mini"
               @tap="launchWithMarket(item)"
             >发起同行</button>
             <button
-              v-if="item.source === 'market'"
+              v-if="item.source === 'market' || item.source === 'festival_theme'"
               class="action-btn action-btn--join"
               size="mini"
               @tap="joinExistingCompanion(item)"
@@ -131,6 +133,7 @@
 import { callCloud } from '@/utils/cloud.js'
 
 const WEEK_LABELS = ['日', '一', '二', '三', '四', '五', '六']
+const DALI_CENTER = { lat: 25.7003, lng: 100.1644 }
 const MARKET_SHORT_DICT = {
   sanyuejie_market: '三月街',
   chuangdanchang_market: '床单厂',
@@ -241,7 +244,7 @@ export default {
         const dayKey = toDayKey(this.monthYear, this.month, day)
         const dayData = this.dayMap[dayKey] || {
           count: 0,
-          sourceCount: { market: 0, officialActivity: 0, officialRecommended: 0, officialPreview: 0 },
+          sourceCount: { market: 0, festivalTheme: 0, officialActivity: 0, officialRecommended: 0, officialPreview: 0 },
           items: [],
         }
         const previewTags = this.buildCellPreviewTags(dayData.items || [])
@@ -253,6 +256,7 @@ export default {
           count: Number(dayData.count || 0),
           sourceCount: dayData.sourceCount || {
             market: 0,
+            festivalTheme: 0,
             officialActivity: 0,
             officialRecommended: 0,
             officialPreview: 0,
@@ -288,6 +292,7 @@ export default {
         return {
           id: '',
           title: '固定集市',
+          scheduleLabel: '频次',
           scheduleText: '按当地固定档期',
           location: { address: '地点待定' },
           note: '无需报名，可直接前往。',
@@ -336,9 +341,10 @@ export default {
     },
 
     summarizeDayItems(items = []) {
-      const sourceCount = { market: 0, officialActivity: 0, officialRecommended: 0, officialPreview: 0 }
+      const sourceCount = { market: 0, festivalTheme: 0, officialActivity: 0, officialRecommended: 0, officialPreview: 0 }
       items.forEach((item) => {
         if (item.source === 'market') sourceCount.market += 1
+        else if (item.source === 'festival_theme') sourceCount.festivalTheme += 1
         else if (item.source === 'official_activity') sourceCount.officialActivity += 1
         else if (item.source === 'official_recommended') sourceCount.officialRecommended += 1
         else if (item.source === 'official_preview') sourceCount.officialPreview += 1
@@ -352,6 +358,10 @@ export default {
       if (value.length <= max) return value
       if (max <= 1) return '…'
       return `${value.slice(0, max - 1)}…`
+    },
+
+    normalizeFestivalTag(value = '') {
+      return String(value || '').trim().replace(/\s+/g, '').slice(0, 8)
     },
 
     marketShortName(rule = {}) {
@@ -370,6 +380,9 @@ export default {
         const m = MARKET_SHORT_DICT[String(item.marketId || '')]
         if (m) return this.compactTitle(m, 5)
       }
+      if (source === 'festival_theme') {
+        return this.compactTitle(String(item.themeShortName || item.title || '节庆主题'), 5)
+      }
       if (source === 'official_recommended') return '官方推荐'
       if (source === 'official_activity') return '官方主办'
       if (source === 'official_preview') return '官方预告'
@@ -383,7 +396,7 @@ export default {
       const safe = Array.isArray(items) ? items : []
       const picked = safe.slice(0, 3)
       if (this.selectedMarketId) {
-        const focused = safe.find((item) => item.source === 'market' && item.marketId === this.selectedMarketId)
+        const focused = safe.find((item) => String(item.marketId || '') === this.selectedMarketId)
         if (focused) {
           const exists = picked.some((item) => item._id === focused._id)
           if (!exists) {
@@ -397,6 +410,7 @@ export default {
         source: item.source || '',
         isRecommended: !!item.isRecommended,
         marketId: item.marketId || '',
+        themeShortName: item.themeShortName || '',
         text: this.shortTagText(item),
       }))
     },
@@ -486,6 +500,7 @@ export default {
 
     sourceLabel(source = '') {
       if (source === 'market') return '固定集市'
+      if (source === 'festival_theme') return '节庆主题'
       if (source === 'official_recommended') return '官方推荐'
       if (source === 'official_activity') return '官方主办'
       return '官方预告'
@@ -493,6 +508,7 @@ export default {
 
     badgeClass(source = '') {
       if (source === 'market') return 'detail-badge--market'
+      if (source === 'festival_theme') return 'detail-badge--festival'
       if (source === 'official_recommended') return 'detail-badge--recommended'
       if (source === 'official_activity') return 'detail-badge--official'
       return 'detail-badge--preview'
@@ -501,14 +517,16 @@ export default {
     cellTagClass(tag = {}) {
       const classes = []
       if (tag.source === 'official_recommended') classes.push('cell-tag--recommended')
+      else if (tag.source === 'festival_theme') classes.push('cell-tag--festival')
       else if (tag.source === 'market') classes.push('cell-tag--market')
       else if (tag.source === 'official_activity') classes.push('cell-tag--official')
       else if (tag.source === 'official_preview') classes.push('cell-tag--preview')
       else if (tag.isRecommended) classes.push('cell-tag--recommended')
       else classes.push('cell-tag--official')
 
-      if (this.selectedMarketId && tag.source === 'market') {
-        if (String(tag.marketId || '') === this.selectedMarketId) classes.push('cell-tag--market-focus')
+      if (this.selectedMarketId && String(tag.marketId || '') === this.selectedMarketId) {
+        if (tag.source === 'festival_theme') classes.push('cell-tag--festival-focus')
+        else classes.push('cell-tag--market-focus')
       }
       return classes.join(' ')
     },
@@ -520,26 +538,34 @@ export default {
     },
 
     async joinExistingCompanion(item = {}) {
+      const source = String(item?.source || '')
       const lat = Number(item?.location?.lat)
       const lng = Number(item?.location?.lng)
       const marketId = String(item?.marketId || '')
-      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-        uni.showToast({ title: '该集市暂无定位信息', icon: 'none' })
+      const festivalTag = this.normalizeFestivalTag(item?.themeShortName || item?.title || '')
+      const targetDayKey = toChinaDayKey(item.startTime || Date.now())
+      const isMarket = source === 'market'
+      const isFestival = source === 'festival_theme'
+      if (!isMarket && !isFestival) {
+        uni.showToast({ title: '仅支持集市/节庆主题关联', icon: 'none' })
         return
       }
-      if (!marketId) {
+      if (isMarket && !marketId) {
         uni.showToast({ title: '集市标识缺失，暂不可关联', icon: 'none' })
         return
       }
-      const targetDayKey = toChinaDayKey(item.startTime || Date.now())
+      if (isFestival && !festivalTag) {
+        uni.showToast({ title: '节庆标签缺失，暂不可关联', icon: 'none' })
+        return
+      }
       uni.showLoading({ title: '查询同行中...', mask: true })
       try {
         const res = await callCloud('getActivityList', {
           cityId: 'dali',
-          lat,
-          lng,
+          lat: Number.isFinite(lat) ? lat : DALI_CENTER.lat,
+          lng: Number.isFinite(lng) ? lng : DALI_CENTER.lng,
           queryMode: 'all',
-          radius: 5000,
+          radius: 2000000,
           sortBy: 'distance_asc',
           categoryId: 'all',
           keyword: '',
@@ -548,9 +574,18 @@ export default {
         const list = Array.isArray(res?.activities) ? res.activities : []
         const companions = list
           .filter((act) => {
-            const linkedMarketId = String(act?.marketLink?.marketId || '')
-            if (!linkedMarketId || linkedMarketId !== marketId) return false
-            const dayKey = String(act?.marketLink?.marketDayKey || toChinaDayKey(act?.startTime || 0))
+            if (isMarket) {
+              const linkedMarketId = String(act?.marketLink?.marketId || '')
+              if (!linkedMarketId || linkedMarketId !== marketId) return false
+            } else if (isFestival) {
+              const tags = Array.isArray(act?.festivalThemeTags) ? act.festivalThemeTags : []
+              if (!tags.some((tag) => this.normalizeFestivalTag(tag) === festivalTag)) return false
+            }
+            const dayKey = String(
+              isMarket
+                ? (act?.marketLink?.marketDayKey || toChinaDayKey(act?.startTime || 0))
+                : toChinaDayKey(act?.startTime || 0),
+            )
             if (dayKey !== targetDayKey) return false
             const status = String(act?.status || '').toUpperCase()
             return status === 'OPEN' || status === 'FULL'
@@ -561,7 +596,9 @@ export default {
           uni.hideLoading()
           uni.showModal({
             title: '暂未发现已有同行',
-            content: '该集市当天还没有可参与的同行活动（仅展示关联该集市的活动），你可以先发起一个。',
+            content: isMarket
+              ? '该集市当天还没有可参与的同行活动（仅展示关联该集市的活动），你可以先发起一个。'
+              : '该节庆主题当天还没有可参与的同行活动（仅展示关联该节庆主题的活动），你可以先发起一个。',
             confirmText: '去发起',
             success: (modalRes) => {
               if (modalRes?.confirm) this.launchWithMarket(item)
@@ -596,7 +633,7 @@ export default {
     },
 
     detailTimeText(item = {}) {
-      if (item.source === 'market') return '全天'
+      if (item.source === 'market' || item.source === 'festival_theme') return '全天'
       const startText = String(item.startText || '--:--')
       const endText = String(item.endText || '--:--')
       return `${startText} - ${endText}`
@@ -614,6 +651,7 @@ export default {
       const lat = Number(item.location?.lat)
       const lng = Number(item.location?.lng)
       const startIso = new Date(item.startTime).toISOString()
+      const source = String(item?.source || '')
       const payload = {
         title,
         description,
@@ -621,10 +659,12 @@ export default {
         categoryId: item.categoryId || 'social',
         startTime: startIso,
         lockDate: true,
-        marketId: String(item.marketId || ''),
-        marketTitle: String(item.title || ''),
         lat: Number.isFinite(lat) ? lat : '',
         lng: Number.isFinite(lng) ? lng : '',
+      }
+      if (source === 'market') {
+        payload.marketId = String(item.marketId || '')
+        payload.marketTitle = String(item.title || '')
       }
       uni.setStorageSync('dali_market_prefill_v1', payload)
       uni.switchTab({ url: '/pages/publish/index' })
@@ -825,9 +865,17 @@ export default {
 .cell-tag--preview {
   background: #8B5CF6;
 }
+.cell-tag--festival {
+  background: #0F766E;
+}
 .cell-tag--market-focus {
   background: #16A34A;
   box-shadow: inset 0 0 0 2rpx rgba(255, 255, 255, 0.88), 0 0 0 2rpx rgba(22, 163, 74, 0.28);
+  transform: translateZ(0);
+}
+.cell-tag--festival-focus {
+  background: #0EA5E9;
+  box-shadow: inset 0 0 0 2rpx rgba(255, 255, 255, 0.88), 0 0 0 2rpx rgba(14, 165, 233, 0.28);
   transform: translateZ(0);
 }
 .day-more {
@@ -863,6 +911,9 @@ export default {
 }
 .legend-pill--market {
   background: #F59E0B;
+}
+.legend-pill--festival {
+  background: #0F766E;
 }
 
 .detail-panel {
@@ -927,6 +978,10 @@ export default {
 .detail-badge--preview {
   color: #5B21B6;
   background: #EDE9FE;
+}
+.detail-badge--festival {
+  color: #115E59;
+  background: #CCFBF1;
 }
 .detail-badge--recommend-extra {
   color: #9F1239;

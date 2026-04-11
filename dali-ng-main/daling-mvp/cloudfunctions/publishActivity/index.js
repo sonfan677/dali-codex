@@ -306,6 +306,8 @@ const USER_MAX_THEME_COUNT = 1
 const OFFICIAL_MAX_THEME_COUNT = 6
 const DEFAULT_USER_MAX_PARTICIPANTS_LIMIT = 30
 const PUBLISH_REVIEW_PENDING_STATUS = 'PUBLISH_PENDING'
+const FESTIVAL_THEME_COLLECTION_CANDIDATES = ['festivalThemes', 'officialFestivalThemes']
+const MAX_FESTIVAL_THEME_TAGS = 5
 
 const HIGH_RISK_TYPE_SET = new Set([
   'singles_social',
@@ -400,6 +402,9 @@ function resolveSceneTypeForPublish({ sceneId = '', typeId = '', categoryId = ''
   const safeSceneId = normalizeSceneId(rawSceneId)
   if (rawSceneId && !safeSceneId) {
     return { error: 'INVALID_SCENE' }
+  }
+  if (safeSceneId === 'festival_theme') {
+    return { error: 'SCENE_NOT_SELECTABLE' }
   }
 
   if (safeSceneId) {
@@ -666,6 +671,110 @@ function toChinaDayKeyByMs(input) {
   const m = `${date.getUTCMonth() + 1}`.padStart(2, '0')
   const d = `${date.getUTCDate()}`.padStart(2, '0')
   return `${y}-${m}-${d}`
+}
+
+function normalizeFestivalThemeTag(value = '') {
+  const safe = String(value || '').trim().replace(/\s+/g, '')
+  if (!safe) return ''
+  return safe.slice(0, 8)
+}
+
+function normalizeFestivalThemeTagList(input = [], max = MAX_FESTIVAL_THEME_TAGS) {
+  const source = Array.isArray(input)
+    ? input
+    : String(input || '').split(/[,\n，、;；]/g)
+  const next = []
+  source.forEach((item) => {
+    const safe = normalizeFestivalThemeTag(item)
+    if (!safe || next.includes(safe)) return
+    next.push(safe)
+  })
+  return next.slice(0, Math.max(0, Number(max) || MAX_FESTIVAL_THEME_TAGS))
+}
+
+function normalizeFestivalLocationKeywords(input = []) {
+  const source = Array.isArray(input)
+    ? input
+    : String(input || '').split(/[,\n，、;；]/g)
+  const next = []
+  source.forEach((item) => {
+    const safe = String(item || '').trim().toLowerCase().slice(0, 20)
+    if (!safe || next.includes(safe)) return
+    next.push(safe)
+  })
+  return next.slice(0, 6)
+}
+
+async function loadFestivalThemeRules(cityId = '') {
+  const safeCityId = String(cityId || DEFAULT_CITY_CONFIG.cityId).trim() || DEFAULT_CITY_CONFIG.cityId
+  const preferred = String(process.env.FESTIVAL_THEME_COLLECTION || '').trim()
+  const candidates = preferred
+    ? [preferred, ...FESTIVAL_THEME_COLLECTION_CANDIDATES]
+    : FESTIVAL_THEME_COLLECTION_CANDIDATES
+  for (let i = 0; i < candidates.length; i += 1) {
+    const collectionName = String(candidates[i] || '').trim()
+    if (!collectionName) continue
+    try {
+      const { data } = await db.collection(collectionName)
+        .where({
+          cityId: safeCityId,
+          isActive: _.neq(false),
+        })
+        .limit(120)
+        .field({
+          _id: true,
+          themeShortName: true,
+          shortName: true,
+          title: true,
+          startDayKey: true,
+          endDayKey: true,
+          locationKeywords: true,
+        })
+        .get()
+      const list = Array.isArray(data) ? data : []
+      return list
+        .map((item) => ({
+          id: String(item._id || '').trim(),
+          shortName: normalizeFestivalThemeTag(item.themeShortName || item.shortName || item.title || ''),
+          startDayKey: String(item.startDayKey || '').trim(),
+          endDayKey: String(item.endDayKey || '').trim(),
+          locationKeywords: normalizeFestivalLocationKeywords(item.locationKeywords || []),
+        }))
+        .filter((item) => item.shortName && item.startDayKey && item.endDayKey)
+        .sort((a, b) => String(a.startDayKey).localeCompare(String(b.startDayKey)))
+    } catch (e) {}
+  }
+  return []
+}
+
+function resolveFestivalThemeAutoMatch({
+  rules = [],
+  startDayKey = '',
+  title = '',
+  description = '',
+  address = '',
+} = {}) {
+  const safeDayKey = String(startDayKey || '').trim()
+  const haystack = `${String(title || '')} ${String(description || '')} ${String(address || '')}`.toLowerCase()
+  const tags = []
+  const ruleIds = []
+  ;(Array.isArray(rules) ? rules : []).forEach((rule) => {
+    if (!rule) return
+    const dateMatched = safeDayKey
+      && String(rule.startDayKey || '').trim()
+      && String(rule.endDayKey || '').trim()
+      && safeDayKey >= String(rule.startDayKey).trim()
+      && safeDayKey <= String(rule.endDayKey).trim()
+    const locationMatched = Array.isArray(rule.locationKeywords)
+      && rule.locationKeywords.some((keyword) => keyword && haystack.includes(String(keyword).toLowerCase()))
+    if (!dateMatched && !locationMatched) return
+    if (rule.shortName && !tags.includes(rule.shortName)) tags.push(rule.shortName)
+    if (rule.id && !ruleIds.includes(rule.id)) ruleIds.push(rule.id)
+  })
+  return {
+    tags: normalizeFestivalThemeTagList(tags, MAX_FESTIVAL_THEME_TAGS),
+    ruleIds: ruleIds.slice(0, MAX_FESTIVAL_THEME_TAGS),
+  }
 }
 
 function normalizeMarketLink(raw = null, startMs = NaN) {
@@ -1027,6 +1136,7 @@ exports.main = async (event, context) => {
   const startMs = new Date(startTime).getTime()
   const endMs   = new Date(endTime).getTime()
   const normalizedMarketLink = normalizeMarketLink(marketLink, startMs)
+  const startDayKey = toChinaDayKeyByMs(startMs)
 
   if (startMs <= now) {
     return { success: false, error: 'START_PASSED', message: '开始时间不能早于现在' }
@@ -1083,6 +1193,17 @@ exports.main = async (event, context) => {
   // 4. 写入数据库
   const trustProfile = buildTrustProfileForPublish(user)
   const baseEffectiveScore = getBaseEffectiveScore(trustProfile.trustLevel)
+  const festivalThemeRules = await loadFestivalThemeRules(finalCityId)
+  const festivalThemeAutoMatch = resolveFestivalThemeAutoMatch({
+    rules: festivalThemeRules,
+    startDayKey,
+    title,
+    description,
+    address,
+  })
+  const festivalThemeTagsAuto = normalizeFestivalThemeTagList(festivalThemeAutoMatch.tags)
+  const festivalThemeTags = festivalThemeTagsAuto
+  const festivalThemeSource = festivalThemeTags.length ? 'auto' : 'none'
   const publishRiskGate = resolvePublishRiskGate({
     typeId: finalTypeId,
     title,
@@ -1158,6 +1279,12 @@ exports.main = async (event, context) => {
       publishRiskLevel: publishRiskGate.level,
       publishRiskReasonCodes: publishRiskGate.reasonCodes,
       publishForceManualReview: !isAdmin && publishRiskGate.forceManualReview,
+      festivalThemeTagsAuto,
+      festivalThemeTagsManual: [],
+      festivalThemeTags,
+      festivalThemeSource,
+      festivalThemeMatchedRuleIds: festivalThemeAutoMatch.ruleIds,
+      festivalThemeMatchedAt: db.serverDate(),
       isOfficial,
       officialOwnerType: isOfficial ? 'platform_admin' : 'user',
       officialThemeIds: isOfficial ? finalThemeIds : [],
@@ -1274,6 +1401,8 @@ exports.main = async (event, context) => {
     isOfficial,
     publishRiskLevel: publishRiskGate.level,
     publishRiskReasonCodes: publishRiskGate.reasonCodes,
+    festivalThemeTags,
+    festivalThemeSource,
     cityConfigVersion: cityConfig.version,
     serverTimestamp: Date.now(),
   }

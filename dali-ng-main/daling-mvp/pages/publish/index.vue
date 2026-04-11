@@ -122,7 +122,7 @@
               <text class="arrow">›</text>
             </view>
           </picker>
-          <text v-if="marketDateLocked" class="hint">集市同行日期已锁定：{{ lockedDateLabel }}（可调整时分）</text>
+          <text v-if="marketDateLocked" class="hint">同行日期已锁定：{{ lockedDateLabel }}（可调整时分）</text>
         </view>
 
         <!-- 时长 -->
@@ -1301,6 +1301,7 @@ _doChooseLocation() {
             IDENTITY_CHECK_REQUIRED: '当前账号需补充身份核验',
             INVALID_TITLE: '标题格式有误',
             INVALID_SCENE: '请选择有效活动场景',
+            SCENE_NOT_SELECTABLE: '节庆主题由系统自动匹配，无需手动选择',
             INVALID_TYPE: '请选择有效活动类型',
             INVALID_CHARGE_TYPE: '收费方式不合法',
             INVALID_FEE_AMOUNT: '付费金额不合法',

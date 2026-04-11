@@ -9,6 +9,7 @@ const OFFICIAL_ROLE_SET = new Set(['official', 'city_operator', 'cityoperator', 
 const OFFICIAL_TYPE_SET = new Set(['official', 'cohost', 'co_host', 'brand_partner', 'copublish', 'co_publish'])
 const RECURRING_RULE_COLLECTION_CANDIDATES = ['officialCalendarRules', 'officialRecurringRules']
 const RECURRING_EXCEPTION_COLLECTION_CANDIDATES = ['officialCalendarExceptions', 'officialRecurringExceptions']
+const FESTIVAL_THEME_COLLECTION_CANDIDATES = ['festivalThemes', 'officialFestivalThemes']
 
 const FIXED_MARKET_RULES = {
   dali: [
@@ -212,6 +213,7 @@ function isOfficialActivityItem(item = {}, officialPublisherSet = new Set()) {
 function calendarPriority(item = {}) {
   if (item?.isRecommended) return 10
   if (item?.source === 'official_activity') return 20
+  if (item?.source === 'festival_theme') return 25
   if (item?.source === 'market') return 30
   if (item?.source === 'official_preview') return 40
   return 99
@@ -477,6 +479,88 @@ async function loadRecurringExceptions(cityId = 'dali', startMs, endMs) {
   }, [])
 }
 
+function normalizeFestivalThemeTag(value = '') {
+  const safe = String(value || '').trim().replace(/\s+/g, '')
+  if (!safe) return ''
+  return safe.slice(0, 8)
+}
+
+function normalizeFestivalLocationKeywords(input = []) {
+  const source = Array.isArray(input)
+    ? input
+    : String(input || '').split(/[,\n，、;；]/g)
+  const next = []
+  source.forEach((item) => {
+    const safe = String(item || '').trim().toLowerCase().slice(0, 20)
+    if (!safe || next.includes(safe)) return
+    next.push(safe)
+  })
+  return next.slice(0, 6)
+}
+
+function formatDayKeyDisplay(dayKey = '') {
+  const [y, m, d] = String(dayKey || '').split('-')
+  if (!y || !m || !d) return dayKey
+  return `${Number(m)}月${Number(d)}日`
+}
+
+function normalizeFestivalThemeRule(raw = {}, index = 0) {
+  const id = String(raw._id || raw.themeId || `festival_theme_${index}`).trim()
+  const shortName = normalizeFestivalThemeTag(raw.themeShortName || raw.shortName || raw.title || '')
+  const startDayKey = String(raw.startDayKey || '').trim()
+  const endDayKey = String(raw.endDayKey || '').trim()
+  if (!id || !shortName || !startDayKey || !endDayKey) return null
+  if (startDayKey > endDayKey) return null
+  return {
+    id,
+    shortName,
+    title: shortName,
+    intro: String(raw.intro || raw.note || '').trim().slice(0, 120),
+    startDayKey,
+    endDayKey,
+    locationKeywords: normalizeFestivalLocationKeywords(raw.locationKeywords || []),
+    categoryId: String(raw.categoryId || 'culture').trim() || 'culture',
+    categoryLabel: String(raw.categoryLabel || '文化').trim() || '文化',
+    organizer: String(raw.organizer || '搭里运营').trim() || '搭里运营',
+    location: raw.location && typeof raw.location === 'object' ? raw.location : {},
+    launchHint: String(raw.launchHint || '节庆同行').trim() || '节庆同行',
+  }
+}
+
+async function loadFestivalThemeRules(cityId = 'dali') {
+  const preferred = String(process.env.FESTIVAL_THEME_COLLECTION || '').trim()
+  const candidates = preferred
+    ? [preferred, ...FESTIVAL_THEME_COLLECTION_CANDIDATES]
+    : FESTIVAL_THEME_COLLECTION_CANDIDATES
+  return readCollectionFirstAvailable(candidates, async (collectionName) => {
+    const { data } = await db.collection(collectionName)
+      .where({
+        cityId,
+        isActive: _.neq(false),
+      })
+      .limit(200)
+      .field({
+        _id: true,
+        cityId: true,
+        themeShortName: true,
+        shortName: true,
+        title: true,
+        intro: true,
+        note: true,
+        startDayKey: true,
+        endDayKey: true,
+        locationKeywords: true,
+        categoryId: true,
+        categoryLabel: true,
+        organizer: true,
+        location: true,
+        launchHint: true,
+      })
+      .get()
+    return data || []
+  }, [])
+}
+
 function normalizeRecurringRule(raw = {}, index = 0) {
   const id = String(raw.ruleId || raw._id || `rec_rule_${index}`).trim()
   if (!id) return null
@@ -649,7 +733,10 @@ function mergeCalendarItemsDedup(items = []) {
 function buildMarketRulesResponse(cityId = 'dali') {
   return buildMarketRules(cityId).map((rule) => ({
     id: rule.id,
+    sourceType: 'market',
     title: rule.title,
+    shortName: rule.title,
+    scheduleLabel: '频次',
     scheduleText: rule.scheduleText,
     location: rule.location || {},
     note: rule.note || '无需报名，可直接前往',
@@ -657,6 +744,28 @@ function buildMarketRulesResponse(cityId = 'dali') {
     categoryId: rule.categoryId || 'culture',
     categoryLabel: rule.categoryLabel || '文化',
   }))
+}
+
+function buildFestivalRulesResponse(rules = []) {
+  return (Array.isArray(rules) ? rules : [])
+    .map((rule, idx) => normalizeFestivalThemeRule(rule, idx))
+    .filter(Boolean)
+    .sort((a, b) => String(a.startDayKey).localeCompare(String(b.startDayKey)))
+    .map((rule) => ({
+      id: rule.id,
+      sourceType: 'festival_theme',
+      title: rule.title,
+      shortName: rule.shortName,
+      scheduleLabel: '日期',
+      scheduleText: `${formatDayKeyDisplay(rule.startDayKey)} - ${formatDayKeyDisplay(rule.endDayKey)}`,
+      location: rule.location || {},
+      note: rule.intro || '节庆主题窗口，可发起同行或参与已有同行。',
+      launchHint: rule.launchHint || '节庆同行',
+      categoryId: rule.categoryId || 'culture',
+      categoryLabel: rule.categoryLabel || '文化',
+      startDayKey: rule.startDayKey,
+      endDayKey: rule.endDayKey,
+    }))
 }
 
 function expandMarketEvents({ cityId = 'dali', startMs, endMs }) {
@@ -715,10 +824,60 @@ function expandMarketEvents({ cityId = 'dali', startMs, endMs }) {
   return result
 }
 
+function expandFestivalThemeEvents({ rules = [], startMs, endMs }) {
+  const normalizedRules = (Array.isArray(rules) ? rules : [])
+    .map((rule, idx) => normalizeFestivalThemeRule(rule, idx))
+    .filter(Boolean)
+  if (!normalizedRules.length) return []
+  const result = []
+  for (let i = 0; i < normalizedRules.length; i += 1) {
+    const rule = normalizedRules[i]
+    const startDate = buildDateFromDayKey(rule.startDayKey, '00:00')
+    const endDate = buildDateFromDayKey(rule.endDayKey, '23:59')
+    const startTs = startDate.getTime()
+    const endTs = endDate.getTime()
+    if (!Number.isFinite(startTs) || !Number.isFinite(endTs) || endTs < startTs) continue
+    const cursorStart = Math.max(startTs, startMs)
+    const cursorEnd = Math.min(endTs, endMs - 1)
+    if (cursorEnd < cursorStart) continue
+    for (let cursor = cursorStart; cursor <= cursorEnd; cursor += DAY_MS) {
+      const dayKey = toChinaDayKey(cursor)
+      if (!dayKey || dayKey < rule.startDayKey || dayKey > rule.endDayKey) continue
+      const dayStart = buildDateFromDayKey(dayKey, '00:00')
+      const dayEnd = buildDateFromDayKey(dayKey, '23:59')
+      const dayStartTs = dayStart.getTime()
+      if (!Number.isFinite(dayStartTs) || dayStartTs < startMs || dayStartTs >= endMs) continue
+      result.push({
+        source: 'festival_theme',
+        _id: `festival_${rule.id}_${dayKey}`,
+        marketId: rule.id,
+        themeShortName: rule.shortName,
+        title: rule.shortName,
+        categoryId: rule.categoryId || 'culture',
+        categoryLabel: rule.categoryLabel || '文化',
+        startTime: dayStart,
+        endTime: dayEnd,
+        location: rule.location || {},
+        quota: 0,
+        joined: null,
+        organizer: rule.organizer || '搭里运营',
+        note: rule.intro || '节庆主题窗口，可发起同行或参与已有同行。',
+        scheduleText: `${formatDayKeyDisplay(rule.startDayKey)} - ${formatDayKeyDisplay(rule.endDayKey)}`,
+        isSignupRequired: false,
+        activityId: '',
+        launchHint: rule.launchHint || '节庆同行',
+        isRecommended: false,
+      })
+    }
+  }
+  return result
+}
+
 function summarizeDayItems(items = []) {
-  const summary = { market: 0, officialActivity: 0, officialRecommended: 0, officialPreview: 0 }
+  const summary = { market: 0, festivalTheme: 0, officialActivity: 0, officialRecommended: 0, officialPreview: 0 }
   items.forEach((item) => {
     if (item.source === 'market') summary.market += 1
+    else if (item.source === 'festival_theme') summary.festivalTheme += 1
     else if (item.source === 'official_activity') summary.officialActivity += 1
     else if (item.source === 'official_recommended') summary.officialRecommended += 1
     else if (item.source === 'official_preview') summary.officialPreview += 1
@@ -816,6 +975,12 @@ exports.main = async (event = {}) => {
     .catch(() => ({ data: [] }))
 
   const marketEvents = expandMarketEvents({ cityId, startMs, endMs })
+  const festivalThemeRules = await loadFestivalThemeRules(cityId)
+  const festivalThemeEvents = expandFestivalThemeEvents({
+    rules: festivalThemeRules,
+    startMs,
+    endMs,
+  })
   const recurringRules = await loadRecurringRules(cityId)
   const recurringExceptions = await loadRecurringExceptions(cityId, startMs, endMs)
   const recurringEvents = expandRecurringEvents({
@@ -843,6 +1008,7 @@ exports.main = async (event = {}) => {
       isRecommended: false,
     })),
     ...marketEvents,
+    ...festivalThemeEvents,
     ...recurringEvents,
   ])
 
@@ -894,7 +1060,10 @@ exports.main = async (event = {}) => {
     days: range.days,
     mode: range.mode,
     monthMeta,
-    marketRules: buildMarketRulesResponse(cityId),
+    marketRules: [
+      ...buildMarketRulesResponse(cityId),
+      ...buildFestivalRulesResponse(festivalThemeRules),
+    ],
     calendarDays,
     totalItems: merged.length,
     recurringMeta: {

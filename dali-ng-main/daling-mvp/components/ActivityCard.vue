@@ -4,6 +4,11 @@
     <!-- 标签行 -->
     <view class="tags">
       <text v-if="activity.isRecommended" class="tag tag--recommend">官方推荐</text>
+      <text
+        v-for="festivalTag in festivalThemeTags"
+        :key="`festival-${activity._id}-${festivalTag}`"
+        class="tag tag--festival"
+      >{{ festivalTag }}</text>
       <text v-if="activity.isVerified" class="tag tag--verified">已实名</text>
       <text class="tag tag--category">{{ categoryLabel }}</text>
       <text class="tag tag--social">{{ socialEnergyLabel }}</text>
@@ -127,6 +132,12 @@ export default {
       return Array.isArray(this.trustProfile.riskTags) ? this.trustProfile.riskTags.slice(0, 2) : []
     },
 
+    festivalThemeTags() {
+      return Array.isArray(this.activity?.festivalThemeTags)
+        ? this.activity.festivalThemeTags.slice(0, 2)
+        : []
+    },
+
     categoryLabel() {
       if (this.activity?.typeName) return this.activity.typeName
       if (this.activity?.sceneName) return this.activity.sceneName
@@ -171,6 +182,7 @@ export default {
   border-radius: 8rpx;
 }
 .tag--recommend { background: #FFF3CD; color: #856404; }
+.tag--festival  { background: #CCFBF1; color: #0F766E; }
 .tag--verified  { background: #EEF7EE; color: #1E7145; }
 .tag--category  { background: #F0F7FF; color: #1E5EA8; }
 .tag--social    { background: #F2F4F7; color: #344054; }

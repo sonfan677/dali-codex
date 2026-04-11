@@ -101,6 +101,25 @@ function parseAdminMeta(openid) {
   }
 }
 
+function normalizeFestivalThemeTag(value = '') {
+  const safe = String(value || '').trim().replace(/\s+/g, '')
+  if (!safe) return ''
+  return safe.slice(0, 8)
+}
+
+function normalizeFestivalThemeTagList(input = [], max = 5) {
+  const source = Array.isArray(input)
+    ? input
+    : String(input || '').split(/[,\n，、;；]/g)
+  const next = []
+  source.forEach((item) => {
+    const safe = normalizeFestivalThemeTag(item)
+    if (!safe || next.includes(safe)) return
+    next.push(safe)
+  })
+  return next.slice(0, Math.max(0, Number(max) || 5))
+}
+
 async function getActivitySnapshot(targetId) {
   try {
     const res = await db.collection('activities').doc(targetId).get()
@@ -359,6 +378,43 @@ exports.main = async (event) => {
         message: action === 'approve_publish'
           ? '活动已审核通过并发布'
           : '活动已驳回'
+      }
+      break
+    }
+
+    case 'set_festival_tags': {
+      finalTargetType = finalTargetType || 'activity'
+      linkedActivityId = targetId
+      beforeState = await getActivitySnapshot(targetId)
+      if (!beforeState) {
+        return { success: false, error: 'NOT_FOUND', message: '活动不存在' }
+      }
+      if (adminRole === 'cityAdmin' && beforeState.cityId && beforeState.cityId !== adminCityId) {
+        return { success: false, error: 'CITY_SCOPE_DENIED', message: '无该城市权限' }
+      }
+
+      const manualTags = normalizeFestivalThemeTagList(event.festivalThemeTags || [])
+      const autoTags = normalizeFestivalThemeTagList(beforeState.festivalThemeTagsAuto || [])
+      const effectiveTags = manualTags.length > 0 ? manualTags : autoTags
+      const source = manualTags.length > 0
+        ? 'manual'
+        : (effectiveTags.length > 0 ? 'auto' : 'none')
+
+      await db.collection('activities').doc(targetId).update({
+        data: {
+          festivalThemeTagsManual: manualTags,
+          festivalThemeTags: effectiveTags,
+          festivalThemeSource: source,
+          festivalThemeManualUpdatedBy: OPENID,
+          festivalThemeManualUpdatedAt: db.serverDate(),
+          updatedAt: db.serverDate(),
+        },
+      })
+      afterState = await getActivitySnapshot(targetId)
+      result = {
+        message: manualTags.length > 0
+          ? '节庆主题标签已更新（人工覆盖）'
+          : '已清除人工覆盖，恢复自动节庆主题标签',
       }
       break
     }

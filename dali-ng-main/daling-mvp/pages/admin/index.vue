@@ -1133,6 +1133,53 @@
           </view>
         </view>
 
+        <view class="card">
+          <view class="title-row">
+            <text class="card-title">节庆主题维护</text>
+            <text class="status-pill status-pill--log">{{ festivalThemeRuleList.length }}</text>
+          </view>
+          <text class="card-openid">规则优先级：人工覆盖 > 自动日期/地点匹配</text>
+          <view class="card-actions card-actions--single">
+            <button
+              class="action-btn action-btn--detail"
+              :disabled="festivalThemeLoading || festivalThemeSaving"
+              @tap="loadFestivalThemeRules"
+            >{{ festivalThemeLoading ? '刷新中...' : '刷新规则' }}</button>
+            <button
+              class="action-btn action-btn--approve"
+              :disabled="festivalThemeSaving"
+              @tap="createFestivalThemeRule"
+            >新增节庆主题</button>
+          </view>
+          <view v-if="festivalThemeRuleList.length === 0" class="empty empty--inline">
+            <text class="empty-text">暂无节庆主题规则</text>
+          </view>
+          <view
+            v-for="rule in festivalThemeRuleList"
+            :key="`festival-rule-${rule._id}`"
+            class="todo-item"
+          >
+            <view class="title-row">
+              <text class="card-sub">{{ rule.shortName || '节庆主题' }}</text>
+              <text class="card-openid">{{ rule.startDayKey }} ~ {{ rule.endDayKey }}</text>
+            </view>
+            <text class="card-openid">说明：{{ rule.intro || '节庆主题窗口，可发起同行或参与已有同行。' }}</text>
+            <text class="card-openid">地点关键词：{{ (rule.locationKeywords || []).join(' / ') || '--' }}</text>
+            <view class="card-actions">
+              <button
+                class="action-btn action-btn--detail mini-btn"
+                :disabled="festivalThemeSaving"
+                @tap="editFestivalThemeRule(rule)"
+              >编辑</button>
+              <button
+                class="action-btn action-btn--reject mini-btn"
+                :disabled="festivalThemeSaving"
+                @tap="removeFestivalThemeRule(rule)"
+              >删除</button>
+            </view>
+          </view>
+        </view>
+
         <view v-if="filteredActivityList.length === 0" class="empty">
           <text class="empty-text">暂无活动</text>
         </view>
@@ -1157,6 +1204,7 @@
               <text v-if="item.reportMeta && item.reportMeta.latestReason" class="card-openid">
                 最近举报：{{ item.reportMeta.latestReason }}
               </text>
+              <text class="card-openid">节庆标签：{{ festivalTagDisplayText(item) }}</text>
               <text class="card-openid">活动ID: {{ item._id ? item._id.slice(0,12) + '...' : '' }}</text>
             </view>
           </view>
@@ -1190,6 +1238,11 @@
               class="action-btn action-btn--reject"
               @tap="hideActivity(item._id)"
             >下架</button>
+            <button
+              class="action-btn action-btn--detail"
+              :disabled="festivalThemeSaving"
+              @tap="editActivityFestivalTags(item)"
+            >节庆标签</button>
           </view>
         </view>
       </template>
@@ -1713,6 +1766,9 @@ export default {
       activityList: [],
       actionLogList: [],
       userProfileList: [],
+      festivalThemeRuleList: [],
+      festivalThemeLoading: false,
+      festivalThemeSaving: false,
       exportSelectedFields: [
         'createdAt',
         'actionText',
@@ -2359,6 +2415,7 @@ export default {
           { label: '举报忽略', value: 'resolve_report_ignore' },
           { label: '发布通过', value: 'approve_publish' },
           { label: '发布驳回', value: 'reject_publish' },
+          { label: '节庆标签覆盖', value: 'set_festival_tags' },
           { label: '巡检执行', value: 'ops_patrol_run' },
           { label: '巡检告警', value: 'ops_patrol_alert' },
         ]
@@ -3074,6 +3131,292 @@ export default {
         uni.showToast({ title: '维护步骤已复制', icon: 'success' })
       } catch (e) {
         uni.showToast({ title: '复制失败，请重试', icon: 'none' })
+      }
+    },
+
+    normalizeFestivalThemeTag(value = '') {
+      const safe = String(value || '').trim().replace(/\s+/g, '')
+      if (!safe) return ''
+      return safe.slice(0, 8)
+    },
+
+    normalizeFestivalThemeTagList(input = [], max = 5) {
+      const source = Array.isArray(input)
+        ? input
+        : String(input || '').split(/[,\n，、;；]/g)
+      const next = []
+      source.forEach((item) => {
+        const safe = this.normalizeFestivalThemeTag(item)
+        if (!safe || next.includes(safe)) return
+        next.push(safe)
+      })
+      return next.slice(0, Math.max(0, Number(max) || 5))
+    },
+
+    normalizeFestivalLocationKeywords(input = []) {
+      const source = Array.isArray(input)
+        ? input
+        : String(input || '').split(/[,\n，、;；]/g)
+      const next = []
+      source.forEach((item) => {
+        const safe = String(item || '').trim().toLowerCase().slice(0, 20)
+        if (!safe || next.includes(safe)) return
+        next.push(safe)
+      })
+      return next.slice(0, 6)
+    },
+
+    askEditableModal({
+      title = '',
+      placeholder = '',
+      value = '',
+      cancelText = '取消',
+      confirmText = '确定',
+    } = {}) {
+      return new Promise((resolve) => {
+        uni.showModal({
+          title,
+          editable: true,
+          placeholderText: placeholder,
+          content: String(value || ''),
+          cancelText,
+          confirmText,
+          success: (res) => {
+            if (!res.confirm) {
+              resolve({ cancelled: true, value: '' })
+              return
+            }
+            resolve({ cancelled: false, value: String(res.content || '').trim() })
+          },
+          fail: () => resolve({ cancelled: true, value: '' }),
+        })
+      })
+    },
+
+    async buildFestivalThemePayload(initial = {}) {
+      const shortNameInput = await this.askEditableModal({
+        title: '节庆短名（最多8字）',
+        placeholder: '例如：劳动节',
+        value: initial.shortName || '',
+      })
+      if (shortNameInput.cancelled) return null
+      const shortName = this.normalizeFestivalThemeTag(shortNameInput.value)
+      if (!shortName) {
+        uni.showToast({ title: '请填写节庆短名', icon: 'none' })
+        return null
+      }
+
+      const startInput = await this.askEditableModal({
+        title: '开始日期',
+        placeholder: 'YYYY-MM-DD',
+        value: initial.startDayKey || '',
+      })
+      if (startInput.cancelled) return null
+      const startDayKey = String(startInput.value || '').trim()
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(startDayKey)) {
+        uni.showToast({ title: '开始日期格式错误', icon: 'none' })
+        return null
+      }
+
+      const endInput = await this.askEditableModal({
+        title: '结束日期',
+        placeholder: 'YYYY-MM-DD',
+        value: initial.endDayKey || '',
+      })
+      if (endInput.cancelled) return null
+      const endDayKey = String(endInput.value || '').trim()
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(endDayKey)) {
+        uni.showToast({ title: '结束日期格式错误', icon: 'none' })
+        return null
+      }
+      if (startDayKey > endDayKey) {
+        uni.showToast({ title: '结束日期不能早于开始日期', icon: 'none' })
+        return null
+      }
+
+      const introInput = await this.askEditableModal({
+        title: '说明文案（可选）',
+        placeholder: '例如：劳动节假期主题活动窗口',
+        value: initial.intro || '',
+      })
+      if (introInput.cancelled) return null
+      const intro = String(introInput.value || '').trim().slice(0, 120)
+
+      const keywordInput = await this.askEditableModal({
+        title: '地点关键词（可选）',
+        placeholder: '多个关键词用逗号分隔',
+        value: Array.isArray(initial.locationKeywords) ? initial.locationKeywords.join(',') : '',
+      })
+      if (keywordInput.cancelled) return null
+      const locationKeywords = this.normalizeFestivalLocationKeywords(keywordInput.value || '')
+
+      return {
+        shortName,
+        intro,
+        startDayKey,
+        endDayKey,
+        locationKeywords,
+      }
+    },
+
+    festivalTagDisplayText(item = {}) {
+      const source = String(item?.festivalThemeSource || 'none')
+      const effective = Array.isArray(item?.festivalThemeTags) ? item.festivalThemeTags : []
+      const manual = Array.isArray(item?.festivalThemeTagsManual) ? item.festivalThemeTagsManual : []
+      const auto = Array.isArray(item?.festivalThemeTagsAuto) ? item.festivalThemeTagsAuto : []
+      const effectiveText = effective.length ? effective.join(' / ') : '无'
+      if (source === 'manual') return `${effectiveText}（人工覆盖）`
+      if (source === 'auto') return `${effectiveText}（自动）`
+      if (manual.length || auto.length) return `${effectiveText}（${source || '未知'}）`
+      return '无'
+    },
+
+    async loadFestivalThemeRules({ silent = false } = {}) {
+      if (this.festivalThemeLoading) return
+      this.festivalThemeLoading = true
+      try {
+        const ret = await callCloud('manageFestivalThemes', {
+          action: 'list',
+          cityId: this.cityId || 'dali',
+        })
+        if (!ret?.success) {
+          if (!silent) uni.showToast({ title: ret?.message || '加载节庆规则失败', icon: 'none' })
+          return
+        }
+        this.festivalThemeRuleList = Array.isArray(ret.themes) ? ret.themes : []
+        if (!silent) uni.showToast({ title: '节庆规则已刷新', icon: 'success' })
+      } catch (e) {
+        if (!silent) uni.showToast({ title: '加载节庆规则失败', icon: 'none' })
+      } finally {
+        this.festivalThemeLoading = false
+      }
+    },
+
+    async createFestivalThemeRule() {
+      if (this.festivalThemeSaving) return
+      const payload = await this.buildFestivalThemePayload()
+      if (!payload) return
+      this.festivalThemeSaving = true
+      try {
+        const ret = await callCloud('manageFestivalThemes', {
+          action: 'upsert',
+          cityId: this.cityId || 'dali',
+          ...payload,
+        })
+        if (ret?.success) {
+          this.festivalThemeRuleList = Array.isArray(ret.themes) ? ret.themes : this.festivalThemeRuleList
+          uni.showToast({ title: ret?.message || '新增成功', icon: 'success' })
+          await this.loadData()
+        } else {
+          uni.showToast({ title: ret?.message || '新增失败', icon: 'none' })
+        }
+      } catch (e) {
+        uni.showToast({ title: '新增失败，请重试', icon: 'none' })
+      } finally {
+        this.festivalThemeSaving = false
+      }
+    },
+
+    async editFestivalThemeRule(rule = {}) {
+      if (this.festivalThemeSaving) return
+      const payload = await this.buildFestivalThemePayload(rule)
+      if (!payload) return
+      const themeId = String(rule?._id || '').trim()
+      if (!themeId) return
+      this.festivalThemeSaving = true
+      try {
+        const ret = await callCloud('manageFestivalThemes', {
+          action: 'upsert',
+          cityId: this.cityId || 'dali',
+          themeId,
+          ...payload,
+        })
+        if (ret?.success) {
+          this.festivalThemeRuleList = Array.isArray(ret.themes) ? ret.themes : this.festivalThemeRuleList
+          uni.showToast({ title: ret?.message || '更新成功', icon: 'success' })
+          await this.loadData()
+        } else {
+          uni.showToast({ title: ret?.message || '更新失败', icon: 'none' })
+        }
+      } catch (e) {
+        uni.showToast({ title: '更新失败，请重试', icon: 'none' })
+      } finally {
+        this.festivalThemeSaving = false
+      }
+    },
+
+    async removeFestivalThemeRule(rule = {}) {
+      if (this.festivalThemeSaving) return
+      const themeId = String(rule?._id || '').trim()
+      if (!themeId) return
+      uni.showModal({
+        title: '确认删除节庆主题？',
+        content: `将删除「${rule.shortName || rule.title || '节庆主题'}」`,
+        success: async (res) => {
+          if (!res.confirm) return
+          this.festivalThemeSaving = true
+          try {
+            const ret = await callCloud('manageFestivalThemes', {
+              action: 'remove',
+              cityId: this.cityId || 'dali',
+              themeId,
+            })
+            if (ret?.success) {
+              this.festivalThemeRuleList = Array.isArray(ret.themes) ? ret.themes : this.festivalThemeRuleList
+              uni.showToast({ title: ret?.message || '删除成功', icon: 'success' })
+              await this.loadData()
+            } else {
+              uni.showToast({ title: ret?.message || '删除失败', icon: 'none' })
+            }
+          } catch (e) {
+            uni.showToast({ title: '删除失败，请重试', icon: 'none' })
+          } finally {
+            this.festivalThemeSaving = false
+          }
+        },
+      })
+    },
+
+    async editActivityFestivalTags(item = {}) {
+      const activityId = String(item?._id || '').trim()
+      if (!activityId) return
+      const currentManual = Array.isArray(item?.festivalThemeTagsManual) ? item.festivalThemeTagsManual : []
+      const currentAuto = Array.isArray(item?.festivalThemeTagsAuto) ? item.festivalThemeTagsAuto : []
+      const currentEffective = Array.isArray(item?.festivalThemeTags) ? item.festivalThemeTags : []
+      const preset = currentManual.length ? currentManual.join(',') : currentEffective.join(',')
+      const input = await this.askEditableModal({
+        title: '节庆标签（人工覆盖）',
+        placeholder: '多个标签用逗号分隔；留空可清除人工覆盖',
+        value: preset,
+      })
+      if (input.cancelled) return
+      const manualTags = this.normalizeFestivalThemeTagList(input.value || '', 5)
+      const reason = manualTags.length > 0
+        ? `手动覆盖节庆标签：${manualTags.join('/')}`
+        : `清除人工覆盖，恢复自动标签（当前自动：${currentAuto.join('/') || '无'}）`
+      this.festivalThemeSaving = true
+      try {
+        const ret = await callCloud('adminAction', {
+          action: 'set_festival_tags',
+          targetId: activityId,
+          targetType: 'activity',
+          festivalThemeTags: manualTags,
+          reason,
+          actionSource: 'human',
+          manualOverride: true,
+          canAutoExecute: true,
+          notifyAfterAction: false,
+        })
+        if (ret?.success) {
+          uni.showToast({ title: ret?.message || '节庆标签已更新', icon: 'success' })
+          await this.loadData()
+        } else {
+          uni.showToast({ title: ret?.message || '更新失败', icon: 'none' })
+        }
+      } catch (e) {
+        uni.showToast({ title: '更新失败，请重试', icon: 'none' })
+      } finally {
+        this.festivalThemeSaving = false
       }
     },
 
@@ -3971,6 +4314,7 @@ export default {
         const pendingVerifyOpenidSet = new Set((this.pendingVerifyList || []).map((item) => item._openid).filter(Boolean))
         this.selectedVerifyOpenids = this.selectedVerifyOpenids.filter((id) => pendingVerifyOpenidSet.has(id))
         await this.loadCalendarOpsSummary({ silent: true })
+        await this.loadFestivalThemeRules({ silent: true })
         this.autoArchiveDailyReport()
       } catch(e) {
         console.error('加载管理数据失败', e)
@@ -4627,6 +4971,7 @@ export default {
         recommend: '设为推荐',
         unrecommend: '取消推荐',
         hide: '手动下架活动',
+        set_festival_tags: '节庆标签人工覆盖',
         approve_publish: '通过发布审核',
         reject_publish: '驳回发布审核',
         verify: '通过身份核验',
