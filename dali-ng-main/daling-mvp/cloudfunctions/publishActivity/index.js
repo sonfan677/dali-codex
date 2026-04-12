@@ -436,7 +436,7 @@ function resolveSceneTypeForPublish({
       }
       return {
         sceneId: safeSceneId,
-        sceneName: SCENE_LABEL_MAP[safeSceneId] || '未分类场景',
+        sceneName: SCENE_LABEL_MAP[safeSceneId] || '未分类类型',
         typeId: buildCustomTypeId(finalCustomTypeName),
         typeName: finalCustomTypeName,
         customTypeName: finalCustomTypeName,
@@ -448,7 +448,7 @@ function resolveSceneTypeForPublish({
     if (!typeDef || !String(typeId || '').trim()) return { error: 'INVALID_TYPE' }
     return {
       sceneId: safeSceneId,
-      sceneName: SCENE_LABEL_MAP[safeSceneId] || '未分类场景',
+      sceneName: SCENE_LABEL_MAP[safeSceneId] || '未分类类型',
       typeId: typeDef.id,
       typeName: typeDef.name || '未分类',
       categoryId: normalizeCategoryId(typeDef.categoryId || 'other'),
@@ -461,7 +461,7 @@ function resolveSceneTypeForPublish({
   if (fallbackSceneId === CUSTOM_SCENE_ID) {
     return {
       sceneId: fallbackSceneId,
-      sceneName: SCENE_LABEL_MAP[fallbackSceneId] || '未分类场景',
+      sceneName: SCENE_LABEL_MAP[fallbackSceneId] || '未分类类型',
       typeId: '',
       typeName: '其它',
       categoryId: 'other',
@@ -470,7 +470,7 @@ function resolveSceneTypeForPublish({
   const fallbackTypeDef = getTypeDef(fallbackSceneId, fallback.typeId)
   return {
     sceneId: fallbackSceneId,
-    sceneName: SCENE_LABEL_MAP[fallbackSceneId] || '未分类场景',
+    sceneName: SCENE_LABEL_MAP[fallbackSceneId] || '未分类类型',
     typeId: fallbackTypeDef?.id || fallback.typeId,
     typeName: fallbackTypeDef?.name || '未分类',
     categoryId: normalizeCategoryId(fallbackTypeDef?.categoryId || normalizedCategoryId || 'other'),
@@ -703,7 +703,7 @@ async function recordCustomSceneTypeStat({
       },
     })
   } catch (e) {
-    console.error('记录其它场景自定义类型统计失败', e)
+    console.error('记录其它类型自定义场景统计失败', e)
   }
 }
 
@@ -1160,23 +1160,23 @@ exports.main = async (event, context) => {
   const lngNum = Number(lng)
   const sceneType = resolveSceneTypeForPublish({ sceneId, typeId, categoryId, customTypeName, typeName })
   if (sceneType?.error === 'INVALID_SCENE') {
-    return { success: false, error: 'INVALID_SCENE', message: '活动场景不合法' }
+    return { success: false, error: 'INVALID_SCENE', message: '活动类型不合法' }
   }
   if (sceneType?.error === 'INVALID_CUSTOM_TYPE') {
-    return { success: false, error: 'INVALID_CUSTOM_TYPE', message: '自定义活动类型不合法' }
+    return { success: false, error: 'INVALID_CUSTOM_TYPE', message: '自定义活动场景不合法' }
   }
   if (sceneType?.error === 'CUSTOM_TYPE_TOO_LONG') {
-    return { success: false, error: 'CUSTOM_TYPE_TOO_LONG', message: '自定义活动类型最多20字' }
+    return { success: false, error: 'CUSTOM_TYPE_TOO_LONG', message: '自定义活动场景最多20字' }
   }
   if (sceneType?.error === 'DUPLICATE_CUSTOM_TYPE') {
     return {
       success: false,
       error: 'DUPLICATE_CUSTOM_TYPE',
-      message: `自定义活动类型与现有类型“${sceneType.duplicateTypeName || ''}”重复`,
+      message: `自定义活动场景与现有场景“${sceneType.duplicateTypeName || ''}”重复`,
     }
   }
   if (sceneType?.error === 'INVALID_TYPE') {
-    return { success: false, error: 'INVALID_TYPE', message: '活动类型不合法' }
+    return { success: false, error: 'INVALID_TYPE', message: '活动场景不合法' }
   }
   const finalSceneId = String(sceneType?.sceneId || '').trim()
   const finalSceneName = String(sceneType?.sceneName || sceneName || '').trim()

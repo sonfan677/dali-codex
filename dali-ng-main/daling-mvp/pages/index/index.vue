@@ -347,9 +347,9 @@ export default {
     },
 
     categoryFilterLabel() {
-      if (this.categoryFilterId === 'all') return '场景'
+      if (this.categoryFilterId === 'all') return '类型'
       const item = this.categoryFilterOptions.find((opt) => opt.id === this.categoryFilterId)
-      return item?.label || '场景'
+      return item?.label || '类型'
     },
 
     distanceFilterLabel() {
@@ -901,7 +901,7 @@ export default {
     openCategoryFilter() {
       this.openFilterSelector({
         type: 'category',
-        title: '场景',
+        title: '类型',
         value: this.categoryFilterId,
         options: this.categoryFilterOptions,
       })

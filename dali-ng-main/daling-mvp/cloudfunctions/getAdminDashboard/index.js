@@ -751,7 +751,7 @@ function buildSceneCounterFromActivities(activityRows = [], filterFn = null) {
   const counter = {}
   ;(activityRows || []).forEach((item) => {
     if (typeof filterFn === 'function' && !filterFn(item)) return
-    const sceneName = String(item?.sceneName || '未分类场景').trim() || '未分类场景'
+    const sceneName = String(item?.sceneName || '未分类类型').trim() || '未分类类型'
     counter[sceneName] = Number(counter[sceneName] || 0) + 1
   })
   return counter
@@ -864,7 +864,7 @@ function buildOperationInsightCards(input = {}) {
   const groupRows = activities90.filter((item) => !!item.isGroupFormation)
   const formingByScene = {}
   groupRows.forEach((item) => {
-    const sceneName = String(item.sceneName || '未分类场景')
+    const sceneName = String(item.sceneName || '未分类类型')
     const minNeed = Number(item.minParticipants || 0)
     const current = Number(item.currentParticipants || 0)
     const formed = String(item.formationStatus || '') === 'CONFIRMED' || (minNeed > 0 && current >= minNeed)
@@ -899,7 +899,7 @@ function buildOperationInsightCards(input = {}) {
   const nightRows = activities90.filter((item) => isNightStart(item.startTime))
   const nightByScene = {}
   nightRows.forEach((item) => {
-    const sceneName = String(item.sceneName || '未分类场景')
+    const sceneName = String(item.sceneName || '未分类类型')
     nightByScene[sceneName] = nightByScene[sceneName] || { total: 0, participants: 0 }
     nightByScene[sceneName].total += 1
     nightByScene[sceneName].participants += Number(item.currentParticipants || 0)
@@ -955,7 +955,7 @@ function buildOperationInsightCards(input = {}) {
   const officialRows = activities90.map((item) => {
     const tags = safeArray(item?.opsTagProfile?.dimensions?.operation?.officialOpsValue)
     return {
-      sceneName: String(item.sceneName || '未分类场景'),
+      sceneName: String(item.sceneName || '未分类类型'),
       officialHint: tags.some((tag) => String(tag).startsWith('适合官方')),
     }
   })
@@ -997,7 +997,7 @@ function buildOperationInsightCards(input = {}) {
   // 7) 商家合作
   const bizCounter = {}
   activities90.forEach((item) => {
-    const sceneName = String(item.sceneName || '未分类场景')
+    const sceneName = String(item.sceneName || '未分类类型')
     const supplyTags = safeArray(item?.opsTagProfile?.dimensions?.commercial?.supplySide)
     const pathTags = safeArray(item?.opsTagProfile?.dimensions?.commercial?.monetizationPath)
     const chargeType = String(item.chargeType || item?.pricing?.chargeType || '').toLowerCase()
@@ -1040,7 +1040,7 @@ function buildOperationInsightCards(input = {}) {
   activities90.forEach((item) => {
     const dayKey = toDayKey(item.startTime || item.createdAt)
     if (!dayKey) return
-    const sceneName = String(item.sceneName || '未分类场景')
+    const sceneName = String(item.sceneName || '未分类类型')
     const isFestival = String(item.sceneId || '') === 'festival_theme'
     dayStats[dayKey] = dayStats[dayKey] || { festival: 0, nonFestival: 0, nonFestivalSceneCounter: {} }
     if (isFestival) {
@@ -1077,7 +1077,7 @@ function buildOperationInsightCards(input = {}) {
     sampleSize: dayRows.length,
     confidence: festivalDays.length >= 3 && normalDays.length >= 5 ? 'medium' : 'low',
     suggestion: boostedScene
-      ? `节庆窗口可联动「${boostedScene.sceneName}」做跨场景专题。`
+      ? `节庆窗口可联动「${boostedScene.sceneName}」做跨类型专题。`
       : '建议增加节庆样本后再判断带动关系。',
     actionType: boostedScene ? 'copy_summary' : '',
     actionLabel: boostedScene ? '复制节庆联动建议' : '',

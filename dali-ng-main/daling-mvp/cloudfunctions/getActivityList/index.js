@@ -310,7 +310,7 @@ function resolveSceneTypeFromLegacyFields(input = {}) {
     const customTypeId = String(input?.typeId || '').trim() || (customTypeName ? `custom_${customTypeName}` : '')
     return {
       sceneId: finalSceneId,
-      sceneName: SCENE_LABEL_MAP[finalSceneId] || '未分类场景',
+      sceneName: SCENE_LABEL_MAP[finalSceneId] || '未分类类型',
       typeId: customTypeId,
       typeName: customTypeName || '其它',
     }
@@ -318,7 +318,7 @@ function resolveSceneTypeFromLegacyFields(input = {}) {
   const resolvedType = resolveTypeForScene(finalSceneId, input?.typeId) || resolveTypeForScene(finalSceneId, fallback.typeId)
   return {
     sceneId: finalSceneId,
-    sceneName: SCENE_LABEL_MAP[finalSceneId] || '未分类场景',
+    sceneName: SCENE_LABEL_MAP[finalSceneId] || '未分类类型',
     typeId: String(resolvedType?.id || ''),
     typeName: String(resolvedType?.name || '未分类'),
   }
@@ -643,7 +643,7 @@ exports.main = async (event, context) => {
         categoryId: normalizedItemCategoryId,
         categoryLabel: CATEGORY_MAP[normalizedItemCategoryId] || '其他',
         sceneId: finalSceneId,
-        sceneName: a.sceneName || sceneType.sceneName || '未分类场景',
+        sceneName: a.sceneName || sceneType.sceneName || '未分类类型',
         typeId: finalTypeId,
         typeName: a.typeName || sceneType.typeName || '未分类',
         socialEnergy: finalSocialEnergy,

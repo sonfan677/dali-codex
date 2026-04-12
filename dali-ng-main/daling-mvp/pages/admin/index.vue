@@ -1439,12 +1439,12 @@
             </view>
 
             <view class="trend-category-panel">
-              <text class="export-config-title">“其它”场景自定义类型统计</text>
+              <text class="export-config-title">“其它”类型自定义场景统计</text>
               <text class="export-tip">
-                累计类型 {{ customSceneTypeStats.totalTypeCount }} · 累计发布 {{ customSceneTypeStats.totalPublishCount }}
+                累计场景 {{ customSceneTypeStats.totalTypeCount }} · 累计发布 {{ customSceneTypeStats.totalPublishCount }}
               </text>
               <view v-if="!customSceneTypeStats.topRows || customSceneTypeStats.topRows.length === 0" class="empty">
-                <text class="empty-text">暂无自定义类型数据</text>
+                <text class="empty-text">暂无自定义场景数据</text>
               </view>
               <view v-else class="trend-mini-bars">
                 <view

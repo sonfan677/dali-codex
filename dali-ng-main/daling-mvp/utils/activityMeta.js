@@ -16,7 +16,7 @@ export const ACTIVITY_SCENE_DEFINITIONS = [
   { id: 'family_pet', label: '亲子宠物', desc: '家庭、儿童、宠物友好活动', iconHint: '小孩/宠物' },
   { id: 'public_welfare', label: '公益社区', desc: '志愿、环保、社区共建、交换', iconHint: '爱心/树叶' },
   { id: 'nomad_city', label: '旅居同城', desc: '新来大理、旅居融入、数字游民等', iconHint: '小屋/行李箱' },
-  { id: 'other_scene', label: '其它', desc: '未归入固定场景，类型可自定义填写', iconHint: '更多/自定义' },
+  { id: 'other_scene', label: '其它', desc: '未归入固定类型，场景可自定义填写', iconHint: '更多/自定义' },
   { id: 'festival_theme', label: '节庆主题', desc: '三月街、火把节、节日和时令主题', iconHint: '火把/灯笼' },
 ]
 
@@ -561,7 +561,7 @@ export function normalizeSceneId(sceneId) {
 
 export function getSceneLabel(sceneId = '') {
   const safe = normalizeSceneId(sceneId)
-  return SCENE_LABEL_MAP[safe] || '未分类场景'
+  return SCENE_LABEL_MAP[safe] || '未分类类型'
 }
 
 export function getTypesByScene(sceneId = '') {

@@ -62,9 +62,9 @@
           <text class="hint">标签会在活动详情里展示，帮助其他用户快速理解活动</text>
         </view>
 
-        <!-- 场景 -->
+        <!-- 类型 -->
         <view class="field">
-          <text class="label">活动场景 *</text>
+          <text class="label">活动类型 *</text>
           <picker
             mode="selector"
             :range="scenePickerRange"
@@ -79,9 +79,9 @@
           <text class="hint">你选择的是：{{ selectedSceneLabel }}</text>
         </view>
 
-        <!-- 类型 -->
+        <!-- 场景 -->
         <view v-if="!isCustomSceneSelected" class="field">
-          <text class="label">活动类型 *</text>
+          <text class="label">活动场景 *</text>
           <picker
             mode="selector"
             :range="typePickerRange"
@@ -96,15 +96,15 @@
           <text class="hint">系统判定社交偏好：{{ inferredSocialEnergyLabel }}</text>
         </view>
         <view v-else class="field">
-          <text class="label">活动类型（自定义）*</text>
+          <text class="label">活动场景（自定义）*</text>
           <input
             class="input"
             v-model="form.customTypeName"
             placeholder="例如：城市寻宝 / 露台音乐夜（2-20字）"
             maxlength="20"
           />
-          <text class="hint">该活动会在发现页“场景=其它”中展示</text>
-          <text v-if="customTypeDuplicateLabel" class="hint hint-error">与现有类型“{{ customTypeDuplicateLabel }}”重复，请直接选择已有类型</text>
+          <text class="hint">该活动会在发现页“类型=其它”中展示</text>
+          <text v-if="customTypeDuplicateLabel" class="hint hint-error">与现有场景“{{ customTypeDuplicateLabel }}”重复，请直接选择已有场景</text>
         </view>
 
         <!-- 地点 -->
@@ -552,7 +552,7 @@ export default {
 
     typePickerRange() {
       const list = Array.isArray(this.typeOptions) ? this.typeOptions : []
-      if (!list.length) return ['请选择活动类型']
+      if (!list.length) return ['请选择活动场景']
       return list.map((item) => item.name)
     },
 
@@ -1231,7 +1231,7 @@ _doChooseLocation() {
       const normalizedCustomTypeName = normalizeCustomTypeName(this.form.customTypeName || '')
       if (this.isCustomSceneSelected) {
         if (!normalizedCustomTypeName || normalizedCustomTypeName.length < 2) {
-          uni.showToast({ title: '请填写2-20字活动类型', icon: 'none' })
+          uni.showToast({ title: '请填写2-20字活动场景', icon: 'none' })
           return
         }
         if (this.customTypeDuplicateLabel) {
@@ -1240,7 +1240,7 @@ _doChooseLocation() {
         }
       }
       if (!this.form.sceneId || (!this.isCustomSceneSelected && !this.form.typeId)) {
-        uni.showToast({ title: '请选择活动场景和活动类型', icon: 'none' })
+        uni.showToast({ title: '请选择活动类型和活动场景', icon: 'none' })
         return
       }
       if (!['free', 'aa', 'paid'].includes(this.form.chargeType)) {
@@ -1343,12 +1343,12 @@ _doChooseLocation() {
             NOT_VERIFIED:  '请先完成身份核验',
             IDENTITY_CHECK_REQUIRED: '当前账号需补充身份核验',
             INVALID_TITLE: '标题格式有误',
-            INVALID_SCENE: '请选择有效活动场景',
-            SCENE_NOT_SELECTABLE: '节庆主题由系统自动匹配，无需手动选择',
-            INVALID_TYPE: '请选择有效活动类型',
-            INVALID_CUSTOM_TYPE: '请输入有效的自定义类型',
-            CUSTOM_TYPE_TOO_LONG: '自定义类型最多20字',
-            DUPLICATE_CUSTOM_TYPE: '自定义类型与现有类型重复',
+            INVALID_SCENE: '请选择有效活动类型',
+            SCENE_NOT_SELECTABLE: '节庆活动类型由系统自动匹配，无需手动选择',
+            INVALID_TYPE: '请选择有效活动场景',
+            INVALID_CUSTOM_TYPE: '请输入有效的自定义活动场景',
+            CUSTOM_TYPE_TOO_LONG: '自定义活动场景最多20字',
+            DUPLICATE_CUSTOM_TYPE: '自定义活动场景与现有场景重复',
             INVALID_CHARGE_TYPE: '收费方式不合法',
             INVALID_FEE_AMOUNT: '付费金额不合法',
             CONTACT_REQUIRED: '请至少填写1项联系方式',
