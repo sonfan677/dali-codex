@@ -349,6 +349,54 @@ function resolveUserMaxParticipantsLimit() {
   return Math.max(1, Math.min(300, Math.round(raw)))
 }
 
+function normalizeBooleanInput(value) {
+  if (value === true || value === false) return value
+  const safe = String(value || '').trim().toLowerCase()
+  if (safe === 'true' || safe === '1' || safe === 'yes') return true
+  if (safe === 'false' || safe === '0' || safe === 'no') return false
+  return null
+}
+
+function normalizePolicyText(value = '', max = 200) {
+  return String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, max)
+}
+
+function resolveJoinRiskDisclosure({
+  publishRiskLevel = 'normal',
+  chargeType = 'free',
+  sourceFlags = {},
+} = {}) {
+  const normalizedChargeType = String(chargeType || 'free').trim().toLowerCase()
+  const flags = {
+    isNight: !!sourceFlags.isNight,
+    isOutdoor: !!sourceFlags.isOutdoor,
+    hasAlcohol: !!sourceFlags.hasAlcohol,
+    hasCarpool: !!sourceFlags.hasCarpool,
+    hasOvernight: !!sourceFlags.hasOvernight,
+    hasMinors: !!sourceFlags.hasMinors,
+  }
+  const mediumRiskByFlags = Object.values(flags).some(Boolean) || normalizedChargeType !== 'free'
+  const isHighRisk = String(publishRiskLevel || '').trim().toLowerCase() === 'high'
+  const level = isHighRisk ? 'L3' : (mediumRiskByFlags ? 'L2' : 'L1')
+
+  const checkItems = []
+  if (level !== 'L1') checkItems.push('platformNotOrganizer', 'selfAssessRisk', 'knowOfflineRisk')
+  if (level === 'L3') checkItems.push('emergencyPrepared')
+  if (normalizedChargeType !== 'free') checkItems.push('knowPaymentByOrganizer')
+
+  return {
+    version: 'p0_v1',
+    level,
+    chargeType: normalizedChargeType,
+    flags,
+    checkItems: [...new Set(checkItems)],
+    generatedAtMs: Date.now(),
+  }
+}
+
 function resolvePublishRiskGate({
   typeId = '',
   title = '',
@@ -1146,6 +1194,16 @@ exports.main = async (event, context) => {
     marketLink = null,
     chargeType = 'free',
     feeAmount = 0,
+    isCommercialActivity = false,
+    payeeSubject = '',
+    refundPolicy = '',
+    cancellationPolicy = '',
+    isNightActivity = false,
+    isOutdoorActivity = false,
+    hasAlcohol = false,
+    hasCarpool = false,
+    hasOvernight = false,
+    hasMinors = false,
     socialEnergy = '',
     allowWaitlist = false,
     requireApproval = false,
@@ -1253,6 +1311,39 @@ exports.main = async (event, context) => {
   if (finalChargeType === 'paid' && (!Number.isFinite(finalFeeAmount) || finalFeeAmount <= 0)) {
     return { success: false, error: 'INVALID_FEE_AMOUNT', message: '付费金额不合法' }
   }
+  const finalIsCommercialActivity = normalizeBooleanInput(isCommercialActivity)
+  if (finalIsCommercialActivity === null) {
+    return { success: false, error: 'INVALID_COMMERCIAL_FLAG', message: '请明确是否商业组织活动' }
+  }
+  const finalPayeeSubject = normalizePolicyText(payeeSubject, 30)
+  const finalRefundPolicy = normalizePolicyText(refundPolicy, 200)
+  const finalCancellationPolicy = normalizePolicyText(cancellationPolicy, 200)
+  if (finalChargeType !== 'free' && finalPayeeSubject.length < 2) {
+    return { success: false, error: 'MISSING_PAYEE_SUBJECT', message: '请填写收款主体' }
+  }
+  if (finalChargeType !== 'free' && finalRefundPolicy.length < 4) {
+    return { success: false, error: 'MISSING_REFUND_POLICY', message: '请填写退款规则' }
+  }
+  if (finalCancellationPolicy.length < 4) {
+    return { success: false, error: 'MISSING_CANCELLATION_POLICY', message: '请填写活动取消规则' }
+  }
+  const finalIsNightActivity = normalizeBooleanInput(isNightActivity)
+  const finalIsOutdoorActivity = normalizeBooleanInput(isOutdoorActivity)
+  const finalHasAlcohol = normalizeBooleanInput(hasAlcohol)
+  const finalHasCarpool = normalizeBooleanInput(hasCarpool)
+  const finalHasOvernight = normalizeBooleanInput(hasOvernight)
+  const finalHasMinors = normalizeBooleanInput(hasMinors)
+  const requiredRiskFlags = [
+    finalIsNightActivity,
+    finalIsOutdoorActivity,
+    finalHasAlcohol,
+    finalHasCarpool,
+    finalHasOvernight,
+    finalHasMinors,
+  ]
+  if (requiredRiskFlags.some((item) => item === null)) {
+    return { success: false, error: 'MISSING_RISK_FLAGS', message: '请完整填写风险要素申报' }
+  }
   const finalAllowWaitlist = !!allowWaitlist
   const finalRequireApproval = !!requireApproval
   const finalContactPhone = String(contactPhone || '').trim()
@@ -1342,6 +1433,12 @@ exports.main = async (event, context) => {
     cityId: finalCityId,
     lat: latNum,
     lng: lngNum,
+    isNightActivity: finalIsNightActivity,
+    isOutdoorActivity: finalIsOutdoorActivity,
+    hasAlcohol: finalHasAlcohol,
+    hasCarpool: finalHasCarpool,
+    hasOvernight: finalHasOvernight,
+    hasMinors: finalHasMinors,
   })
 
   // 4. 写入数据库
@@ -1375,6 +1472,18 @@ exports.main = async (event, context) => {
   const participantCapApplied = !isAdmin
     && hasExplicitMaxParticipants
     && requestedMaxParticipants > userMaxParticipantsLimit
+  const joinRiskDisclosure = resolveJoinRiskDisclosure({
+    publishRiskLevel: publishRiskGate.level,
+    chargeType: finalChargeType,
+    sourceFlags: {
+      isNight: finalIsNightActivity || !!opsTagProfile?.sourceFields?.isNight,
+      isOutdoor: finalIsOutdoorActivity || !!opsTagProfile?.riskTriggerFlags?.isOutdoor,
+      hasAlcohol: finalHasAlcohol || !!opsTagProfile?.riskTriggerFlags?.isAlcohol,
+      hasCarpool: finalHasCarpool,
+      hasOvernight: finalHasOvernight,
+      hasMinors: finalHasMinors || !!opsTagProfile?.riskTriggerFlags?.isChildren,
+    },
+  })
 
   const result = await db.collection('activities').add({
     data: {
@@ -1418,6 +1527,22 @@ exports.main = async (event, context) => {
         feeAmount: finalFeeAmount,
         currency: 'CNY',
       },
+      feeDisclosure: {
+        isCommercialActivity: finalIsCommercialActivity,
+        payeeSubject: finalPayeeSubject,
+        refundPolicy: finalRefundPolicy,
+        cancellationPolicy: finalCancellationPolicy,
+        platformPaymentRole: 'not_involved',
+      },
+      riskDeclaration: {
+        isNightActivity: finalIsNightActivity,
+        isOutdoorActivity: finalIsOutdoorActivity,
+        hasAlcohol: finalHasAlcohol,
+        hasCarpool: finalHasCarpool,
+        hasOvernight: finalHasOvernight,
+        hasMinors: finalHasMinors,
+      },
+      riskDisclosure: joinRiskDisclosure,
       allowWaitlist: finalAllowWaitlist,
       requireApproval: finalRequireApproval,
       joinPolicy: {
@@ -1558,6 +1683,21 @@ exports.main = async (event, context) => {
     socialEnergyLabel: finalSocialEnergyLabel,
     chargeType: finalChargeType,
     feeAmount: finalFeeAmount,
+    feeDisclosure: {
+      isCommercialActivity: finalIsCommercialActivity,
+      payeeSubject: finalPayeeSubject,
+      refundPolicy: finalRefundPolicy,
+      cancellationPolicy: finalCancellationPolicy,
+    },
+    riskDeclaration: {
+      isNightActivity: finalIsNightActivity,
+      isOutdoorActivity: finalIsOutdoorActivity,
+      hasAlcohol: finalHasAlcohol,
+      hasCarpool: finalHasCarpool,
+      hasOvernight: finalHasOvernight,
+      hasMinors: finalHasMinors,
+    },
+    riskDisclosure: joinRiskDisclosure,
     maxParticipants: finalMaxParticipants,
     participantCapApplied,
     opsTagVersion: OPS_TAG_VERSION,

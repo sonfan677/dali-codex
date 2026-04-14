@@ -197,6 +197,72 @@
           </view>
         </view>
 
+        <!-- 收费与履约披露 -->
+        <view class="field">
+          <text class="label">收费与履约披露 *</text>
+          <view class="risk-binary-row">
+            <text class="risk-binary-label">是否商业组织活动</text>
+            <view class="fee-options risk-binary-options">
+              <view
+                class="fee-option"
+                :class="{ 'fee-option--active': form.isCommercialActivity === 'yes' }"
+                @tap="setCommercialMode('yes')"
+              >是</view>
+              <view
+                class="fee-option"
+                :class="{ 'fee-option--active': form.isCommercialActivity === 'no' }"
+                @tap="setCommercialMode('no')"
+              >否</view>
+            </view>
+          </view>
+          <view v-if="form.chargeType !== 'free'" class="mt12">
+            <input
+              class="input"
+              v-model="form.payeeSubject"
+              placeholder="收款主体（如：张三 / XX工作室）*"
+              maxlength="30"
+            />
+            <textarea
+              class="textarea mt12"
+              v-model="form.refundPolicy"
+              placeholder="退款规则（必填，如：活动前24小时可全额退款）*"
+              maxlength="200"
+            />
+          </view>
+          <textarea
+            class="textarea mt12"
+            v-model="form.cancellationPolicy"
+            placeholder="活动取消规则（必填，如：人数不足自动取消并通知）*"
+            maxlength="200"
+          />
+          <text class="hint">费用由活动发起者自行收取，平台不代收、不托管、不分账</text>
+        </view>
+
+        <!-- 风险要素申报 -->
+        <view class="field">
+          <text class="label">风险要素申报 *</text>
+          <view
+            v-for="item in riskBinaryFields"
+            :key="`risk-${item.key}`"
+            class="risk-binary-row"
+          >
+            <text class="risk-binary-label">{{ item.label }}</text>
+            <view class="fee-options risk-binary-options">
+              <view
+                class="fee-option"
+                :class="{ 'fee-option--active': form[item.key] === 'yes' }"
+                @tap="setRiskBinary(item.key, 'yes')"
+              >是</view>
+              <view
+                class="fee-option"
+                :class="{ 'fee-option--active': form[item.key] === 'no' }"
+                @tap="setRiskBinary(item.key, 'no')"
+              >否</view>
+            </view>
+          </view>
+          <text class="hint">请如实填写，系统将据此分级提示与审核</text>
+        </view>
+
         <!-- 报名规则 -->
         <view class="field field-switch">
           <view>
@@ -452,6 +518,14 @@ const USER_VISIBLE_TAG_GROUPS = [
   },
 ]
 const USER_VISIBLE_TAG_ALLOW_SET = new Set(USER_VISIBLE_TAG_GROUPS.flatMap((group) => group.tags))
+const RISK_BINARY_FIELDS = [
+  { key: 'isNightActivity', label: '是否夜间活动（21:00后或06:00前）' },
+  { key: 'isOutdoorActivity', label: '是否户外活动' },
+  { key: 'hasAlcohol', label: '是否涉及饮酒' },
+  { key: 'hasCarpool', label: '是否涉及拼车/搭车' },
+  { key: 'hasOvernight', label: '是否涉及过夜安排' },
+  { key: 'hasMinors', label: '是否允许未成年人参与' },
+]
 
 export default {
   setup() {
@@ -498,6 +572,16 @@ export default {
         maxParticipants: null,
         chargeType: 'free',
         feeAmount: '',
+        isCommercialActivity: '',
+        payeeSubject: '',
+        refundPolicy: '',
+        cancellationPolicy: '',
+        isNightActivity: '',
+        isOutdoorActivity: '',
+        hasAlcohol: '',
+        hasCarpool: '',
+        hasOvernight: '',
+        hasMinors: '',
         allowWaitlist: false,
         requireApproval: false,
         contactPhone: '',
@@ -516,6 +600,7 @@ export default {
       durationOptions: ['1小时', '2小时', '3小时', '4小时', '6小时', '8小时'],
       durationIndex: 1,
       visibleTagGroups: USER_VISIBLE_TAG_GROUPS,
+      riskBinaryFields: RISK_BINARY_FIELDS,
       visibleTagOpenMap: USER_VISIBLE_TAG_GROUPS.reduce((acc, group) => {
         acc[group.id] = false
         return acc
@@ -807,6 +892,23 @@ export default {
       const raw = String(e?.detail?.value || '')
       const cleaned = raw.replace(/[^\d.]/g, '').replace(/\.{2,}/g, '.')
       this.form.feeAmount = cleaned
+    },
+
+    setCommercialMode(mode = 'no') {
+      this.form.isCommercialActivity = mode === 'yes' ? 'yes' : mode === 'no' ? 'no' : ''
+    },
+
+    setRiskBinary(key = '', value = 'no') {
+      const safeKey = String(key || '').trim()
+      if (!safeKey || !Object.prototype.hasOwnProperty.call(this.form, safeKey)) return
+      this.form[safeKey] = value === 'yes' ? 'yes' : value === 'no' ? 'no' : ''
+    },
+
+    parseRiskBinaryValue(value = '') {
+      const safe = String(value || '').trim()
+      if (safe === 'yes') return true
+      if (safe === 'no') return false
+      return null
     },
 
     onAllowWaitlistChange(e) {
@@ -1247,6 +1349,11 @@ _doChooseLocation() {
         uni.showToast({ title: '请选择收费方式', icon: 'none' })
         return
       }
+      const isCommercialActivity = this.parseRiskBinaryValue(this.form.isCommercialActivity)
+      if (isCommercialActivity === null) {
+        uni.showToast({ title: '请选择是否商业组织活动', icon: 'none' })
+        return
+      }
       let feeAmount = 0
       if (this.form.chargeType === 'paid') {
         feeAmount = Number(this.form.feeAmount)
@@ -1254,6 +1361,34 @@ _doChooseLocation() {
           uni.showToast({ title: '请填写正确的付费金额', icon: 'none' })
           return
         }
+      }
+      const payeeSubject = String(this.form.payeeSubject || '').trim()
+      const refundPolicy = String(this.form.refundPolicy || '').trim()
+      const cancellationPolicy = String(this.form.cancellationPolicy || '').trim()
+      if (this.form.chargeType !== 'free') {
+        if (payeeSubject.length < 2) {
+          uni.showToast({ title: '请填写收款主体', icon: 'none' })
+          return
+        }
+        if (refundPolicy.length < 4) {
+          uni.showToast({ title: '请填写退款规则', icon: 'none' })
+          return
+        }
+      }
+      if (cancellationPolicy.length < 4) {
+        uni.showToast({ title: '请填写活动取消规则', icon: 'none' })
+        return
+      }
+      const riskBinaryPayload = {}
+      const missingRiskField = this.riskBinaryFields.find((item) => {
+        const parsed = this.parseRiskBinaryValue(this.form[item.key])
+        if (parsed === null) return true
+        riskBinaryPayload[item.key] = parsed
+        return false
+      })
+      if (missingRiskField) {
+        uni.showToast({ title: `请选择：${missingRiskField.label}`, icon: 'none' })
+        return
       }
       const contactPhone = String(this.form.contactPhone || '').trim()
       const contactWechat = String(this.form.contactWechat || '').trim()
@@ -1290,6 +1425,11 @@ _doChooseLocation() {
           socialEnergy:     this.inferredSocialEnergyId,
           chargeType:       this.form.chargeType,
           feeAmount,
+          isCommercialActivity,
+          payeeSubject,
+          refundPolicy,
+          cancellationPolicy,
+          ...riskBinaryPayload,
           allowWaitlist:    !!this.form.allowWaitlist,
           requireApproval:  !!this.form.requireApproval,
           contactPhone,
@@ -1351,6 +1491,11 @@ _doChooseLocation() {
             DUPLICATE_CUSTOM_TYPE: '自定义活动场景与现有场景重复',
             INVALID_CHARGE_TYPE: '收费方式不合法',
             INVALID_FEE_AMOUNT: '付费金额不合法',
+            INVALID_COMMERCIAL_FLAG: '请选择是否商业组织活动',
+            MISSING_PAYEE_SUBJECT: '请填写收款主体',
+            MISSING_REFUND_POLICY: '请填写退款规则',
+            MISSING_CANCELLATION_POLICY: '请填写活动取消规则',
+            MISSING_RISK_FLAGS: '请完整填写风险要素申报',
             CONTACT_REQUIRED: '请至少填写1项联系方式',
             INVALID_CATEGORY: '请选择有效活动分类',
             START_PASSED:  '开始时间不能早于现在',
@@ -1522,6 +1667,18 @@ _doChooseLocation() {
   display: flex;
   align-items: center;
   gap: 10rpx;
+}
+.risk-binary-row {
+  margin-top: 10rpx;
+}
+.risk-binary-label {
+  display: block;
+  font-size: 24rpx;
+  color: #344054;
+  margin-bottom: 8rpx;
+}
+.risk-binary-options {
+  margin-top: 0;
 }
 .fee-currency {
   font-size: 30rpx;

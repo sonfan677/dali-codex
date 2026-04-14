@@ -359,6 +359,12 @@ function resolveRisk({
   chargeType = 'free',
   maxParticipants = 999,
   isNight = false,
+  isNightActivity = false,
+  isOutdoorActivity = false,
+  hasAlcohol = false,
+  hasCarpool = false,
+  hasOvernight = false,
+  hasMinors = false,
 }) {
   const safety = []
   const order = []
@@ -366,18 +372,28 @@ function resolveRisk({
   const emergency = []
   let score = 8
 
-  const isAlcohol = ALCOHOL_TYPE_SET.has(typeId)
-  const isOutdoor = OUTDOOR_SCENE_SET.has(sceneId) || OUTDOOR_TYPE_SET.has(typeId)
+  const isAlcohol = !!hasAlcohol || ALCOHOL_TYPE_SET.has(typeId)
+  const isOutdoor = !!isOutdoorActivity || OUTDOOR_SCENE_SET.has(sceneId) || OUTDOOR_TYPE_SET.has(typeId)
   const isWater = WATER_TYPE_SET.has(typeId)
-  const hasChildren = FAMILY_SCENE_SET.has(sceneId) || CHILD_TYPE_SET.has(typeId)
+  const hasChildren = !!hasMinors || FAMILY_SCENE_SET.has(sceneId) || CHILD_TYPE_SET.has(typeId)
   const hasPet = FAMILY_SCENE_SET.has(sceneId) || PET_TYPE_SET.has(typeId)
   const socialSensitive = sceneId === 'social_networking' || PRIVATE_SOCIAL_TYPE_SET.has(typeId)
   const marketSales = MARKET_SCENE_SET.has(sceneId) || MARKET_SALES_TYPE_SET.has(typeId)
   const cap = Number(maxParticipants || 999)
 
-  if (isNight) {
+  if (isNight || isNightActivity || hasOvernight) {
     score += 14
     pushTags(safety, ['夜间风险'])
+  }
+  if (hasCarpool) {
+    score += 10
+    pushTags(safety, ['交通出行风险'])
+    pushTags(emergency, ['集合点清晰'])
+  }
+  if (hasOvernight) {
+    score += 12
+    pushTags(safety, ['临时场地风险'])
+    pushTags(order, ['纠纷高发'])
   }
   if (isAlcohol) {
     score += 16
@@ -441,8 +457,11 @@ function resolveRisk({
   return {
     score,
     triggers: {
+      isNight: !!isNightActivity || !!isNight,
       isOutdoor,
       isAlcohol,
+      isCarpool: !!hasCarpool,
+      isOvernight: !!hasOvernight,
       isChildren: hasChildren,
       isPet: hasPet,
     },
@@ -563,8 +582,11 @@ function clampDimensions(dimensions = {}) {
 
   const r = cloned.risk || {}
   r.triggers = {
+    isNight: !!r?.triggers?.isNight,
     isOutdoor: !!r?.triggers?.isOutdoor,
     isAlcohol: !!r?.triggers?.isAlcohol,
+    isCarpool: !!r?.triggers?.isCarpool,
+    isOvernight: !!r?.triggers?.isOvernight,
     isChildren: !!r?.triggers?.isChildren,
     isPet: !!r?.triggers?.isPet,
   }
@@ -591,8 +613,11 @@ function clampDimensions(dimensions = {}) {
 function buildRiskTriggerFlags(dimensions = {}, requireApproval = false) {
   const safetyTags = uniq(safeArray(dimensions?.risk?.safety))
   const triggerByRisk = {
+    isNight: !!dimensions?.risk?.triggers?.isNight || safetyTags.includes('夜间风险'),
     isOutdoor: !!dimensions?.risk?.triggers?.isOutdoor || safetyTags.includes('户外运动风险'),
     isAlcohol: !!dimensions?.risk?.triggers?.isAlcohol || safetyTags.includes('酒精相关风险'),
+    isCarpool: !!dimensions?.risk?.triggers?.isCarpool || safetyTags.includes('交通出行风险'),
+    isOvernight: !!dimensions?.risk?.triggers?.isOvernight || safetyTags.includes('临时场地风险'),
     isChildren: !!dimensions?.risk?.triggers?.isChildren || safetyTags.includes('儿童参与风险'),
     isPet: !!dimensions?.risk?.triggers?.isPet || safetyTags.includes('宠物参与风险'),
     isApprovalRequired: !!requireApproval,
@@ -713,6 +738,12 @@ function buildOpsTagProfile(input = {}) {
   const startMs = toMs(input.startTime)
   const startHourChina = chinaHourFromMs(startMs)
   const isNight = startHourChina >= 21 || (startHourChina >= 0 && startHourChina < 6)
+  const isNightActivity = !!input.isNightActivity
+  const isOutdoorActivity = !!input.isOutdoorActivity
+  const hasAlcohol = !!input.hasAlcohol
+  const hasCarpool = !!input.hasCarpool
+  const hasOvernight = !!input.hasOvernight
+  const hasMinors = !!input.hasMinors
   const address = normalizeText(input.address)
   const cityId = normalizeText(input.cityId || 'dali')
   const areaTag = resolveAreaTag(address)
@@ -742,6 +773,12 @@ function buildOpsTagProfile(input = {}) {
     chargeType,
     maxParticipants,
     isNight,
+    isNightActivity,
+    isOutdoorActivity,
+    hasAlcohol,
+    hasCarpool,
+    hasOvernight,
+    hasMinors,
   })
   const region = resolveRegion({
     sceneId,
@@ -779,11 +816,20 @@ function buildOpsTagProfile(input = {}) {
       isGroupFormation,
       startHourChina,
       isNight,
+      isNightActivity,
+      isOutdoorActivity,
+      hasAlcohol,
+      hasCarpool,
+      hasOvernight,
+      hasMinors,
       cityId,
       areaTag,
       hasLocation,
+      isNightRisk: riskTriggerFlags.isNight,
       isOutdoor: riskTriggerFlags.isOutdoor,
       isAlcohol: riskTriggerFlags.isAlcohol,
+      isCarpool: riskTriggerFlags.isCarpool,
+      isOvernight: riskTriggerFlags.isOvernight,
       isChildren: riskTriggerFlags.isChildren,
       isPet: riskTriggerFlags.isPet,
       isApprovalRequired: riskTriggerFlags.isApprovalRequired,

@@ -5,9 +5,94 @@ const _ = db.command
 
 const ACTIVE_JOIN_STATUSES = ['joined', 'pending_approval', 'waitlist']
 
+function normalizeBooleanInput(value) {
+  if (value === true || value === false) return value
+  const safe = String(value || '').trim().toLowerCase()
+  if (safe === 'true' || safe === '1' || safe === 'yes') return true
+  if (safe === 'false' || safe === '0' || safe === 'no') return false
+  return false
+}
+
+function resolveJoinRiskDisclosure(activity = {}) {
+  const fromActivity = activity?.riskDisclosure && typeof activity.riskDisclosure === 'object'
+    ? activity.riskDisclosure
+    : {}
+  const chargeType = String(
+    fromActivity.chargeType
+    || activity?.pricing?.chargeType
+    || activity?.chargeType
+    || 'free'
+  ).trim().toLowerCase()
+  const flags = {
+    isNight: normalizeBooleanInput(fromActivity?.flags?.isNight || activity?.riskDeclaration?.isNightActivity),
+    isOutdoor: normalizeBooleanInput(fromActivity?.flags?.isOutdoor || activity?.riskDeclaration?.isOutdoorActivity || activity?.opsTagProfile?.riskTriggerFlags?.isOutdoor),
+    hasAlcohol: normalizeBooleanInput(fromActivity?.flags?.hasAlcohol || activity?.riskDeclaration?.hasAlcohol || activity?.opsTagProfile?.riskTriggerFlags?.isAlcohol),
+    hasCarpool: normalizeBooleanInput(fromActivity?.flags?.hasCarpool || activity?.riskDeclaration?.hasCarpool || activity?.opsTagProfile?.riskTriggerFlags?.isCarpool),
+    hasOvernight: normalizeBooleanInput(fromActivity?.flags?.hasOvernight || activity?.riskDeclaration?.hasOvernight || activity?.opsTagProfile?.riskTriggerFlags?.isOvernight),
+    hasMinors: normalizeBooleanInput(fromActivity?.flags?.hasMinors || activity?.riskDeclaration?.hasMinors || activity?.opsTagProfile?.riskTriggerFlags?.isChildren),
+  }
+  const hasMediumRiskFactor = Object.values(flags).some(Boolean) || chargeType !== 'free'
+  const isHigh = String(activity?.publishRiskLevel || '').trim().toLowerCase() === 'high' || String(fromActivity?.level || '').toUpperCase() === 'L3'
+  const level = isHigh ? 'L3' : (hasMediumRiskFactor ? 'L2' : 'L1')
+
+  const checkItems = []
+  if (level !== 'L1') checkItems.push('platformNotOrganizer', 'selfAssessRisk', 'knowOfflineRisk')
+  if (level === 'L3') checkItems.push('emergencyPrepared')
+  if (chargeType !== 'free') checkItems.push('knowPaymentByOrganizer')
+
+  return {
+    version: String(fromActivity?.version || 'p0_v1'),
+    level,
+    chargeType,
+    flags,
+    checkItems: Array.isArray(fromActivity?.checkItems) && fromActivity.checkItems.length
+      ? fromActivity.checkItems
+      : [...new Set(checkItems)],
+  }
+}
+
+function validateRiskConfirmPayload(disclosure = {}, riskConfirm = null) {
+  const requiredChecks = Array.isArray(disclosure?.checkItems)
+    ? disclosure.checkItems.map((item) => String(item || '').trim()).filter(Boolean)
+    : []
+  const strictRequired = String(disclosure?.level || 'L1').toUpperCase() !== 'L1' || String(disclosure?.chargeType || 'free') !== 'free'
+  const payload = riskConfirm && typeof riskConfirm === 'object' ? riskConfirm : {}
+  const checks = payload?.checks && typeof payload.checks === 'object' ? payload.checks : {}
+  const normalizedChecks = requiredChecks.reduce((acc, key) => {
+    acc[key] = !!checks[key]
+    return acc
+  }, {})
+  const missingChecks = requiredChecks.filter((key) => !normalizedChecks[key])
+  const confirmed = normalizeBooleanInput(payload?.confirmed)
+
+  if (strictRequired && (!confirmed || missingChecks.length > 0)) {
+    return {
+      ok: false,
+      strictRequired,
+      missingChecks,
+      normalized: null,
+    }
+  }
+
+  return {
+    ok: true,
+    strictRequired,
+    missingChecks,
+    normalized: {
+      confirmed: strictRequired ? true : (confirmed || requiredChecks.length === 0),
+      checks: normalizedChecks,
+      level: String(disclosure?.level || 'L1'),
+      chargeType: String(disclosure?.chargeType || 'free'),
+      version: String(disclosure?.version || 'p0_v1'),
+      clientConfirmedAtMs: Number(payload?.clientConfirmedAtMs || 0) || 0,
+      source: strictRequired ? 'client_confirmed' : 'basic_confirmed',
+    },
+  }
+}
+
 exports.main = async (event, context) => {
   const { OPENID } = cloud.getWXContext()
-  const { activityId } = event
+  const { activityId, riskConfirm = null } = event
 
   if (!activityId) {
     return { success: false, error: 'INVALID_ACTIVITY_ID', message: '缺少活动ID' }
@@ -74,6 +159,28 @@ exports.main = async (event, context) => {
     if (activity.publisherId === OPENID) {
       await transaction.rollback()
       return { success: false, error: 'OWN_ACTIVITY', message: '不能报名自己发布的活动' }
+    }
+
+    const riskDisclosure = resolveJoinRiskDisclosure(activity)
+    const riskConfirmValidation = validateRiskConfirmPayload(riskDisclosure, riskConfirm)
+    if (!riskConfirmValidation.ok) {
+      await transaction.rollback()
+      return {
+        success: false,
+        error: 'RISK_CONFIRM_REQUIRED',
+        message: '请先阅读并确认风险提示',
+        riskDisclosure,
+        missingChecks: riskConfirmValidation.missingChecks,
+      }
+    }
+    const riskConfirmAudit = riskConfirmValidation.normalized || {
+      confirmed: true,
+      checks: {},
+      level: String(riskDisclosure.level || 'L1'),
+      chargeType: String(riskDisclosure.chargeType || 'free'),
+      version: String(riskDisclosure.version || 'p0_v1'),
+      clientConfirmedAtMs: 0,
+      source: 'basic_confirmed',
     }
 
     const allowWaitlist = !!(activity.joinPolicy?.allowWaitlist ?? activity.allowWaitlist)
@@ -147,6 +254,10 @@ exports.main = async (event, context) => {
           appliedAt: db.serverDate(),
           reviewStatus: targetStatus === 'pending_approval' ? 'pending' : (targetStatus === 'joined' ? 'approved' : ''),
           reviewedAt: targetStatus === 'joined' ? db.serverDate() : null,
+          riskConfirm: {
+            ...riskConfirmAudit,
+            confirmedAt: db.serverDate(),
+          },
           cancelledAt: null,
           updatedAt: db.serverDate(),
         }
@@ -169,6 +280,10 @@ exports.main = async (event, context) => {
           appliedAt: db.serverDate(),
           reviewStatus: targetStatus === 'pending_approval' ? 'pending' : (targetStatus === 'joined' ? 'approved' : ''),
           reviewedAt: targetStatus === 'joined' ? db.serverDate() : null,
+          riskConfirm: {
+            ...riskConfirmAudit,
+            confirmedAt: db.serverDate(),
+          },
           cancelledAt: null,
           createdAt: db.serverDate(),
           updatedAt: db.serverDate(),
@@ -215,6 +330,7 @@ exports.main = async (event, context) => {
       formationStatus: nextFormationStatus,
       requiresApproval: requireApproval,
       isWaitlist: targetStatus === 'waitlist',
+      riskConfirmLevel: riskConfirmAudit.level,
     }
 
   } catch(e) {

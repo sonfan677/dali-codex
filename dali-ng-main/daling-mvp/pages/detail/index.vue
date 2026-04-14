@@ -52,6 +52,15 @@
         <text class="info-value">{{ joinPolicyText }}</text>
       </view>
 
+      <view class="compliance-box">
+        <text class="compliance-title">组织与费用说明</text>
+        <text class="compliance-item">组织者：{{ activity.publisherNickname || '匿名用户' }}</text>
+        <text class="compliance-item">平台角色：搭里仅提供信息展示与报名工具，不参与线下组织、收费履约与现场管理。</text>
+        <text v-if="isChargeActivity" class="compliance-item">收款主体：{{ payeeSubjectText }}</text>
+        <text v-if="isChargeActivity" class="compliance-item">退款规则：{{ refundPolicyText }}</text>
+        <text class="compliance-item">取消规则：{{ cancellationPolicyText }}</text>
+      </view>
+
       <!-- 描述 -->
       <view v-if="activity.description || userVisibleTagsForDisplay.length" class="desc-box">
         <view v-if="userVisibleTagsForDisplay.length" class="desc-visible-tags">
@@ -470,6 +479,39 @@
       </view>
     </view>
 
+    <view v-if="showRiskConfirmDialog" class="risk-confirm-mask" @tap="cancelRiskConfirmDialog">
+      <view class="risk-confirm-dialog" @tap.stop>
+        <text class="risk-confirm-title">{{ riskConfirmCopy.title }}</text>
+        <text class="risk-confirm-desc">{{ riskConfirmCopy.description }}</text>
+        <view v-if="riskNoticeList.length" class="risk-notice-list">
+          <text
+            v-for="item in riskNoticeList"
+            :key="`risk-notice-${item}`"
+            class="risk-notice-item"
+          >{{ item }}</text>
+        </view>
+        <view v-if="riskCheckItems.length" class="risk-check-list">
+          <view
+            v-for="item in riskCheckItems"
+            :key="`risk-check-${item.key}`"
+            class="risk-check-item"
+            @tap="toggleRiskCheck(item.key)"
+          >
+            <text class="risk-check-icon">{{ riskCheckState[item.key] ? '☑' : '☐' }}</text>
+            <text class="risk-check-label">{{ item.label }}</text>
+          </view>
+        </view>
+        <view class="risk-confirm-actions">
+          <button class="risk-btn risk-btn--cancel" @tap="cancelRiskConfirmDialog">返回</button>
+          <button
+            class="risk-btn risk-btn--confirm"
+            :disabled="!canConfirmRiskChecks"
+            @tap="confirmRiskDialog"
+          >确认并继续</button>
+        </view>
+      </view>
+    </view>
+
   </view>
 
   <!-- 加载中 -->
@@ -529,6 +571,15 @@ export default {
       joinProfileDraftIdentityTags: [],
       pendingJoinAfterPhoneBind: false,
       pendingJoinAfterProfile: false,
+      showRiskConfirmDialog: false,
+      riskConfirmCopy: {
+        title: '',
+        description: '',
+      },
+      riskNoticeList: [],
+      riskCheckItems: [],
+      riskCheckState: {},
+      pendingRiskConfirmResolver: null,
     }
   },
 
@@ -744,6 +795,31 @@ export default {
       return '免费'
     },
 
+    isChargeActivity() {
+      const chargeType = String(this.activity?.pricing?.chargeType || this.activity?.chargeType || 'free')
+      return chargeType === 'aa' || chargeType === 'paid'
+    },
+
+    payeeSubjectText() {
+      const val = String(this.activity?.feeDisclosure?.payeeSubject || '').trim()
+      return val || '发起者自行收款'
+    },
+
+    refundPolicyText() {
+      const val = String(this.activity?.feeDisclosure?.refundPolicy || '').trim()
+      return val || '请联系发起者确认退款规则'
+    },
+
+    cancellationPolicyText() {
+      const val = String(this.activity?.feeDisclosure?.cancellationPolicy || '').trim()
+      return val || '若活动取消或变更，请以发起者通知为准'
+    },
+
+    canConfirmRiskChecks() {
+      if (!this.riskCheckItems.length) return true
+      return this.riskCheckItems.every((item) => !!this.riskCheckState[item.key])
+    },
+
     joinPolicyText() {
       if (!this.activity) return '直接报名'
       const allowWaitlist = !!(this.activity?.joinPolicy?.allowWaitlist ?? this.activity?.allowWaitlist)
@@ -816,8 +892,11 @@ export default {
       const summary = this.adminInsight?.opsTagSummary || {}
       const triggerFlags = summary.riskTriggerFlags || {}
       const triggerTags = [
+        triggerFlags.isNight ? '是否夜间=是' : '',
         triggerFlags.isOutdoor ? '是否户外=是' : '',
         triggerFlags.isAlcohol ? '是否酒精=是' : '',
+        triggerFlags.isCarpool ? '是否拼车=是' : '',
+        triggerFlags.isOvernight ? '是否过夜=是' : '',
         triggerFlags.isChildren ? '是否儿童=是' : '',
         triggerFlags.isPet ? '是否宠物=是' : '',
         triggerFlags.isApprovalRequired ? '是否审核制=是' : '',
@@ -900,6 +979,160 @@ export default {
   },
 
   methods: {
+    normalizeBooleanInput(value) {
+      if (value === true || value === false) return value
+      const safe = String(value || '').trim().toLowerCase()
+      if (safe === 'true' || safe === '1' || safe === 'yes') return true
+      if (safe === 'false' || safe === '0' || safe === 'no') return false
+      return false
+    },
+
+    resolveRiskDisclosureForJoin() {
+      const source = this.activity?.riskDisclosure && typeof this.activity.riskDisclosure === 'object'
+        ? this.activity.riskDisclosure
+        : {}
+      const chargeType = String(
+        source.chargeType
+        || this.activity?.pricing?.chargeType
+        || this.activity?.chargeType
+        || 'free'
+      ).trim().toLowerCase()
+      const flags = {
+        isNight: this.normalizeBooleanInput(source?.flags?.isNight || this.activity?.riskDeclaration?.isNightActivity),
+        isOutdoor: this.normalizeBooleanInput(source?.flags?.isOutdoor || this.activity?.riskDeclaration?.isOutdoorActivity),
+        hasAlcohol: this.normalizeBooleanInput(source?.flags?.hasAlcohol || this.activity?.riskDeclaration?.hasAlcohol),
+        hasCarpool: this.normalizeBooleanInput(source?.flags?.hasCarpool || this.activity?.riskDeclaration?.hasCarpool),
+        hasOvernight: this.normalizeBooleanInput(source?.flags?.hasOvernight || this.activity?.riskDeclaration?.hasOvernight),
+        hasMinors: this.normalizeBooleanInput(source?.flags?.hasMinors || this.activity?.riskDeclaration?.hasMinors),
+      }
+      const hasMediumRiskFactor = Object.values(flags).some(Boolean) || chargeType !== 'free'
+      const isHigh = String(this.activity?.publishRiskLevel || '').trim().toLowerCase() === 'high' || String(source?.level || '').toUpperCase() === 'L3'
+      const level = isHigh ? 'L3' : (hasMediumRiskFactor ? 'L2' : 'L1')
+      const checkItems = []
+      if (level !== 'L1') {
+        checkItems.push('platformNotOrganizer', 'selfAssessRisk', 'knowOfflineRisk')
+      }
+      if (level === 'L3') checkItems.push('emergencyPrepared')
+      if (chargeType !== 'free') checkItems.push('knowPaymentByOrganizer')
+      return {
+        level,
+        chargeType,
+        flags,
+        checkItems: Array.isArray(source?.checkItems) && source.checkItems.length
+          ? source.checkItems
+          : [...new Set(checkItems)],
+      }
+    },
+
+    getRiskCheckItemLabel(key = '') {
+      const map = {
+        platformNotOrganizer: '我已知悉平台不是活动组织者，也不参与线下现场管理',
+        selfAssessRisk: '我会根据自身情况评估风险并谨慎参与',
+        knowOfflineRisk: '我已知悉陌生人线下活动存在人身和财产风险',
+        emergencyPrepared: '我会提前做好行程/紧急联系人/装备等安全准备',
+        knowPaymentByOrganizer: '我已知悉费用由发起者自行收取，平台不代收不担保退款',
+      }
+      return map[String(key || '').trim()] || String(key || '').trim()
+    },
+
+    buildRiskConfirmCopy(disclosure = {}) {
+      const level = String(disclosure?.level || 'L1').toUpperCase()
+      if (level === 'L3') {
+        return {
+          title: '高风险活动报名确认',
+          description: '该活动包含较高风险因素，请阅读并勾选确认后再继续报名。',
+        }
+      }
+      if (level === 'L2') {
+        return {
+          title: '风险提示与报名确认',
+          description: '该活动存在一定风险，请阅读并勾选确认后继续。',
+        }
+      }
+      return {
+        title: '报名须知',
+        description: '请先阅读报名提示，确认后继续。',
+      }
+    },
+
+    buildRiskNoticeList(disclosure = {}) {
+      const flags = disclosure?.flags || {}
+      const notices = [
+        '平台仅提供活动信息展示与报名工具，不参与线下组织与现场履约。',
+      ]
+      if (flags.isNight) notices.push('包含夜间时段，请优先选择公共场所并注意返程安全。')
+      if (flags.isOutdoor) notices.push('包含户外场景，请关注天气变化并做好装备准备。')
+      if (flags.hasAlcohol) notices.push('涉及饮酒，请理性参与，避免酒后驾驶或风险行为。')
+      if (flags.hasCarpool) notices.push('涉及拼车/搭车，请先核验车主与路线并共享行程。')
+      if (flags.hasOvernight) notices.push('涉及过夜安排，请提前确认住宿安全与规则。')
+      if (flags.hasMinors) notices.push('涉及未成年人参与，请确保监护措施与活动适配性。')
+      if (String(disclosure?.chargeType || 'free') !== 'free') {
+        notices.push('如涉及收费，请先核验收款主体、收费项目与退款规则。')
+      }
+      return notices
+    },
+
+    toggleRiskCheck(key = '') {
+      const safe = String(key || '').trim()
+      if (!safe || !Object.prototype.hasOwnProperty.call(this.riskCheckState, safe)) return
+      this.riskCheckState = {
+        ...this.riskCheckState,
+        [safe]: !this.riskCheckState[safe],
+      }
+    },
+
+    cancelRiskConfirmDialog() {
+      const resolver = this.pendingRiskConfirmResolver
+      this.showRiskConfirmDialog = false
+      this.pendingRiskConfirmResolver = null
+      if (typeof resolver === 'function') resolver(null)
+    },
+
+    confirmRiskDialog() {
+      if (!this.canConfirmRiskChecks) {
+        uni.showToast({ title: '请先完成确认勾选', icon: 'none' })
+        return
+      }
+      const resolver = this.pendingRiskConfirmResolver
+      const payload = {
+        confirmed: true,
+        checks: { ...this.riskCheckState },
+        clientConfirmedAtMs: Date.now(),
+      }
+      this.showRiskConfirmDialog = false
+      this.pendingRiskConfirmResolver = null
+      if (typeof resolver === 'function') resolver(payload)
+    },
+
+    ensureJoinRiskConfirm() {
+      const disclosure = this.resolveRiskDisclosureForJoin()
+      const checkItems = Array.isArray(disclosure.checkItems)
+        ? disclosure.checkItems.map((key) => ({ key, label: this.getRiskCheckItemLabel(key) }))
+        : []
+      this.riskConfirmCopy = this.buildRiskConfirmCopy(disclosure)
+      this.riskNoticeList = this.buildRiskNoticeList(disclosure)
+      this.riskCheckItems = checkItems
+      this.riskCheckState = checkItems.reduce((acc, item) => {
+        acc[item.key] = false
+        return acc
+      }, {})
+      this.showRiskConfirmDialog = true
+      return new Promise((resolve) => {
+        this.pendingRiskConfirmResolver = (result) => {
+          if (!result) {
+            resolve(null)
+            return
+          }
+          resolve({
+            ...result,
+            level: disclosure.level,
+            chargeType: disclosure.chargeType,
+            version: 'p0_v1',
+          })
+        }
+      })
+    },
+
     async loadDetail() {
       try {
         const res = await callCloud('getActivityDetail', { activityId: this.activityId })
@@ -1446,6 +1679,9 @@ export default {
         this.showJoinPhoneBindDialog = true
         return
       }
+
+      const riskConfirm = await this.ensureJoinRiskConfirm()
+      if (!riskConfirm) return
     
       // 请求订阅授权（不影响报名主流程）
       const subRes = await this.requestSubscribe()
@@ -1501,7 +1737,10 @@ export default {
     
       this.joining = true
       try {
-        const res = await callCloud('joinActivity', { activityId: this.activityId })
+        const res = await callCloud('joinActivity', {
+          activityId: this.activityId,
+          riskConfirm,
+        })
         if (res.success) {
           this.joinStatus = String(res.joinStatus || 'joined')
           this.hasJoined = this.joinStatus === 'joined'
@@ -1526,6 +1765,7 @@ export default {
             PUBLISH_REVIEW_PENDING: '活动审核中，暂不可报名',
             PUBLISH_REVIEW_REJECTED: '活动未通过审核，暂不可报名',
             OWN_ACTIVITY:   '不能报名自己的活动',
+            RISK_CONFIRM_REQUIRED: '请先完成风险确认',
           }
           uni.showToast({ title: msgs[res.error] || '报名失败', icon: 'none' })
         }
@@ -1723,6 +1963,26 @@ export default {
 }
 .info-label { font-size: 26rpx; color: #999; width: 80rpx; flex-shrink: 0; }
 .info-value { font-size: 26rpx; color: #333; flex: 1; line-height: 1.5; }
+.compliance-box {
+  margin: 24rpx 0;
+  padding: 20rpx;
+  border-radius: 14rpx;
+  background: #F8FAFC;
+  border: 1rpx solid #E4E7EC;
+}
+.compliance-title {
+  display: block;
+  font-size: 24rpx;
+  color: #1A3C5E;
+  font-weight: 600;
+  margin-bottom: 10rpx;
+}
+.compliance-item {
+  display: block;
+  font-size: 23rpx;
+  color: #475467;
+  line-height: 1.6;
+}
 
 .desc-box {
   background: white; border-radius: 12rpx;
@@ -2300,6 +2560,96 @@ export default {
   text-align: center;
   font-size: 24rpx;
   color: #98A2B3;
+}
+.risk-confirm-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1200;
+}
+.risk-confirm-dialog {
+  width: 86%;
+  background: #fff;
+  border-radius: 18rpx;
+  padding: 30rpx 26rpx 24rpx;
+}
+.risk-confirm-title {
+  display: block;
+  font-size: 30rpx;
+  font-weight: 700;
+  color: #1A1A1A;
+}
+.risk-confirm-desc {
+  display: block;
+  margin-top: 10rpx;
+  font-size: 24rpx;
+  color: #667085;
+  line-height: 1.6;
+}
+.risk-notice-list {
+  margin-top: 12rpx;
+  padding: 14rpx;
+  border-radius: 12rpx;
+  background: #F8FAFC;
+}
+.risk-notice-item {
+  display: block;
+  font-size: 23rpx;
+  color: #344054;
+  line-height: 1.6;
+}
+.risk-notice-item + .risk-notice-item {
+  margin-top: 8rpx;
+}
+.risk-check-list {
+  margin-top: 14rpx;
+}
+.risk-check-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10rpx;
+  padding: 10rpx 0;
+}
+.risk-check-icon {
+  font-size: 30rpx;
+  line-height: 1.3;
+  color: #1A3C5E;
+}
+.risk-check-label {
+  flex: 1;
+  font-size: 24rpx;
+  color: #1A1A1A;
+  line-height: 1.55;
+}
+.risk-confirm-actions {
+  margin-top: 16rpx;
+  display: flex;
+  gap: 14rpx;
+}
+.risk-btn {
+  flex: 1;
+  height: 78rpx;
+  line-height: 78rpx;
+  border-radius: 12rpx;
+  font-size: 26rpx;
+  border: none;
+}
+.risk-btn::after {
+  border: none;
+}
+.risk-btn--cancel {
+  background: #EEF2F7;
+  color: #475467;
+}
+.risk-btn--confirm {
+  background: #1A3C5E;
+  color: #fff;
+}
+.risk-btn[disabled] {
+  opacity: 0.5;
 }
 .profile-editor {
   margin-top: 16rpx;

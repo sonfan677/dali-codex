@@ -352,6 +352,61 @@ function safeArray(value) {
   return Array.isArray(value) ? value : []
 }
 
+function normalizeBooleanInput(value) {
+  if (value === true || value === false) return value
+  const safe = String(value || '').trim().toLowerCase()
+  if (safe === 'true' || safe === '1' || safe === 'yes') return true
+  if (safe === 'false' || safe === '0' || safe === 'no') return false
+  return false
+}
+
+function buildRiskDisclosure(activity = {}) {
+  const fromActivity = activity?.riskDisclosure && typeof activity.riskDisclosure === 'object'
+    ? activity.riskDisclosure
+    : null
+  const fallbackFlags = {
+    isNight: normalizeBooleanInput(activity?.riskDeclaration?.isNightActivity),
+    isOutdoor: normalizeBooleanInput(activity?.riskDeclaration?.isOutdoorActivity) || !!activity?.opsTagProfile?.riskTriggerFlags?.isOutdoor,
+    hasAlcohol: normalizeBooleanInput(activity?.riskDeclaration?.hasAlcohol) || !!activity?.opsTagProfile?.riskTriggerFlags?.isAlcohol,
+    hasCarpool: normalizeBooleanInput(activity?.riskDeclaration?.hasCarpool) || !!activity?.opsTagProfile?.riskTriggerFlags?.isCarpool,
+    hasOvernight: normalizeBooleanInput(activity?.riskDeclaration?.hasOvernight) || !!activity?.opsTagProfile?.riskTriggerFlags?.isOvernight,
+    hasMinors: normalizeBooleanInput(activity?.riskDeclaration?.hasMinors) || !!activity?.opsTagProfile?.riskTriggerFlags?.isChildren,
+  }
+  const chargeType = String(activity?.pricing?.chargeType || activity?.chargeType || fromActivity?.chargeType || 'free').trim().toLowerCase()
+  const mediumByFlags = Object.values(fallbackFlags).some(Boolean) || chargeType !== 'free'
+  const isHigh = String(activity?.publishRiskLevel || fromActivity?.level || '').trim().toLowerCase() === 'high' || String(fromActivity?.level || '').toUpperCase() === 'L3'
+  const level = isHigh ? 'L3' : (mediumByFlags ? 'L2' : 'L1')
+  const checkItems = []
+  if (level !== 'L1') checkItems.push('platformNotOrganizer', 'selfAssessRisk', 'knowOfflineRisk')
+  if (level === 'L3') checkItems.push('emergencyPrepared')
+  if (chargeType !== 'free') checkItems.push('knowPaymentByOrganizer')
+  return {
+    version: String(fromActivity?.version || 'p0_v1'),
+    level,
+    chargeType,
+    flags: {
+      ...fallbackFlags,
+      ...(fromActivity?.flags || {}),
+    },
+    checkItems: Array.isArray(fromActivity?.checkItems) && fromActivity.checkItems.length
+      ? fromActivity.checkItems
+      : [...new Set(checkItems)],
+  }
+}
+
+function buildFeeDisclosure(activity = {}) {
+  const fromActivity = activity?.feeDisclosure && typeof activity.feeDisclosure === 'object'
+    ? activity.feeDisclosure
+    : {}
+  return {
+    isCommercialActivity: normalizeBooleanInput(fromActivity.isCommercialActivity),
+    payeeSubject: String(fromActivity.payeeSubject || '').trim(),
+    refundPolicy: String(fromActivity.refundPolicy || '').trim(),
+    cancellationPolicy: String(fromActivity.cancellationPolicy || '').trim(),
+    platformPaymentRole: String(fromActivity.platformPaymentRole || 'not_involved'),
+  }
+}
+
 function buildAdminOpsTagSummary(profile = null) {
   if (!profile || typeof profile !== 'object') return null
   const keywordHits = safeArray(profile?.keywordEnhancement?.hits)
@@ -369,8 +424,11 @@ function buildAdminOpsTagSummary(profile = null) {
     keywordHitCount: Number(profile?.keywordEnhancement?.hitCount || 0),
     keywordScoreDelta: Number(profile?.keywordEnhancement?.scoreDelta || 0),
     riskTriggerFlags: {
+      isNight: !!profile?.riskTriggerFlags?.isNight,
       isOutdoor: !!profile?.riskTriggerFlags?.isOutdoor,
       isAlcohol: !!profile?.riskTriggerFlags?.isAlcohol,
+      isCarpool: !!profile?.riskTriggerFlags?.isCarpool,
+      isOvernight: !!profile?.riskTriggerFlags?.isOvernight,
       isChildren: !!profile?.riskTriggerFlags?.isChildren,
       isPet: !!profile?.riskTriggerFlags?.isPet,
       isApprovalRequired: !!profile?.riskTriggerFlags?.isApprovalRequired,
@@ -442,6 +500,8 @@ exports.main = async (event) => {
       feeAmount: Number(activity.pricing?.feeAmount ?? activity.feeAmount ?? 0) || 0,
       currency: activity.pricing?.currency || 'CNY',
     },
+    feeDisclosure: buildFeeDisclosure(activity),
+    riskDisclosure: buildRiskDisclosure(activity),
     allowWaitlist: !!(activity.allowWaitlist ?? activity.joinPolicy?.allowWaitlist),
     requireApproval: !!(activity.requireApproval ?? activity.joinPolicy?.requireApproval),
     joinPolicy: {

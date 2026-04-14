@@ -17,7 +17,7 @@
         </view>
         <view class="bullet-item">
           <text class="bullet">·</text>
-          <text class="bullet-text">平台不提供支付、担保交易、履约承诺、会员收费或充值服务。</text>
+          <text class="bullet-text">平台不提供代收代付、资金托管、担保交易、分账结算、履约承诺、会员充值等资金服务。</text>
         </view>
       </view>
 
@@ -60,7 +60,7 @@
         </view>
         <view class="bullet-item">
           <text class="bullet">·</text>
-          <text class="bullet-text">任何形式的付费、收费、充值、会员、订单或交易闭环信息</text>
+          <text class="bullet-text">未披露收款主体、收费项目、退款规则、取消规则的收费活动信息</text>
         </view>
         <view class="bullet-item">
           <text class="bullet">·</text>
@@ -74,6 +74,10 @@
         <view class="bullet-item">
           <text class="bullet">·</text>
           <text class="bullet-text">发布者应确保活动信息真实、清晰、可执行，并对活动内容及现场组织自行负责。</text>
+        </view>
+        <view class="bullet-item">
+          <text class="bullet">·</text>
+          <text class="bullet-text">收费活动须明确披露“是否收费、收款主体、退款规则、取消规则、是否商业组织活动”，并由发布者自行收款和处理履约。</text>
         </view>
         <view class="bullet-item">
           <text class="bullet">·</text>
@@ -100,7 +104,7 @@
 
       <!-- 六 -->
       <text class="section-title">六、免责声明</text>
-      <text class="item-body">平台仅提供活动信息展示、报名记录和基础管理能力，不对活动本身的真实性、适法性、安全性、组织效果或线下履约结果作出保证。用户参与活动前应自行判断风险并谨慎决策。</text>
+      <text class="item-body">平台仅提供活动信息展示、报名记录和基础管理能力，不对活动本身的真实性、适法性、安全性、组织效果或线下履约结果作出保证。除平台另有明确说明外，活动费用均由发布者自行收取，平台不代收、不托管、不担保退款。用户参与活动前应自行判断风险并谨慎决策。</text>
 
       <!-- 七 -->
       <text class="section-title">七、协议变更</text>
