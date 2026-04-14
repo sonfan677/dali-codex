@@ -318,6 +318,31 @@
           <text class="hint">仅报名成功用户可见联系方式</text>
         </view>
 
+        <view class="field">
+          <text class="label">发布协议确认 *</text>
+          <view class="consent-item" @tap="toggleConsent('publishRules')">
+            <text class="consent-box">{{ consent.publishRules ? '☑' : '☐' }}</text>
+            <view class="consent-content">
+              <text class="consent-line">
+                我已阅读并同意
+                <text class="consent-link" @tap.stop="openPublishRules">《活动发布规则》</text>
+                （{{ publishRulesVersion }}）
+              </text>
+            </view>
+          </view>
+          <view class="consent-item" @tap="toggleConsent('organizerAgreement')">
+            <text class="consent-box">{{ consent.organizerAgreement ? '☑' : '☐' }}</text>
+            <view class="consent-content">
+              <text class="consent-line">
+                我已阅读并同意
+                <text class="consent-link" @tap.stop="openOrganizerAgreement">《组织者服务协议》</text>
+                （{{ organizerAgreementVersion }}）
+              </text>
+            </view>
+          </view>
+          <text class="hint">仅首次同意当前版本时会写入云端；规则更新后需重新同意。</text>
+        </view>
+
         <!-- 成团活动开关 -->
         <view class="field field-switch">
           <view>
@@ -612,6 +637,14 @@ export default {
       lockedDateIndex: -1,
       lockedDateLabel: '',
       marketLinkDraft: null,
+      publishGovernanceConfig: {
+        publishRulesVersion: 'publish_rules_v1',
+        organizerAgreementVersion: 'organizer_agreement_v1',
+      },
+      consent: {
+        publishRules: false,
+        organizerAgreement: false,
+      },
     }
   },
 
@@ -684,11 +717,20 @@ export default {
     inferredSocialEnergyLabel() {
       return getSocialEnergyLabel(this.inferredSocialEnergyId)
     },
+
+    publishRulesVersion() {
+      return String(this.publishGovernanceConfig?.publishRulesVersion || 'publish_rules_v1')
+    },
+
+    organizerAgreementVersion() {
+      return String(this.publishGovernanceConfig?.organizerAgreementVersion || 'organizer_agreement_v1')
+    },
   },
 
   onLoad(options = {}) {
     this.applyPrefillFromQuery(options)
     this.consumeMarketPrefillFromStorage({ showToast: false })
+    this.syncPublishGovernanceFromStore()
   },
 
   async onShow() {
@@ -697,6 +739,8 @@ export default {
       await this.userStore.syncSession({ force: false, minIntervalMs: 15000 })
     } catch (e) {
       console.error('发布页同步会话失败', e)
+    } finally {
+      this.syncPublishGovernanceFromStore()
     }
   },
 
@@ -719,6 +763,47 @@ export default {
       const h = `${dt.getHours()}`.padStart(2, '0')
       const min = `${dt.getMinutes()}`.padStart(2, '0')
       return `${m}月${d}日 ${h}:${min}`
+    },
+
+    syncPublishGovernanceFromStore() {
+      const gd = getApp().globalData || {}
+      const configFromStore = this.userStore?.publishGovernanceConfig || {}
+      const configFromGlobal = gd.publishGovernanceConfig || {}
+      const publishRulesVersion = String(
+        configFromStore.publishRulesVersion
+        || configFromGlobal.publishRulesVersion
+        || 'publish_rules_v1'
+      ).trim() || 'publish_rules_v1'
+      const organizerAgreementVersion = String(
+        configFromStore.organizerAgreementVersion
+        || configFromGlobal.organizerAgreementVersion
+        || 'organizer_agreement_v1'
+      ).trim() || 'organizer_agreement_v1'
+      this.publishGovernanceConfig = {
+        publishRulesVersion,
+        organizerAgreementVersion,
+      }
+
+      const consentFromStore = this.userStore?.organizerConsents || {}
+      const consentFromGlobal = gd.organizerConsents || {}
+      const publishRulesConsent = consentFromStore.publishRules || consentFromGlobal.publishRules || {}
+      const organizerAgreementConsent = consentFromStore.organizerAgreement || consentFromGlobal.organizerAgreement || {}
+      this.consent.publishRules = String(publishRulesConsent.version || '').trim() === publishRulesVersion && !!publishRulesConsent.acceptedAt
+      this.consent.organizerAgreement = String(organizerAgreementConsent.version || '').trim() === organizerAgreementVersion && !!organizerAgreementConsent.acceptedAt
+    },
+
+    toggleConsent(key = '') {
+      const safeKey = String(key || '').trim()
+      if (!['publishRules', 'organizerAgreement'].includes(safeKey)) return
+      this.consent[safeKey] = !this.consent[safeKey]
+    },
+
+    openPublishRules() {
+      uni.navigateTo({ url: '/pages/publish-rules/index' })
+    },
+
+    openOrganizerAgreement() {
+      uni.navigateTo({ url: '/pages/organizer-agreement/index' })
     },
 
     syncSceneAndType(sceneId = '', typeId = '') {
@@ -1405,6 +1490,10 @@ _doChooseLocation() {
         uni.showToast({ title: '成团最低人数至少2人', icon: 'none' })
         return
       }
+      if (!this.consent.publishRules || !this.consent.organizerAgreement) {
+        uni.showToast({ title: '请先同意发布规则与组织者协议', icon: 'none' })
+        return
+      }
 
       this.submitting = true
       try {
@@ -1455,6 +1544,18 @@ _doChooseLocation() {
               marketDayKey: this.toLocalDayKey(this.form.startTimeMs),
             }
             : null,
+          publishConsent: {
+            publishRules: {
+              accepted: !!this.consent.publishRules,
+              version: this.publishRulesVersion,
+            },
+            organizerAgreement: {
+              accepted: !!this.consent.organizerAgreement,
+              version: this.organizerAgreementVersion,
+            },
+            source: 'publish_page',
+            acceptedAt: new Date().toISOString(),
+          },
         })
         if (res.success) {
           const publishReviewStatus = String(res.publishReviewStatus || '').toLowerCase()
@@ -1475,6 +1576,17 @@ _doChooseLocation() {
               confirmText: '去核验',
               success: (r) => {
                 if (r.confirm) uni.navigateTo({ url: '/pages/verify/index' })
+              }
+            })
+            return
+          }
+          if (res.error === 'CONSENT_REQUIRED' || res.error === 'CONSENT_VERSION_MISMATCH') {
+            uni.showModal({
+              title: '发布前需同意协议',
+              content: res.message || '请阅读并同意当前版本发布规则后继续',
+              confirmText: '去阅读',
+              success: (r) => {
+                if (r.confirm) this.openPublishRules()
               }
             })
             return
@@ -1504,6 +1616,10 @@ _doChooseLocation() {
             MIN_PARTICIPANTS_EXCEED_MAX: '最低成团人数不能超过活动人数上限',
             OUT_OF_DALI_REGION: '活动地点需在大理白族自治州范围内',
             CITY_NOT_SUPPORTED: '当前仅支持在大理白族自治州发布活动',
+            ORGANIZER_TIER_BLOCKED: '当前账号等级暂不支持发布该活动',
+            PUBLISH_RESTRICTED: '当前账号发布受限，请联系管理员',
+            CONSENT_REQUIRED: '请先同意《活动发布规则》《组织者服务协议》',
+            CONSENT_VERSION_MISMATCH: '协议版本已更新，请重新同意后发布',
           }
           uni.showToast({ title: msgs[res.error] || res.message || '发布失败', icon: 'none' })
         }
@@ -1720,6 +1836,29 @@ _doChooseLocation() {
   height: 180rpx;
   border-radius: 10rpx;
   background: #f2f4f7;
+}
+.consent-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12rpx;
+  margin-bottom: 12rpx;
+}
+.consent-box {
+  font-size: 30rpx;
+  color: #1A3C5E;
+  line-height: 1.4;
+}
+.consent-content {
+  flex: 1;
+}
+.consent-line {
+  font-size: 25rpx;
+  color: #344054;
+  line-height: 1.6;
+}
+.consent-link {
+  color: #1A3C5E;
+  font-weight: 600;
 }
 
 .phone-bind-mask {

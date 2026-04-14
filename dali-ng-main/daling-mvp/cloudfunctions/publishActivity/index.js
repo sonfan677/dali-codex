@@ -313,6 +313,26 @@ const CUSTOM_SCENE_TYPE_STATS_COLLECTION = 'sceneCustomTypeStats'
 const CUSTOM_TYPE_ID_PREFIX = 'custom_type'
 const FESTIVAL_THEME_COLLECTION_CANDIDATES = ['festivalThemes', 'officialFestivalThemes']
 const MAX_FESTIVAL_THEME_TAGS = 5
+const DEFAULT_ACTIVITY_PUBLISH_RULES_VERSION = 'publish_rules_v1'
+const DEFAULT_ORGANIZER_SERVICE_AGREEMENT_VERSION = 'organizer_agreement_v1'
+const ORGANIZER_TIER_LABEL_MAP = {
+  normal: '普通发起者',
+  verified: '认证发起者',
+  commercial: '商业组织者',
+  qualified: '资质组织者',
+}
+const ORGANIZER_TIER_ORDER_MAP = {
+  normal: 1,
+  verified: 2,
+  commercial: 3,
+  qualified: 4,
+}
+const PUBLISH_RISK_LEVEL_ORDER_MAP = {
+  L1: 1,
+  L2: 2,
+  L3: 3,
+  L4: 4,
+}
 
 const HIGH_RISK_TYPE_SET = new Set([
   'singles_social',
@@ -340,6 +360,413 @@ function parseAdminMeta(openid) {
     .filter(Boolean)
   return {
     isAdmin: adminOpenids.includes(openid),
+  }
+}
+
+function resolvePublishGovernanceConfig() {
+  const publishRulesVersion = String(process.env.ACTIVITY_PUBLISH_RULES_VERSION || DEFAULT_ACTIVITY_PUBLISH_RULES_VERSION).trim() || DEFAULT_ACTIVITY_PUBLISH_RULES_VERSION
+  const organizerAgreementVersion = String(process.env.ORGANIZER_SERVICE_AGREEMENT_VERSION || DEFAULT_ORGANIZER_SERVICE_AGREEMENT_VERSION).trim() || DEFAULT_ORGANIZER_SERVICE_AGREEMENT_VERSION
+  const complaintDowngradeThreshold = normalizeNumber(process.env.PUBLISH_COMPLAINT_DOWNGRADE_THRESHOLD, 3)
+  const complaintRestrictAllThreshold = normalizeNumber(process.env.PUBLISH_COMPLAINT_RESTRICT_ALL_THRESHOLD, 6)
+  return {
+    publishRulesVersion,
+    organizerAgreementVersion,
+    complaintDowngradeThreshold: Math.max(1, Math.min(20, Number(complaintDowngradeThreshold) || 3)),
+    complaintRestrictAllThreshold: Math.max(2, Math.min(30, Number(complaintRestrictAllThreshold) || 6)),
+  }
+}
+
+function normalizeOrganizerConsents(raw = {}) {
+  const source = raw && typeof raw === 'object' ? raw : {}
+  const publishRules = source.publishRules && typeof source.publishRules === 'object'
+    ? source.publishRules
+    : {}
+  const organizerAgreement = source.organizerAgreement && typeof source.organizerAgreement === 'object'
+    ? source.organizerAgreement
+    : {}
+  return {
+    publishRules: {
+      version: String(publishRules.version || '').trim(),
+      acceptedAt: publishRules.acceptedAt || null,
+      source: String(publishRules.source || '').trim(),
+    },
+    organizerAgreement: {
+      version: String(organizerAgreement.version || '').trim(),
+      acceptedAt: organizerAgreement.acceptedAt || null,
+      source: String(organizerAgreement.source || '').trim(),
+    },
+    updatedAt: source.updatedAt || null,
+  }
+}
+
+function normalizeConsentAccepted(value) {
+  if (value === true || value === false) return value
+  const safe = String(value || '').trim().toLowerCase()
+  if (safe === 'true' || safe === '1' || safe === 'yes') return true
+  if (safe === 'false' || safe === '0' || safe === 'no') return false
+  return false
+}
+
+function normalizePublishConsentPayload(raw = {}) {
+  const source = raw && typeof raw === 'object' ? raw : {}
+  const publishRules = source.publishRules && typeof source.publishRules === 'object'
+    ? source.publishRules
+    : {}
+  const organizerAgreement = source.organizerAgreement && typeof source.organizerAgreement === 'object'
+    ? source.organizerAgreement
+    : {}
+  const acceptedAtRaw = source.acceptedAt || source.clientAcceptedAt || null
+  const acceptedAtMs = new Date(acceptedAtRaw).getTime()
+  return {
+    publishRules: {
+      accepted: normalizeConsentAccepted(publishRules.accepted),
+      version: String(publishRules.version || '').trim(),
+    },
+    organizerAgreement: {
+      accepted: normalizeConsentAccepted(organizerAgreement.accepted),
+      version: String(organizerAgreement.version || '').trim(),
+    },
+    source: String(source.source || 'publish_form').trim() || 'publish_form',
+    acceptedAtIso: Number.isFinite(acceptedAtMs) ? new Date(acceptedAtMs).toISOString() : new Date().toISOString(),
+  }
+}
+
+function hasAcceptedConsentVersion(consents = {}, key = '', version = '') {
+  const safeKey = String(key || '').trim()
+  if (!safeKey || !version) return false
+  const node = consents?.[safeKey]
+  if (!node || typeof node !== 'object') return false
+  return String(node.version || '').trim() === String(version || '').trim() && !!node.acceptedAt
+}
+
+function validatePublishConsents({
+  existingConsents = {},
+  consentPayload = {},
+  governanceConfig = {},
+  isAdmin = false,
+} = {}) {
+  const normalizedExisting = normalizeOrganizerConsents(existingConsents)
+  const normalizedPayload = normalizePublishConsentPayload(consentPayload)
+  if (isAdmin) {
+    return {
+      ok: true,
+      shouldPersist: false,
+      mergedConsents: normalizedExisting,
+      missingKeys: [],
+      mismatchKeys: [],
+    }
+  }
+
+  const requiredPublishRulesVersion = String(governanceConfig.publishRulesVersion || '').trim()
+  const requiredOrganizerAgreementVersion = String(governanceConfig.organizerAgreementVersion || '').trim()
+
+  const existingPublishRulesAccepted = hasAcceptedConsentVersion(normalizedExisting, 'publishRules', requiredPublishRulesVersion)
+  const existingOrganizerAgreementAccepted = hasAcceptedConsentVersion(normalizedExisting, 'organizerAgreement', requiredOrganizerAgreementVersion)
+
+  const payloadPublishRulesAccepted = normalizedPayload.publishRules.accepted
+    && normalizedPayload.publishRules.version === requiredPublishRulesVersion
+  const payloadOrganizerAgreementAccepted = normalizedPayload.organizerAgreement.accepted
+    && normalizedPayload.organizerAgreement.version === requiredOrganizerAgreementVersion
+
+  const missingKeys = []
+  const mismatchKeys = []
+
+  if (!existingPublishRulesAccepted && !payloadPublishRulesAccepted) {
+    if (normalizedPayload.publishRules.accepted && normalizedPayload.publishRules.version !== requiredPublishRulesVersion) {
+      mismatchKeys.push('publishRules')
+    } else {
+      missingKeys.push('publishRules')
+    }
+  }
+  if (!existingOrganizerAgreementAccepted && !payloadOrganizerAgreementAccepted) {
+    if (normalizedPayload.organizerAgreement.accepted && normalizedPayload.organizerAgreement.version !== requiredOrganizerAgreementVersion) {
+      mismatchKeys.push('organizerAgreement')
+    } else {
+      missingKeys.push('organizerAgreement')
+    }
+  }
+
+  if (mismatchKeys.length > 0) {
+    return {
+      ok: false,
+      error: 'CONSENT_VERSION_MISMATCH',
+      message: '协议版本已更新，请重新阅读并同意后发布',
+      missingKeys,
+      mismatchKeys,
+      requiredPublishRulesVersion,
+      requiredOrganizerAgreementVersion,
+      shouldPersist: false,
+      mergedConsents: normalizedExisting,
+    }
+  }
+
+  if (missingKeys.length > 0) {
+    return {
+      ok: false,
+      error: 'CONSENT_REQUIRED',
+      message: '请先阅读并同意《活动发布规则》《组织者服务协议》',
+      missingKeys,
+      mismatchKeys,
+      requiredPublishRulesVersion,
+      requiredOrganizerAgreementVersion,
+      shouldPersist: false,
+      mergedConsents: normalizedExisting,
+    }
+  }
+
+  const shouldPersist = !existingPublishRulesAccepted || !existingOrganizerAgreementAccepted
+  const mergedConsents = shouldPersist
+    ? {
+        publishRules: {
+          version: requiredPublishRulesVersion,
+          acceptedAt: normalizedPayload.acceptedAtIso,
+          source: normalizedPayload.source,
+        },
+        organizerAgreement: {
+          version: requiredOrganizerAgreementVersion,
+          acceptedAt: normalizedPayload.acceptedAtIso,
+          source: normalizedPayload.source,
+        },
+        updatedAt: normalizedPayload.acceptedAtIso,
+      }
+    : normalizedExisting
+
+  return {
+    ok: true,
+    error: '',
+    message: '',
+    missingKeys,
+    mismatchKeys,
+    requiredPublishRulesVersion,
+    requiredOrganizerAgreementVersion,
+    shouldPersist,
+    mergedConsents,
+  }
+}
+
+function resolveOrganizerTier(user = {}, isAdmin = false) {
+  if (isAdmin) {
+    return { tier: 'qualified', source: 'admin' }
+  }
+
+  const manualTier = String(
+    user.organizerTier
+    || user.publisherTier
+    || user.organizerLevel
+    || ''
+  ).trim().toLowerCase()
+  if (ORGANIZER_TIER_ORDER_MAP[manualTier]) {
+    return { tier: manualTier, source: 'manual' }
+  }
+
+  const verifyStatus = String(user.verifyStatus || '').trim().toLowerCase()
+  const identityCheckStatus = String(user.identityCheckStatus || '').trim().toLowerCase()
+  const isVerified = !!user.isVerified || verifyStatus === 'approved' || verifyStatus === 'platform_verified'
+  const phoneVerified = !!user.phoneVerified || String(user.mobileBindStatus || '').trim() === 'bound'
+  const hasIdentityCheckApproved = identityCheckStatus === 'approved'
+
+  const qualificationStatus = String(
+    user.organizerQualificationStatus
+    || user.qualificationStatus
+    || user.officialQualificationStatus
+    || ''
+  ).trim().toLowerCase()
+  const hasQualifiedFlag = !!user.organizerQualified || !!user.qualifiedOrganizer || qualificationStatus === 'approved' || qualificationStatus === 'verified'
+  if (hasQualifiedFlag && isVerified && phoneVerified) {
+    return { tier: 'qualified', source: 'qualified_profile' }
+  }
+
+  const identityTags = Array.isArray(user.identityTags) ? user.identityTags : []
+  const hasCommercialIdentity = !!user.isCommercialOrganizer
+    || !!user.commercialOrganizer
+    || identityTags.some((tag) => ['merchant', 'homestay_owner', 'host'].includes(String(tag || '').trim()))
+  if (hasCommercialIdentity && isVerified && phoneVerified) {
+    return { tier: 'commercial', source: 'commercial_profile' }
+  }
+
+  if (isVerified && phoneVerified && hasIdentityCheckApproved) {
+    return { tier: 'verified', source: 'verified_profile' }
+  }
+
+  if (isVerified && phoneVerified) {
+    return { tier: 'verified', source: 'verified_profile_lite' }
+  }
+
+  return { tier: 'normal', source: 'default' }
+}
+
+function resolveGovernanceRiskLevel({
+  publishRiskGate = {},
+  chargeType = 'free',
+  riskDeclaration = {},
+} = {}) {
+  const publishRisk = String(publishRiskGate.level || '').trim().toLowerCase()
+  if (publishRisk === 'high') return 'L3'
+  const hasRiskFlag = Object.values({
+    isNightActivity: !!riskDeclaration.isNightActivity,
+    isOutdoorActivity: !!riskDeclaration.isOutdoorActivity,
+    hasAlcohol: !!riskDeclaration.hasAlcohol,
+    hasCarpool: !!riskDeclaration.hasCarpool,
+    hasOvernight: !!riskDeclaration.hasOvernight,
+    hasMinors: !!riskDeclaration.hasMinors,
+  }).some(Boolean)
+  if (String(chargeType || '').trim().toLowerCase() !== 'free' || hasRiskFlag) return 'L2'
+  return 'L1'
+}
+
+function compareRiskLevel(a = 'L1', b = 'L1') {
+  const levelA = PUBLISH_RISK_LEVEL_ORDER_MAP[String(a || '').trim().toUpperCase()] || 1
+  const levelB = PUBLISH_RISK_LEVEL_ORDER_MAP[String(b || '').trim().toUpperCase()] || 1
+  return levelA - levelB
+}
+
+function resolveTierPublishPermission({
+  organizerTier = 'normal',
+  publishRiskLevel = 'L1',
+  chargeType = 'free',
+  isAdmin = false,
+} = {}) {
+  if (isAdmin) return { allowed: true, reasonCode: '', message: '', maxRiskLevel: 'L4', allowPaid: true }
+  const tierRuleMap = {
+    normal: { maxRiskLevel: 'L2', allowPaid: false },
+    verified: { maxRiskLevel: 'L2', allowPaid: true },
+    commercial: { maxRiskLevel: 'L3', allowPaid: true },
+    qualified: { maxRiskLevel: 'L4', allowPaid: true },
+  }
+  const tier = String(organizerTier || 'normal').trim().toLowerCase()
+  const rule = tierRuleMap[tier] || tierRuleMap.normal
+  const normalizedChargeType = String(chargeType || 'free').trim().toLowerCase()
+  if (normalizedChargeType === 'paid' && !rule.allowPaid) {
+    return {
+      allowed: false,
+      reasonCode: 'TIER_PAID_NOT_ALLOWED',
+      message: '当前账号等级暂不支持发布付费活动，请先升级为认证发起者',
+      maxRiskLevel: rule.maxRiskLevel,
+      allowPaid: rule.allowPaid,
+    }
+  }
+  if (compareRiskLevel(publishRiskLevel, rule.maxRiskLevel) > 0) {
+    return {
+      allowed: false,
+      reasonCode: 'TIER_RISK_NOT_ALLOWED',
+      message: '当前账号等级暂不支持发布该风险等级活动，请先完成更高等级认证',
+      maxRiskLevel: rule.maxRiskLevel,
+      allowPaid: rule.allowPaid,
+    }
+  }
+  return {
+    allowed: true,
+    reasonCode: '',
+    message: '',
+    maxRiskLevel: rule.maxRiskLevel,
+    allowPaid: rule.allowPaid,
+  }
+}
+
+function normalizeRestrictionScopes(scopes = []) {
+  const source = Array.isArray(scopes)
+    ? scopes
+    : String(scopes || '').split(/[,\n，、;；]/g)
+  const unique = []
+  source.forEach((item) => {
+    const safe = String(item || '').trim().toLowerCase()
+    if (!safe || unique.includes(safe)) return
+    unique.push(safe)
+  })
+  return unique.slice(0, 8)
+}
+
+function resolvePublishRestriction({
+  user = {},
+  publishRiskLevel = 'L1',
+  chargeType = 'free',
+  governanceConfig = {},
+  nowMs = Date.now(),
+} = {}) {
+  const normalizedChargeType = String(chargeType || 'free').trim().toLowerCase()
+  const reportAgainstCount = Number(user.reportAgainstCount || 0)
+  const complaintDowngradeThreshold = Number(governanceConfig.complaintDowngradeThreshold || 3)
+  const complaintRestrictAllThreshold = Number(governanceConfig.complaintRestrictAllThreshold || 6)
+
+  const explicitRestriction = user.publishRestriction && typeof user.publishRestriction === 'object'
+    ? user.publishRestriction
+    : null
+  if (explicitRestriction) {
+    const untilMs = new Date(explicitRestriction.untilAt).getTime()
+    const isActive = explicitRestriction.active === true || (Number.isFinite(untilMs) && nowMs < untilMs)
+    if (isActive) {
+      const scopes = normalizeRestrictionScopes(explicitRestriction.scopes || [])
+      const hitByAll = scopes.length === 0 || scopes.includes('all')
+      const hitByPaid = normalizedChargeType === 'paid' && scopes.includes('paid')
+      const hitByHighRisk = compareRiskLevel(publishRiskLevel, 'L3') >= 0 && scopes.includes('high_risk')
+      if (hitByAll || hitByPaid || hitByHighRisk) {
+        return {
+          allowed: false,
+          code: 'EXPLICIT_RESTRICTION',
+          message: String(explicitRestriction.reason || '').trim() || '当前账号发布受限，请联系管理员处理',
+          snapshot: {
+            type: 'explicit',
+            scopes,
+            untilAt: explicitRestriction.untilAt || null,
+            reason: String(explicitRestriction.reason || '').trim() || '',
+          },
+        }
+      }
+    }
+  }
+
+  if (reportAgainstCount >= complaintRestrictAllThreshold) {
+    return {
+      allowed: false,
+      code: 'COMPLAINT_RESTRICT_ALL',
+      message: '账号投诉较多，当前已临时限制发布，请联系管理员复核',
+      snapshot: {
+        type: 'auto',
+        reportAgainstCount,
+        threshold: complaintRestrictAllThreshold,
+        scope: 'all',
+      },
+    }
+  }
+
+  if (reportAgainstCount >= complaintDowngradeThreshold) {
+    if (normalizedChargeType === 'paid') {
+      return {
+        allowed: false,
+        code: 'COMPLAINT_RESTRICT_PAID',
+        message: '账号投诉较多，当前仅可发布免费或AA活动',
+        snapshot: {
+          type: 'auto',
+          reportAgainstCount,
+          threshold: complaintDowngradeThreshold,
+          scope: 'paid',
+        },
+      }
+    }
+    if (compareRiskLevel(publishRiskLevel, 'L3') >= 0) {
+      return {
+        allowed: false,
+        code: 'COMPLAINT_RESTRICT_HIGH_RISK',
+        message: '账号投诉较多，当前暂不支持发布高风险活动',
+        snapshot: {
+          type: 'auto',
+          reportAgainstCount,
+          threshold: complaintDowngradeThreshold,
+          scope: 'high_risk',
+        },
+      }
+    }
+  }
+
+  return {
+    allowed: true,
+    code: '',
+    message: '',
+    snapshot: {
+      type: 'none',
+      reportAgainstCount,
+      threshold: complaintDowngradeThreshold,
+    },
   }
 }
 
@@ -388,7 +815,7 @@ function resolveJoinRiskDisclosure({
   if (normalizedChargeType !== 'free') checkItems.push('knowPaymentByOrganizer')
 
   return {
-    version: 'p0_v1',
+    version: 'p1_v1',
     level,
     chargeType: normalizedChargeType,
     flags,
@@ -1120,6 +1547,7 @@ async function markHighFrequencyOrganizerIfNeeded(openid = '') {
 exports.main = async (event, context) => {
   const { OPENID } = cloud.getWXContext()
   const { isAdmin } = parseAdminMeta(OPENID)
+  const publishGovernanceConfig = resolvePublishGovernanceConfig()
 
   // 1. 校验身份核验状态
   const { data: users } = await db.collection('users')
@@ -1140,6 +1568,7 @@ exports.main = async (event, context) => {
     identityCheckRequired: false,
     identityCheckStatus: 'none',
     identityCheckReasons: [],
+    organizerConsents: normalizeOrganizerConsents({}),
   }
   if (user?._id) {
     const autoApproveResult = await maybeAutoApprovePendingVerify(user, OPENID)
@@ -1210,6 +1639,7 @@ exports.main = async (event, context) => {
     contactPhone = '',
     contactWechat = '',
     contactQrcodeFileId = '',
+    publishConsent = {},
   } = event
 
   const cityConfig = await loadCityConfig(cityId || DEFAULT_CITY_CONFIG.cityId)
@@ -1235,6 +1665,9 @@ exports.main = async (event, context) => {
   }
   if (sceneType?.error === 'INVALID_TYPE') {
     return { success: false, error: 'INVALID_TYPE', message: '活动场景不合法' }
+  }
+  if (sceneType?.error === 'SCENE_NOT_SELECTABLE') {
+    return { success: false, error: 'SCENE_NOT_SELECTABLE', message: '节庆活动类型由系统自动匹配，无需手动选择' }
   }
   const finalSceneId = String(sceneType?.sceneId || '').trim()
   const finalSceneName = String(sceneType?.sceneName || sceneName || '').trim()
@@ -1461,6 +1894,100 @@ exports.main = async (event, context) => {
     description,
     opsTagProfile,
   })
+  const publishGovernanceRiskLevel = resolveGovernanceRiskLevel({
+    publishRiskGate,
+    chargeType: finalChargeType,
+    riskDeclaration: {
+      isNightActivity: finalIsNightActivity,
+      isOutdoorActivity: finalIsOutdoorActivity,
+      hasAlcohol: finalHasAlcohol,
+      hasCarpool: finalHasCarpool,
+      hasOvernight: finalHasOvernight,
+      hasMinors: finalHasMinors,
+    },
+  })
+  const organizerTierMeta = resolveOrganizerTier(user, isAdmin)
+  const organizerTierPermission = resolveTierPublishPermission({
+    organizerTier: organizerTierMeta.tier,
+    publishRiskLevel: publishGovernanceRiskLevel,
+    chargeType: finalChargeType,
+    isAdmin,
+  })
+  if (!organizerTierPermission.allowed) {
+    return {
+      success: false,
+      error: 'ORGANIZER_TIER_BLOCKED',
+      message: organizerTierPermission.message || '当前账号等级暂不支持发布该活动',
+      organizerTier: organizerTierMeta.tier,
+      organizerTierLabel: ORGANIZER_TIER_LABEL_MAP[organizerTierMeta.tier] || ORGANIZER_TIER_LABEL_MAP.normal,
+      publishRiskLevel: publishGovernanceRiskLevel,
+      chargeType: finalChargeType,
+      tierReasonCode: organizerTierPermission.reasonCode,
+    }
+  }
+
+  const restrictionDecision = resolvePublishRestriction({
+    user,
+    publishRiskLevel: publishGovernanceRiskLevel,
+    chargeType: finalChargeType,
+    governanceConfig: publishGovernanceConfig,
+    nowMs: now,
+  })
+  if (!restrictionDecision.allowed) {
+    return {
+      success: false,
+      error: 'PUBLISH_RESTRICTED',
+      message: restrictionDecision.message || '当前账号发布受限，请联系管理员',
+      organizerTier: organizerTierMeta.tier,
+      publishRiskLevel: publishGovernanceRiskLevel,
+      chargeType: finalChargeType,
+      restrictionCode: restrictionDecision.code,
+      restriction: restrictionDecision.snapshot,
+    }
+  }
+
+  const consentValidation = validatePublishConsents({
+    existingConsents: user.organizerConsents,
+    consentPayload: publishConsent,
+    governanceConfig: publishGovernanceConfig,
+    isAdmin,
+  })
+  if (!consentValidation.ok) {
+    return {
+      success: false,
+      error: consentValidation.error || 'CONSENT_REQUIRED',
+      message: consentValidation.message || '请先同意发布协议',
+      requiredVersions: {
+        publishRulesVersion: consentValidation.requiredPublishRulesVersion,
+        organizerAgreementVersion: consentValidation.requiredOrganizerAgreementVersion,
+      },
+      missingConsents: consentValidation.missingKeys || [],
+      mismatchConsents: consentValidation.mismatchKeys || [],
+    }
+  }
+  if (!isAdmin && consentValidation.shouldPersist && user?._id) {
+    await db.collection('users').doc(user._id).update({
+      data: {
+        organizerConsents: {
+          publishRules: {
+            version: consentValidation.mergedConsents.publishRules.version,
+            acceptedAt: new Date(consentValidation.mergedConsents.publishRules.acceptedAt),
+            source: consentValidation.mergedConsents.publishRules.source,
+          },
+          organizerAgreement: {
+            version: consentValidation.mergedConsents.organizerAgreement.version,
+            acceptedAt: new Date(consentValidation.mergedConsents.organizerAgreement.acceptedAt),
+            source: consentValidation.mergedConsents.organizerAgreement.source,
+          },
+          updatedAt: db.serverDate(),
+        },
+        updatedAt: db.serverDate(),
+      },
+    }).catch(() => {})
+    user.organizerConsents = consentValidation.mergedConsents
+  }
+
+  const governanceForceManualReview = !isAdmin && compareRiskLevel(publishGovernanceRiskLevel, 'L3') >= 0
   const publishReviewStatus = isAdmin ? 'approved' : 'pending'
   const publishReviewRequired = !isAdmin
   const publishStatus = publishReviewStatus === 'approved'
@@ -1558,8 +2085,22 @@ exports.main = async (event, context) => {
       publishReviewedBy: isAdmin ? OPENID : '',
       publishReviewReason: isAdmin ? '管理员发布，自动通过' : '待管理员审核',
       publishRiskLevel: publishRiskGate.level,
+      publishGovernanceRiskLevel,
       publishRiskReasonCodes: publishRiskGate.reasonCodes,
-      publishForceManualReview: !isAdmin && publishRiskGate.forceManualReview,
+      publishForceManualReview: !isAdmin && (publishRiskGate.forceManualReview || governanceForceManualReview),
+      publishRulesVersion: publishGovernanceConfig.publishRulesVersion,
+      organizerAgreementVersion: publishGovernanceConfig.organizerAgreementVersion,
+      publishConsentSnapshot: {
+        publishRulesVersion: publishGovernanceConfig.publishRulesVersion,
+        organizerAgreementVersion: publishGovernanceConfig.organizerAgreementVersion,
+        acceptedAt: consentValidation?.mergedConsents?.updatedAt
+          ? new Date(consentValidation.mergedConsents.updatedAt)
+          : db.serverDate(),
+      },
+      organizerTier: organizerTierMeta.tier,
+      organizerTierLabel: ORGANIZER_TIER_LABEL_MAP[organizerTierMeta.tier] || ORGANIZER_TIER_LABEL_MAP.normal,
+      organizerTierSource: organizerTierMeta.source,
+      publishRestrictionSnapshot: restrictionDecision.snapshot || null,
       festivalThemeTagsAuto,
       festivalThemeTagsManual: [],
       festivalThemeTags,
@@ -1707,7 +2248,12 @@ exports.main = async (event, context) => {
     publishStatus,
     isOfficial,
     publishRiskLevel: publishRiskGate.level,
+    publishGovernanceRiskLevel,
     publishRiskReasonCodes: publishRiskGate.reasonCodes,
+    organizerTier: organizerTierMeta.tier,
+    organizerTierLabel: ORGANIZER_TIER_LABEL_MAP[organizerTierMeta.tier] || ORGANIZER_TIER_LABEL_MAP.normal,
+    publishRulesVersion: publishGovernanceConfig.publishRulesVersion,
+    organizerAgreementVersion: publishGovernanceConfig.organizerAgreementVersion,
     festivalThemeTags,
     festivalThemeSource,
     cityConfigVersion: cityConfig.version,

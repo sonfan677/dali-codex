@@ -54,6 +54,14 @@
     {
       "path": "pages/privacy/index",
       "style": { "navigationBarTitleText": "隐私政策" }
+    },
+    {
+      "path": "pages/publish-rules/index",
+      "style": { "navigationBarTitleText": "活动发布规则" }
+    },
+    {
+      "path": "pages/organizer-agreement/index",
+      "style": { "navigationBarTitleText": "组织者服务协议" }
     }
   ],
   "tabBar": {

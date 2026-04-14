@@ -21,6 +21,15 @@ export const useUserStore = defineStore('user', {
     identityCheckStatus: 'none',
     identityCheckReasons: [],
     identityCheckTriggeredAt: null,
+    organizerConsents: {
+      publishRules: { version: '', acceptedAt: null, source: '' },
+      organizerAgreement: { version: '', acceptedAt: null, source: '' },
+      updatedAt: null,
+    },
+    publishGovernanceConfig: {
+      publishRulesVersion: 'publish_rules_v1',
+      organizerAgreementVersion: 'organizer_agreement_v1',
+    },
     lastSessionSyncAt: 0,
     isLoggedIn: false,
   }),
@@ -42,6 +51,22 @@ export const useUserStore = defineStore('user', {
       this.identityCheckStatus = res.identityCheckStatus || 'none'
       this.identityCheckReasons = Array.isArray(res.identityCheckReasons) ? res.identityCheckReasons : []
       this.identityCheckTriggeredAt = res.identityCheckTriggeredAt || null
+      this.organizerConsents = res.organizerConsents && typeof res.organizerConsents === 'object'
+        ? res.organizerConsents
+        : {
+          publishRules: { version: '', acceptedAt: null, source: '' },
+          organizerAgreement: { version: '', acceptedAt: null, source: '' },
+          updatedAt: null,
+        }
+      this.publishGovernanceConfig = res.publishGovernanceConfig && typeof res.publishGovernanceConfig === 'object'
+        ? {
+          publishRulesVersion: res.publishGovernanceConfig.publishRulesVersion || 'publish_rules_v1',
+          organizerAgreementVersion: res.publishGovernanceConfig.organizerAgreementVersion || 'organizer_agreement_v1',
+        }
+        : {
+          publishRulesVersion: 'publish_rules_v1',
+          organizerAgreementVersion: 'organizer_agreement_v1',
+        }
       this.nickname = fallbackProfile.nickname || res.nickname || this.nickname || ''
       this.avatarUrl = fallbackProfile.avatarUrl || res.avatarUrl || this.avatarUrl || ''
       this.isLoggedIn = true
@@ -67,6 +92,15 @@ export const useUserStore = defineStore('user', {
       gd.identityCheckStatus = this.identityCheckStatus || 'none'
       gd.identityCheckReasons = Array.isArray(this.identityCheckReasons) ? this.identityCheckReasons : []
       gd.identityCheckTriggeredAt = this.identityCheckTriggeredAt || null
+      gd.organizerConsents = this.organizerConsents || {
+        publishRules: { version: '', acceptedAt: null, source: '' },
+        organizerAgreement: { version: '', acceptedAt: null, source: '' },
+        updatedAt: null,
+      }
+      gd.publishGovernanceConfig = this.publishGovernanceConfig || {
+        publishRulesVersion: 'publish_rules_v1',
+        organizerAgreementVersion: 'organizer_agreement_v1',
+      }
       gd.nickname = this.nickname || ''
       gd.avatarUrl = this.avatarUrl || ''
       gd.isLoggedIn = true
@@ -124,6 +158,15 @@ export const useUserStore = defineStore('user', {
       this.identityCheckStatus = 'none'
       this.identityCheckReasons = []
       this.identityCheckTriggeredAt = null
+      this.organizerConsents = {
+        publishRules: { version: '', acceptedAt: null, source: '' },
+        organizerAgreement: { version: '', acceptedAt: null, source: '' },
+        updatedAt: null,
+      }
+      this.publishGovernanceConfig = {
+        publishRulesVersion: 'publish_rules_v1',
+        organizerAgreementVersion: 'organizer_agreement_v1',
+      }
       this.lastSessionSyncAt = 0
       this.isLoggedIn = false
     }

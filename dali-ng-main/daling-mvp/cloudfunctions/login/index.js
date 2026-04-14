@@ -4,6 +4,8 @@ const db = cloud.database()
 const _ = db.command
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000
 const VERIFY_AUTO_APPROVE_DEFAULT_MINUTES = 10
+const DEFAULT_ACTIVITY_PUBLISH_RULES_VERSION = 'publish_rules_v1'
+const DEFAULT_ORGANIZER_SERVICE_AGREEMENT_VERSION = 'organizer_agreement_v1'
 const USER_IDENTITY_TAG_SET = new Set([
   'homestay_owner',
   'host',
@@ -16,6 +18,36 @@ const USER_IDENTITY_TAG_SET = new Set([
   'pet_owner',
   'other',
 ])
+
+function resolvePublishGovernanceConfig() {
+  return {
+    publishRulesVersion: String(process.env.ACTIVITY_PUBLISH_RULES_VERSION || DEFAULT_ACTIVITY_PUBLISH_RULES_VERSION).trim() || DEFAULT_ACTIVITY_PUBLISH_RULES_VERSION,
+    organizerAgreementVersion: String(process.env.ORGANIZER_SERVICE_AGREEMENT_VERSION || DEFAULT_ORGANIZER_SERVICE_AGREEMENT_VERSION).trim() || DEFAULT_ORGANIZER_SERVICE_AGREEMENT_VERSION,
+  }
+}
+
+function normalizeOrganizerConsents(raw = {}) {
+  const source = raw && typeof raw === 'object' ? raw : {}
+  const publishRules = source.publishRules && typeof source.publishRules === 'object'
+    ? source.publishRules
+    : {}
+  const organizerAgreement = source.organizerAgreement && typeof source.organizerAgreement === 'object'
+    ? source.organizerAgreement
+    : {}
+  return {
+    publishRules: {
+      version: String(publishRules.version || '').trim(),
+      acceptedAt: publishRules.acceptedAt || null,
+      source: String(publishRules.source || '').trim(),
+    },
+    organizerAgreement: {
+      version: String(organizerAgreement.version || '').trim(),
+      acceptedAt: organizerAgreement.acceptedAt || null,
+      source: String(organizerAgreement.source || '').trim(),
+    },
+    updatedAt: source.updatedAt || null,
+  }
+}
 
 function calcUserRiskScore(user = {}) {
   const noShowCount = Number(user.noShowCount || 0)
@@ -197,6 +229,9 @@ function buildReservedUserPatch(user = {}, cityId, todayKey) {
   if (typeof user.verifyAutoWindowMinutes !== 'number') patch.verifyAutoWindowMinutes = null
   if (typeof user.verifyFinalDecisionSource !== 'string') patch.verifyFinalDecisionSource = ''
   if (typeof user.verifyReviewedAt === 'undefined') patch.verifyReviewedAt = null
+  if (!user.organizerConsents || typeof user.organizerConsents !== 'object') {
+    patch.organizerConsents = normalizeOrganizerConsents({})
+  }
   if (typeof user.subscribeNearbyActivity !== 'boolean') patch.subscribeNearbyActivity = false
   if (!user.subscriptions || typeof user.subscriptions !== 'object') {
     patch.subscriptions = normalizeSubscriptions({})
@@ -218,6 +253,7 @@ exports.main = async (event, context) => {
   const cityId = event?.cityId || 'dali'
   const todayKey = toChinaDateKey()
   const nowMs = Date.now()
+  const publishGovernanceConfig = resolvePublishGovernanceConfig()
 
   const { data: users } = await db.collection('users')
     .where({ _openid: OPENID })
@@ -254,6 +290,7 @@ exports.main = async (event, context) => {
         verifyAutoWindowMinutes: null,
         verifyFinalDecisionSource: '',
         verifyReviewedAt: null,
+        organizerConsents: normalizeOrganizerConsents({}),
         subscribeNearbyActivity: false,
         publishCount: 0,
         joinCount: 0,
@@ -300,11 +337,13 @@ exports.main = async (event, context) => {
       identityCheckStatus: 'none',
       identityCheckReasons: [],
       identityCheckTriggeredAt: null,
+      organizerConsents: normalizeOrganizerConsents({}),
       openid: OPENID,
       nickname,
       avatarUrl,
       subscriptions,
       shouldPromptNearbySubscription: true,
+      publishGovernanceConfig,
     }
   }
 
@@ -366,6 +405,7 @@ exports.main = async (event, context) => {
   const nickname = mergedUser.nickname || ''
   const avatarUrl = mergedUser.avatarUrl || ''
   const subscriptions = normalizeSubscriptions(mergedUser.subscriptions)
+  const organizerConsents = normalizeOrganizerConsents(mergedUser.organizerConsents)
 
   return {
     success: true,
@@ -386,10 +426,12 @@ exports.main = async (event, context) => {
     identityCheckStatus: mergedUser.identityCheckStatus || 'none',
     identityCheckReasons: Array.isArray(mergedUser.identityCheckReasons) ? mergedUser.identityCheckReasons : [],
     identityCheckTriggeredAt: mergedUser.identityCheckTriggeredAt || null,
+    organizerConsents,
     openid: OPENID,
     nickname,
     avatarUrl,
     subscriptions,
     shouldPromptNearbySubscription: shouldPromptNearbySubscription(subscriptions, nowMs),
+    publishGovernanceConfig,
   }
 }
