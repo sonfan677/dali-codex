@@ -171,35 +171,37 @@ async function loadPublishGovernanceSnapshot(cityId = 'dali') {
   }
   if (raw) return raw
   try {
-    let byAction = await db.collection('adminActions')
+    const queryRes = await db.collection('adminActions')
       .where({
         action: 'update_publish_governance_config',
         targetId: 'publish_governance',
-        cityId: safeCityId,
       })
-      .orderBy('createdAt', 'desc')
-      .limit(1)
+      .limit(100)
       .get()
-    let row = byAction?.data?.[0] || null
-    if (!row) {
-      byAction = await db.collection('adminActions')
-        .where({
-          action: 'update_publish_governance_config',
-          targetId: 'publish_governance',
-        })
-        .orderBy('createdAt', 'desc')
-        .limit(1)
-        .get()
-      row = byAction?.data?.[0] || null
-    }
-    if (row && row.afterState && row.afterState.publishGovernanceConfig) {
+    const rows = Array.isArray(queryRes?.data) ? queryRes.data : []
+    const candidates = rows
+      .filter((row) => row?.afterState?.publishGovernanceConfig)
+      .filter((row) => !safeCityId || !row.cityId || row.cityId === safeCityId)
+    const withTs = candidates.map((row) => {
+      const tsFromCreatedAt = new Date(row?.createdAt).getTime()
+      const tsFromUpdatedAt = new Date(row?.afterState?.updatedAt).getTime()
+      const tsFromVersion = Number(String(row?.afterState?.version || '').split('_').pop())
+      const tsFromActionId = Number(String(row?.actionId || '').split('_')[1])
+      const ts = [tsFromCreatedAt, tsFromUpdatedAt, tsFromVersion, tsFromActionId]
+        .filter((n) => Number.isFinite(n))
+        .sort((a, b) => b - a)[0] || 0
+      return { row, ts }
+    })
+    withTs.sort((a, b) => b.ts - a.ts)
+    const picked = withTs[0]?.row || null
+    if (picked) {
       return {
         key: 'publish_governance',
-        cityId: safeCityId,
-        version: row.afterState.version || '',
-        publishGovernanceConfig: row.afterState.publishGovernanceConfig,
-        updatedAt: row.createdAt || null,
-        updatedBy: row.adminOpenid || '',
+        cityId: picked.cityId || safeCityId,
+        version: picked.afterState?.version || '',
+        publishGovernanceConfig: picked.afterState.publishGovernanceConfig,
+        updatedAt: picked.afterState?.updatedAt || picked.createdAt || null,
+        updatedBy: picked.afterState?.updatedBy || picked.adminOpenid || '',
       }
     }
   } catch (e) {}
@@ -810,6 +812,9 @@ exports.main = async (event) => {
         result = {
           message: '治理开关已更新，发布规则实时生效',
           persistMode: 'opsConfigs',
+          publishGovernanceConfig: payload,
+          version,
+          updatedAt: afterState?.updatedAt || null,
         }
       } catch (e) {
         if (!isCollectionMissingError(e)) {
@@ -833,6 +838,9 @@ exports.main = async (event) => {
           message: '治理开关已更新（兼容模式）',
           tip: '建议创建 opsConfigs 集合后再试，可获得稳定配置读写能力',
           persistMode: 'adminActions_fallback',
+          publishGovernanceConfig: payload,
+          version,
+          updatedAt: afterState?.updatedAt || null,
         }
       }
       break

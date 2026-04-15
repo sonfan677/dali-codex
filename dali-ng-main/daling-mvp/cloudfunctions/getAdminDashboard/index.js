@@ -524,31 +524,33 @@ async function loadPublishGovernanceConfig(cityId = 'dali') {
   }
   if (!raw) {
     try {
-      let byAction = await db.collection('adminActions')
+      const byAction = await db.collection('adminActions')
         .where({
           action: 'update_publish_governance_config',
           targetId: 'publish_governance',
-          cityId: safeCityId,
         })
-        .orderBy('createdAt', 'desc')
-        .limit(1)
+        .limit(100)
         .get()
-      let row = byAction?.data?.[0] || null
-      if (!row) {
-        byAction = await db.collection('adminActions')
-          .where({
-            action: 'update_publish_governance_config',
-            targetId: 'publish_governance',
-          })
-          .orderBy('createdAt', 'desc')
-          .limit(1)
-          .get()
-        row = byAction?.data?.[0] || null
-      }
-      if (row?.afterState?.publishGovernanceConfig) {
+      const rows = Array.isArray(byAction?.data) ? byAction.data : []
+      const candidates = rows
+        .filter((row) => row?.afterState?.publishGovernanceConfig)
+        .filter((row) => !safeCityId || !row.cityId || row.cityId === safeCityId)
+      const withTs = candidates.map((row) => {
+        const tsFromCreatedAt = new Date(row?.createdAt).getTime()
+        const tsFromUpdatedAt = new Date(row?.afterState?.updatedAt).getTime()
+        const tsFromVersion = Number(String(row?.afterState?.version || '').split('_').pop())
+        const tsFromActionId = Number(String(row?.actionId || '').split('_')[1])
+        const ts = [tsFromCreatedAt, tsFromUpdatedAt, tsFromVersion, tsFromActionId]
+          .filter((n) => Number.isFinite(n))
+          .sort((a, b) => b - a)[0] || 0
+        return { row, ts }
+      })
+      withTs.sort((a, b) => b.ts - a.ts)
+      const row = withTs[0]?.row || null
+      if (row && row.afterState && row.afterState.publishGovernanceConfig) {
         raw = {
           key: 'publish_governance',
-          cityId: safeCityId,
+          cityId: row.cityId || safeCityId,
           publishGovernanceConfig: row.afterState.publishGovernanceConfig,
           version: row.afterState.version || '',
           updatedAt: row.afterState.updatedAt || row.createdAt || null,

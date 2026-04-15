@@ -4718,8 +4718,17 @@ export default {
           notifyAfterAction: false,
         })
         if (ret?.success) {
+          if (ret.publishGovernanceConfig && typeof ret.publishGovernanceConfig === 'object') {
+            this.publishGovernanceConfig = ret.publishGovernanceConfig
+          }
+          if (ret.version) {
+            this.publishGovernanceConfigVersion = ret.version
+          }
+          if (ret.updatedAt) {
+            this.publishGovernanceConfigUpdatedAt = ret.updatedAt
+          }
           uni.showToast({ title: ret.message || '治理开关已更新', icon: 'success' })
-          await this.loadData()
+          await this.loadData().catch(() => {})
           return true
         }
         uni.showToast({ title: ret?.message || '更新失败', icon: 'none' })
