@@ -749,7 +749,6 @@ exports.main = async (event) => {
 
       await db.collection('opsConfigs').doc('user_segment_rule').set({
         data: {
-          _id: 'user_segment_rule',
           key: 'user_segment_rule',
           cityId: cityId || adminCityId || 'dali',
           segmentRuleConfig: payload,
@@ -790,7 +789,6 @@ exports.main = async (event) => {
       try {
         await db.collection('opsConfigs').doc('publish_governance').set({
           data: {
-            _id: 'publish_governance',
             key: 'publish_governance',
             cityId: safeCityId,
             publishGovernanceConfig: payload,
