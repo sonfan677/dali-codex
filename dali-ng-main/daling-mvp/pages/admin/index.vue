@@ -320,6 +320,52 @@
 
         <view class="card">
           <view class="title-row">
+            <text class="card-title">治理开关（P1.1）</text>
+            <text class="status-pill status-pill--log">实时生效</text>
+          </view>
+          <text class="card-openid">
+            版本：{{ publishGovernanceConfigVersion || '--' }} · 最近更新：{{ publishGovernanceConfigUpdatedAt ? formatTime(publishGovernanceConfigUpdatedAt) : '--' }}
+          </text>
+          <text class="card-openid">
+            用户发布审核：{{ publishGovernanceConfig.userPublishNeedReview ? '开启' : '关闭' }} · 等级门槛：{{ publishGovernanceConfig.enableTierGate ? '开启' : '关闭' }}
+          </text>
+          <text class="card-openid">
+            投诉限制：{{ publishGovernanceConfig.enableComplaintRestriction ? '开启' : '关闭' }} · 高风险强审：{{ publishGovernanceConfig.highRiskForceManualReview ? '开启' : '关闭' }}
+          </text>
+          <text class="card-openid">
+            投诉阈值：降档 {{ publishGovernanceConfig.complaintDowngradeThreshold }} / 全禁 {{ publishGovernanceConfig.complaintRestrictAllThreshold }}
+          </text>
+          <view class="card-actions">
+            <button
+              class="action-btn action-btn--detail mini-btn"
+              :disabled="publishGovernanceSaving"
+              @tap="togglePublishGovernance('userPublishNeedReview')"
+            >切换发布审核</button>
+            <button
+              class="action-btn action-btn--detail mini-btn"
+              :disabled="publishGovernanceSaving"
+              @tap="togglePublishGovernance('enableTierGate')"
+            >切换等级门槛</button>
+            <button
+              class="action-btn action-btn--detail mini-btn"
+              :disabled="publishGovernanceSaving"
+              @tap="togglePublishGovernance('enableComplaintRestriction')"
+            >切换投诉限制</button>
+            <button
+              class="action-btn action-btn--detail mini-btn"
+              :disabled="publishGovernanceSaving"
+              @tap="togglePublishGovernance('highRiskForceManualReview')"
+            >切换高风险强审</button>
+            <button
+              class="action-btn action-btn--approve mini-btn"
+              :disabled="publishGovernanceSaving"
+              @tap="editPublishGovernanceConfig"
+            >编辑细项</button>
+          </view>
+        </view>
+
+        <view class="card">
+          <view class="title-row">
             <text class="card-title">方案2触发队列（按需核验）</text>
             <text class="status-pill status-pill--pending">{{ scheme2TriggeredUserList.length }}</text>
           </view>
@@ -365,12 +411,17 @@
             </view>
             <text class="card-openid">原因：{{ scheme2ReasonText(item.identityCheckReasons) }}</text>
             <text class="card-openid">分群：{{ segmentLabelText(item.userSegment?.finalLabel) }}（{{ segmentConfidenceText(item.userSegment?.confidence) }}）</text>
+            <text class="card-openid">组织者等级：{{ organizerTierLabelText(item.organizerTier) }}</text>
             <text class="card-openid">发布7天：{{ item.recentPublish7dCount || 0 }} · 被举报：{{ item.reportAgainstCount || 0 }} · 状态：{{ scheme2StatusText(item.identityCheckStatus) }}</text>
             <view class="card-actions">
               <button class="action-btn action-btn--detail mini-btn" :disabled="segmentLockSavingOpenid===item.openid" @tap="setUserSegmentLock(item.openid, 'visitor')">锁为游客</button>
               <button class="action-btn action-btn--detail mini-btn" :disabled="segmentLockSavingOpenid===item.openid" @tap="setUserSegmentLock(item.openid, 'nomad')">锁为旅居</button>
               <button class="action-btn action-btn--detail mini-btn" :disabled="segmentLockSavingOpenid===item.openid" @tap="setUserSegmentLock(item.openid, 'local')">锁为本地</button>
               <button class="action-btn action-btn--reject mini-btn" :disabled="segmentLockSavingOpenid===item.openid" @tap="setUserSegmentLock(item.openid, 'unknown')">清除锁定</button>
+              <button class="action-btn action-btn--detail mini-btn" :disabled="organizerTierSavingOpenid===item.openid" @tap="setOrganizerTier(item.openid, 'normal')">普通级</button>
+              <button class="action-btn action-btn--detail mini-btn" :disabled="organizerTierSavingOpenid===item.openid" @tap="setOrganizerTier(item.openid, 'verified')">认证级</button>
+              <button class="action-btn action-btn--detail mini-btn" :disabled="organizerTierSavingOpenid===item.openid" @tap="setOrganizerTier(item.openid, 'commercial')">商业级</button>
+              <button class="action-btn action-btn--approve mini-btn" :disabled="organizerTierSavingOpenid===item.openid" @tap="setOrganizerTier(item.openid, 'qualified')">资质级</button>
             </view>
           </view>
         </view>
@@ -1788,6 +1839,26 @@ export default {
       userSegmentRuleConfigUpdatedAt: null,
       segmentRuleSaving: false,
       segmentLockSavingOpenid: '',
+      publishGovernanceConfig: {
+        publishRulesVersion: 'publish_rules_v1',
+        organizerAgreementVersion: 'organizer_agreement_v1',
+        complaintDowngradeThreshold: 3,
+        complaintRestrictAllThreshold: 6,
+        enableComplaintRestriction: true,
+        enableTierGate: true,
+        userPublishNeedReview: true,
+        highRiskForceManualReview: true,
+        tierRules: {
+          normal: { maxRiskLevel: 'L2', allowPaid: false },
+          verified: { maxRiskLevel: 'L2', allowPaid: true },
+          commercial: { maxRiskLevel: 'L3', allowPaid: true },
+          qualified: { maxRiskLevel: 'L4', allowPaid: true },
+        },
+      },
+      publishGovernanceConfigVersion: '',
+      publishGovernanceConfigUpdatedAt: null,
+      publishGovernanceSaving: false,
+      organizerTierSavingOpenid: '',
       insightActionLoadingKey: '',
       opsWeeklyBrief: {
         weekStartDate: '',
@@ -4341,6 +4412,9 @@ export default {
         this.userSegmentRuleConfig = res.userSegmentRuleConfig || this.userSegmentRuleConfig
         this.userSegmentRuleConfigVersion = res.userSegmentRuleConfigVersion || ''
         this.userSegmentRuleConfigUpdatedAt = res.userSegmentRuleConfigUpdatedAt || null
+        this.publishGovernanceConfig = res.publishGovernanceConfig || this.publishGovernanceConfig
+        this.publishGovernanceConfigVersion = res.publishGovernanceConfigVersion || ''
+        this.publishGovernanceConfigUpdatedAt = res.publishGovernanceConfigUpdatedAt || null
         this.activityList = res.activityList || []
         this.actionLogList = res.actionLogList || []
         this.userProfileList = res.userProfileList || []
@@ -4403,6 +4477,16 @@ export default {
         low: '低置信度',
       }
       return map[String(level || '').toLowerCase()] || '中置信度'
+    },
+
+    organizerTierLabelText(code = '') {
+      const map = {
+        normal: '普通发起者',
+        verified: '认证发起者',
+        commercial: '商业组织者',
+        qualified: '资质组织者',
+      }
+      return map[String(code || '').toLowerCase()] || '普通发起者'
     },
 
     async runInsightCardAction(item = {}) {
@@ -4600,6 +4684,192 @@ export default {
         uni.showToast({ title: '更新失败，请重试', icon: 'none' })
       } finally {
         this.segmentLockSavingOpenid = ''
+      }
+    },
+
+    parseGovernanceBool(value, fallback = false) {
+      if (value === true || value === false) return value
+      const safe = String(value || '').trim().toLowerCase()
+      if (['true', '1', 'yes', 'on'].includes(safe)) return true
+      if (['false', '0', 'no', 'off'].includes(safe)) return false
+      return !!fallback
+    },
+
+    normalizeGovernanceRiskLevel(value = '', fallback = 'L2') {
+      const safe = String(value || '').trim().toUpperCase()
+      if (['L1', 'L2', 'L3', 'L4'].includes(safe)) return safe
+      return fallback
+    },
+
+    async updatePublishGovernanceConfig(nextConfig = null, reason = '后台调整治理开关') {
+      if (this.publishGovernanceSaving) return false
+      if (!nextConfig || typeof nextConfig !== 'object') return false
+      this.publishGovernanceSaving = true
+      try {
+        const ret = await callCloud('adminAction', {
+          action: 'update_publish_governance_config',
+          targetType: 'system',
+          targetId: 'publish_governance',
+          reason: String(reason || '后台调整治理开关').slice(0, 120),
+          publishGovernanceConfig: nextConfig,
+          actionSource: 'human',
+          canAutoExecute: true,
+          manualOverride: true,
+          notifyAfterAction: false,
+        })
+        if (ret?.success) {
+          uni.showToast({ title: ret.message || '治理开关已更新', icon: 'success' })
+          await this.loadData()
+          return true
+        }
+        uni.showToast({ title: ret?.message || '更新失败', icon: 'none' })
+        return false
+      } catch (e) {
+        uni.showToast({ title: '更新失败，请重试', icon: 'none' })
+        return false
+      } finally {
+        this.publishGovernanceSaving = false
+      }
+    },
+
+    async togglePublishGovernance(key = '') {
+      if (this.publishGovernanceSaving) return
+      const safeKey = String(key || '').trim()
+      if (!safeKey) return
+      const current = this.publishGovernanceConfig || {}
+      if (typeof current[safeKey] !== 'boolean') return
+      const next = JSON.parse(JSON.stringify(current))
+      next[safeKey] = !current[safeKey]
+      const reason = `后台切换治理开关：${safeKey}=${next[safeKey] ? 'on' : 'off'}`
+      await this.updatePublishGovernanceConfig(next, reason)
+    },
+
+    async editPublishGovernanceConfig() {
+      if (this.publishGovernanceSaving) return
+      const current = JSON.parse(JSON.stringify(this.publishGovernanceConfig || {}))
+      const template = [
+        '按以下格式填写（每行一个）：',
+        'publishRulesVersion=publish_rules_v1',
+        'organizerAgreementVersion=organizer_agreement_v1',
+        'complaintDowngradeThreshold=3',
+        'complaintRestrictAllThreshold=6',
+        'enableComplaintRestriction=true',
+        'enableTierGate=true',
+        'userPublishNeedReview=true',
+        'highRiskForceManualReview=true',
+        'tierRules.normal.maxRiskLevel=L2',
+        'tierRules.normal.allowPaid=false',
+        'tierRules.verified.maxRiskLevel=L2',
+        'tierRules.verified.allowPaid=true',
+        'tierRules.commercial.maxRiskLevel=L3',
+        'tierRules.commercial.allowPaid=true',
+        'tierRules.qualified.maxRiskLevel=L4',
+        'tierRules.qualified.allowPaid=true',
+        '',
+        '当前配置：',
+        `publishRulesVersion=${current.publishRulesVersion || ''}`,
+        `organizerAgreementVersion=${current.organizerAgreementVersion || ''}`,
+        `complaintDowngradeThreshold=${current.complaintDowngradeThreshold || 3}`,
+        `complaintRestrictAllThreshold=${current.complaintRestrictAllThreshold || 6}`,
+        `enableComplaintRestriction=${current.enableComplaintRestriction ? 'true' : 'false'}`,
+        `enableTierGate=${current.enableTierGate ? 'true' : 'false'}`,
+        `userPublishNeedReview=${current.userPublishNeedReview ? 'true' : 'false'}`,
+        `highRiskForceManualReview=${current.highRiskForceManualReview ? 'true' : 'false'}`,
+      ].join('\n')
+      const content = await new Promise((resolve) => {
+        uni.showModal({
+          title: '编辑治理开关',
+          editable: true,
+          placeholderText: template,
+          success: (res) => resolve(res.confirm ? String(res.content || '') : ''),
+          fail: () => resolve(''),
+        })
+      })
+      if (!content) return
+      const next = JSON.parse(JSON.stringify(current))
+      const lines = content.split('\n').map((s) => s.trim()).filter(Boolean)
+      lines.forEach((line) => {
+        if (!line.includes('=')) return
+        const [pathRaw, valueRaw = ''] = line.split('=')
+        const path = String(pathRaw || '').trim()
+        const value = String(valueRaw || '').trim()
+        if (!path) return
+        if (path === 'publishRulesVersion') {
+          next.publishRulesVersion = value || next.publishRulesVersion
+          return
+        }
+        if (path === 'organizerAgreementVersion') {
+          next.organizerAgreementVersion = value || next.organizerAgreementVersion
+          return
+        }
+        if (path === 'complaintDowngradeThreshold') {
+          const n = Number(value)
+          if (Number.isFinite(n)) next.complaintDowngradeThreshold = n
+          return
+        }
+        if (path === 'complaintRestrictAllThreshold') {
+          const n = Number(value)
+          if (Number.isFinite(n)) next.complaintRestrictAllThreshold = n
+          return
+        }
+        if (path === 'enableComplaintRestriction') {
+          next.enableComplaintRestriction = this.parseGovernanceBool(value, next.enableComplaintRestriction)
+          return
+        }
+        if (path === 'enableTierGate') {
+          next.enableTierGate = this.parseGovernanceBool(value, next.enableTierGate)
+          return
+        }
+        if (path === 'userPublishNeedReview') {
+          next.userPublishNeedReview = this.parseGovernanceBool(value, next.userPublishNeedReview)
+          return
+        }
+        if (path === 'highRiskForceManualReview') {
+          next.highRiskForceManualReview = this.parseGovernanceBool(value, next.highRiskForceManualReview)
+          return
+        }
+        const tierMatch = path.match(/^tierRules\.(normal|verified|commercial|qualified)\.(maxRiskLevel|allowPaid)$/)
+        if (!tierMatch) return
+        const tier = tierMatch[1]
+        const key = tierMatch[2]
+        if (!next.tierRules || typeof next.tierRules !== 'object') next.tierRules = {}
+        if (!next.tierRules[tier] || typeof next.tierRules[tier] !== 'object') next.tierRules[tier] = {}
+        if (key === 'maxRiskLevel') {
+          next.tierRules[tier].maxRiskLevel = this.normalizeGovernanceRiskLevel(value, next.tierRules[tier].maxRiskLevel || 'L2')
+        } else {
+          next.tierRules[tier].allowPaid = this.parseGovernanceBool(value, next.tierRules[tier].allowPaid)
+        }
+      })
+      await this.updatePublishGovernanceConfig(next, '后台编辑治理开关细项')
+    },
+
+    async setOrganizerTier(openid = '', tier = 'normal') {
+      const safeOpenid = String(openid || '').trim()
+      const safeTier = String(tier || '').trim().toLowerCase()
+      if (!safeOpenid || !['normal', 'verified', 'commercial', 'qualified'].includes(safeTier)) return
+      this.organizerTierSavingOpenid = safeOpenid
+      try {
+        const ret = await callCloud('adminAction', {
+          action: 'set_organizer_tier',
+          targetId: safeOpenid,
+          targetType: 'user',
+          organizerTier: safeTier,
+          reason: `手动调整组织者等级为${this.organizerTierLabelText(safeTier)}`,
+          actionSource: 'human',
+          manualOverride: true,
+          canAutoExecute: true,
+          notifyAfterAction: false,
+        })
+        if (ret?.success) {
+          uni.showToast({ title: ret.message || '组织者等级已更新', icon: 'success' })
+          await this.loadData()
+        } else {
+          uni.showToast({ title: ret?.message || '更新失败', icon: 'none' })
+        }
+      } catch (e) {
+        uni.showToast({ title: '更新失败，请重试', icon: 'none' })
+      } finally {
+        this.organizerTierSavingOpenid = ''
       }
     },
 
@@ -5018,6 +5288,8 @@ export default {
         verify_auto_approved: '系统自动通过（待复核）',
         set_segment_lock: '手动锁定用户分群',
         update_segment_rule_config: '更新分群规则',
+        set_organizer_tier: '调整组织者等级',
+        update_publish_governance_config: '更新治理开关',
         segment_auto_switch: '用户分群自动切换',
         ops_patrol_run: '运营自动巡检执行',
         ops_patrol_alert: '运营巡检风险告警',
@@ -5049,6 +5321,7 @@ export default {
         activity: '活动',
         user: '用户',
         report: '举报',
+        system: '系统',
       }
       return map[type] || '记录'
     },
@@ -5064,6 +5337,8 @@ export default {
         ops_patrol_run: 'status-pill--result-neutral',
         set_segment_lock: 'status-pill--result-neutral',
         update_segment_rule_config: 'status-pill--result-neutral',
+        set_organizer_tier: 'status-pill--result-neutral',
+        update_publish_governance_config: 'status-pill--result-neutral',
         segment_auto_switch: 'status-pill--result-neutral',
         hide: 'status-pill--result-risk',
         ban: 'status-pill--result-risk',
@@ -5950,6 +6225,7 @@ export default {
         '实名状态',
         '实名通道',
         '手机号绑定',
+        '组织者等级',
         '风控分',
         '方案2状态',
         '方案2触发原因',
@@ -5966,7 +6242,7 @@ export default {
       ])
 
       if (users.length === 0) {
-        append(['-', '-', '-', '-', '-', '-', '-', 0, '-', '-', 0, 0, 0, 0, 0, 0, '-', '-', '-', '-'])
+        append(['-', '-', '-', '-', '-', '-', '-', '-', 0, '-', '-', 0, 0, 0, 0, 0, 0, '-', '-', '-', '-'])
       } else {
         users.forEach((item, index) => {
           append([
@@ -5977,6 +6253,7 @@ export default {
             this.scheme2StatusText(item.verifyStatus || 'none'),
             item.verifyProvider || '',
             item.phoneVerified ? '已绑定' : '未绑定',
+            this.organizerTierLabelText(item.organizerTier),
             Number(item.userRiskScore || 0),
             this.scheme2StatusText(item.identityCheckStatus || 'none'),
             this.scheme2ReasonText(item.identityCheckReasons || []),

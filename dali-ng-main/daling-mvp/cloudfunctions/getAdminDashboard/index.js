@@ -340,6 +340,23 @@ const DEFAULT_SEGMENT_RULE_CONFIG = {
   },
 }
 
+const DEFAULT_PUBLISH_GOVERNANCE_CONFIG = {
+  publishRulesVersion: 'publish_rules_v1',
+  organizerAgreementVersion: 'organizer_agreement_v1',
+  complaintDowngradeThreshold: 3,
+  complaintRestrictAllThreshold: 6,
+  enableComplaintRestriction: true,
+  enableTierGate: true,
+  userPublishNeedReview: true,
+  highRiskForceManualReview: true,
+  tierRules: {
+    normal: { maxRiskLevel: 'L2', allowPaid: false },
+    verified: { maxRiskLevel: 'L2', allowPaid: true },
+    commercial: { maxRiskLevel: 'L3', allowPaid: true },
+    qualified: { maxRiskLevel: 'L4', allowPaid: true },
+  },
+}
+
 function toTimestamp(value) {
   const ms = new Date(value).getTime()
   return Number.isFinite(ms) ? ms : NaN
@@ -396,6 +413,20 @@ function parseIntSafe(value, fallback) {
   return Number.isFinite(n) ? Math.round(n) : fallback
 }
 
+function parseBoolSafe(value, fallback = false) {
+  if (value === true || value === false) return value
+  const safe = String(value || '').trim().toLowerCase()
+  if (['true', '1', 'yes', 'on'].includes(safe)) return true
+  if (['false', '0', 'no', 'off'].includes(safe)) return false
+  return !!fallback
+}
+
+function normalizeRiskLevel(value = 'L2', fallback = 'L2') {
+  const safe = String(value || fallback).trim().toUpperCase()
+  if (['L1', 'L2', 'L3', 'L4'].includes(safe)) return safe
+  return fallback
+}
+
 function sanitizeSegmentRuleConfig(raw = {}) {
   const visitor = raw?.visitor || {}
   const local = raw?.local || {}
@@ -418,6 +449,40 @@ function sanitizeSegmentRuleConfig(raw = {}) {
   }
 }
 
+function sanitizeTierRule(raw = {}, fallback = { maxRiskLevel: 'L2', allowPaid: false }) {
+  return {
+    maxRiskLevel: normalizeRiskLevel(raw?.maxRiskLevel, fallback.maxRiskLevel),
+    allowPaid: parseBoolSafe(raw?.allowPaid, fallback.allowPaid),
+  }
+}
+
+function sanitizePublishGovernanceConfig(raw = {}, current = DEFAULT_PUBLISH_GOVERNANCE_CONFIG) {
+  const source = raw && typeof raw === 'object' ? raw : {}
+  const base = current && typeof current === 'object'
+    ? current
+    : DEFAULT_PUBLISH_GOVERNANCE_CONFIG
+  const next = {
+    publishRulesVersion: String(source.publishRulesVersion || base.publishRulesVersion || DEFAULT_PUBLISH_GOVERNANCE_CONFIG.publishRulesVersion).trim() || DEFAULT_PUBLISH_GOVERNANCE_CONFIG.publishRulesVersion,
+    organizerAgreementVersion: String(source.organizerAgreementVersion || base.organizerAgreementVersion || DEFAULT_PUBLISH_GOVERNANCE_CONFIG.organizerAgreementVersion).trim() || DEFAULT_PUBLISH_GOVERNANCE_CONFIG.organizerAgreementVersion,
+    complaintDowngradeThreshold: Math.max(1, Math.min(20, parseIntSafe(source.complaintDowngradeThreshold, base.complaintDowngradeThreshold || DEFAULT_PUBLISH_GOVERNANCE_CONFIG.complaintDowngradeThreshold))),
+    complaintRestrictAllThreshold: Math.max(2, Math.min(30, parseIntSafe(source.complaintRestrictAllThreshold, base.complaintRestrictAllThreshold || DEFAULT_PUBLISH_GOVERNANCE_CONFIG.complaintRestrictAllThreshold))),
+    enableComplaintRestriction: parseBoolSafe(source.enableComplaintRestriction, base.enableComplaintRestriction),
+    enableTierGate: parseBoolSafe(source.enableTierGate, base.enableTierGate),
+    userPublishNeedReview: parseBoolSafe(source.userPublishNeedReview, base.userPublishNeedReview),
+    highRiskForceManualReview: parseBoolSafe(source.highRiskForceManualReview, base.highRiskForceManualReview),
+  }
+  const tierSource = source.tierRules && typeof source.tierRules === 'object'
+    ? source.tierRules
+    : (base.tierRules || {})
+  next.tierRules = {
+    normal: sanitizeTierRule(tierSource.normal || {}, base.tierRules?.normal || DEFAULT_PUBLISH_GOVERNANCE_CONFIG.tierRules.normal),
+    verified: sanitizeTierRule(tierSource.verified || {}, base.tierRules?.verified || DEFAULT_PUBLISH_GOVERNANCE_CONFIG.tierRules.verified),
+    commercial: sanitizeTierRule(tierSource.commercial || {}, base.tierRules?.commercial || DEFAULT_PUBLISH_GOVERNANCE_CONFIG.tierRules.commercial),
+    qualified: sanitizeTierRule(tierSource.qualified || {}, base.tierRules?.qualified || DEFAULT_PUBLISH_GOVERNANCE_CONFIG.tierRules.qualified),
+  }
+  return next
+}
+
 async function loadSegmentRuleConfig(cityId = 'dali') {
   let raw = null
   try {
@@ -437,6 +502,32 @@ async function loadSegmentRuleConfig(cityId = 'dali') {
   return {
     config: cfg,
     version: String(raw?.version || 'segment_rule_default'),
+    updatedAt: raw?.updatedAt || null,
+  }
+}
+
+async function loadPublishGovernanceConfig(cityId = 'dali') {
+  let raw = null
+  try {
+    const byId = await db.collection('opsConfigs').doc('publish_governance').get()
+    raw = byId?.data || null
+  } catch (e) {}
+  if (!raw) {
+    try {
+      const byKey = await db.collection('opsConfigs')
+        .where({ key: 'publish_governance', cityId })
+        .limit(1)
+        .get()
+      raw = byKey?.data?.[0] || null
+    } catch (e) {}
+  }
+  const config = sanitizePublishGovernanceConfig(
+    raw?.publishGovernanceConfig || {},
+    DEFAULT_PUBLISH_GOVERNANCE_CONFIG
+  )
+  return {
+    config,
+    version: String(raw?.version || 'publish_governance_default'),
     updatedAt: raw?.updatedAt || null,
   }
 }
@@ -1318,7 +1409,16 @@ exports.main = async () => {
     return { success: false, error: 'UNAUTHORIZED', message: '无管理员权限' }
   }
 
-  const [pendingUsersRes, reportsRes, activitiesRes, actionLogsRes, userProfilesRes, participationsRaw, segmentRuleConfigRes] = await Promise.all([
+  const [
+    pendingUsersRes,
+    reportsRes,
+    activitiesRes,
+    actionLogsRes,
+    userProfilesRes,
+    participationsRaw,
+    segmentRuleConfigRes,
+    publishGovernanceConfigRes,
+  ] = await Promise.all([
     db.collection('users')
       .where({ verifyStatus: 'pending' })
       .field({
@@ -1495,6 +1595,9 @@ exports.main = async () => {
         userSegment: true,
         segmentTagVersion: true,
         segmentUpdatedAt: true,
+        organizerTier: true,
+        organizerTierUpdatedAt: true,
+        organizerTierUpdatedBy: true,
         createdAt: true,
         updatedAt: true,
       })
@@ -1502,6 +1605,7 @@ exports.main = async () => {
       .catch(() => ({ data: [] })),
     fetchRecentParticipations(PARTICIPATION_ANALYSIS_LIMIT),
     loadSegmentRuleConfig(meta.cityId || 'dali'),
+    loadPublishGovernanceConfig(meta.cityId || 'dali'),
   ])
 
   const shouldFilterCity = meta.adminRole === 'cityAdmin'
@@ -1676,6 +1780,9 @@ exports.main = async () => {
   const segmentRuleConfig = segmentRuleConfigRes?.config || DEFAULT_SEGMENT_RULE_CONFIG
   const segmentRuleConfigVersion = segmentRuleConfigRes?.version || 'segment_rule_default'
   const segmentRuleConfigUpdatedAt = segmentRuleConfigRes?.updatedAt || null
+  const publishGovernanceConfig = publishGovernanceConfigRes?.config || DEFAULT_PUBLISH_GOVERNANCE_CONFIG
+  const publishGovernanceConfigVersion = publishGovernanceConfigRes?.version || 'publish_governance_default'
+  const publishGovernanceConfigUpdatedAt = publishGovernanceConfigRes?.updatedAt || null
   const { segmentList, overview: userSegmentOverview } = buildUserSegmentPack(
     rawUserProfiles,
     Object.values(activityMap),
@@ -1744,6 +1851,9 @@ exports.main = async () => {
               source: 'auto_inferred',
               evidence: {},
             },
+        organizerTier: String(item.organizerTier || '').trim().toLowerCase() || 'normal',
+        organizerTierUpdatedAt: item.organizerTierUpdatedAt || null,
+        organizerTierUpdatedBy: item.organizerTierUpdatedBy || '',
         realNamePlain,
         phonePlain,
         createdAt: item.createdAt || null,
@@ -1828,6 +1938,9 @@ exports.main = async () => {
     userSegmentRuleConfig: segmentRuleConfig,
     userSegmentRuleConfigVersion: segmentRuleConfigVersion,
     userSegmentRuleConfigUpdatedAt: segmentRuleConfigUpdatedAt,
+    publishGovernanceConfig,
+    publishGovernanceConfigVersion,
+    publishGovernanceConfigUpdatedAt,
     activityList: enrichedActivityList,
     actionLogList,
     userProfileList,

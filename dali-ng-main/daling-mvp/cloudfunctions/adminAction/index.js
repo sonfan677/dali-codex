@@ -39,9 +39,40 @@ const DEFAULT_SEGMENT_RULE_CONFIG = {
   },
 }
 
+const DEFAULT_PUBLISH_GOVERNANCE_CONFIG = {
+  publishRulesVersion: 'publish_rules_v1',
+  organizerAgreementVersion: 'organizer_agreement_v1',
+  complaintDowngradeThreshold: 3,
+  complaintRestrictAllThreshold: 6,
+  enableComplaintRestriction: true,
+  enableTierGate: true,
+  userPublishNeedReview: true,
+  highRiskForceManualReview: true,
+  tierRules: {
+    normal: { maxRiskLevel: 'L2', allowPaid: false },
+    verified: { maxRiskLevel: 'L2', allowPaid: true },
+    commercial: { maxRiskLevel: 'L3', allowPaid: true },
+    qualified: { maxRiskLevel: 'L4', allowPaid: true },
+  },
+}
+
 function parseIntSafe(value, fallback) {
   const n = Number(value)
   return Number.isFinite(n) ? Math.round(n) : fallback
+}
+
+function parseBoolSafe(value, fallback = false) {
+  if (value === true || value === false) return value
+  const safe = String(value || '').trim().toLowerCase()
+  if (['true', '1', 'yes', 'on'].includes(safe)) return true
+  if (['false', '0', 'no', 'off'].includes(safe)) return false
+  return !!fallback
+}
+
+function normalizeRiskLevel(value = 'L2', fallback = 'L2') {
+  const safe = String(value || fallback).trim().toUpperCase()
+  if (['L1', 'L2', 'L3', 'L4'].includes(safe)) return safe
+  return fallback
 }
 
 function sanitizeSegmentRuleConfig(raw = {}) {
@@ -65,6 +96,56 @@ function sanitizeSegmentRuleConfig(raw = {}) {
     },
   }
   return cfg
+}
+
+function sanitizeTierRule(raw = {}, fallback = { maxRiskLevel: 'L2', allowPaid: false }) {
+  return {
+    maxRiskLevel: normalizeRiskLevel(raw?.maxRiskLevel, fallback.maxRiskLevel),
+    allowPaid: parseBoolSafe(raw?.allowPaid, fallback.allowPaid),
+  }
+}
+
+function sanitizePublishGovernanceConfig(raw = {}, current = DEFAULT_PUBLISH_GOVERNANCE_CONFIG) {
+  const source = raw && typeof raw === 'object' ? raw : {}
+  const base = current && typeof current === 'object'
+    ? current
+    : DEFAULT_PUBLISH_GOVERNANCE_CONFIG
+  const next = {
+    publishRulesVersion: String(source.publishRulesVersion || base.publishRulesVersion || DEFAULT_PUBLISH_GOVERNANCE_CONFIG.publishRulesVersion).trim() || DEFAULT_PUBLISH_GOVERNANCE_CONFIG.publishRulesVersion,
+    organizerAgreementVersion: String(source.organizerAgreementVersion || base.organizerAgreementVersion || DEFAULT_PUBLISH_GOVERNANCE_CONFIG.organizerAgreementVersion).trim() || DEFAULT_PUBLISH_GOVERNANCE_CONFIG.organizerAgreementVersion,
+    complaintDowngradeThreshold: Math.max(1, Math.min(20, parseIntSafe(source.complaintDowngradeThreshold, base.complaintDowngradeThreshold || DEFAULT_PUBLISH_GOVERNANCE_CONFIG.complaintDowngradeThreshold))),
+    complaintRestrictAllThreshold: Math.max(2, Math.min(30, parseIntSafe(source.complaintRestrictAllThreshold, base.complaintRestrictAllThreshold || DEFAULT_PUBLISH_GOVERNANCE_CONFIG.complaintRestrictAllThreshold))),
+    enableComplaintRestriction: parseBoolSafe(source.enableComplaintRestriction, base.enableComplaintRestriction),
+    enableTierGate: parseBoolSafe(source.enableTierGate, base.enableTierGate),
+    userPublishNeedReview: parseBoolSafe(source.userPublishNeedReview, base.userPublishNeedReview),
+    highRiskForceManualReview: parseBoolSafe(source.highRiskForceManualReview, base.highRiskForceManualReview),
+  }
+  const tierSource = source.tierRules && typeof source.tierRules === 'object'
+    ? source.tierRules
+    : (base.tierRules || {})
+  next.tierRules = {
+    normal: sanitizeTierRule(tierSource.normal || {}, base.tierRules?.normal || DEFAULT_PUBLISH_GOVERNANCE_CONFIG.tierRules.normal),
+    verified: sanitizeTierRule(tierSource.verified || {}, base.tierRules?.verified || DEFAULT_PUBLISH_GOVERNANCE_CONFIG.tierRules.verified),
+    commercial: sanitizeTierRule(tierSource.commercial || {}, base.tierRules?.commercial || DEFAULT_PUBLISH_GOVERNANCE_CONFIG.tierRules.commercial),
+    qualified: sanitizeTierRule(tierSource.qualified || {}, base.tierRules?.qualified || DEFAULT_PUBLISH_GOVERNANCE_CONFIG.tierRules.qualified),
+  }
+  return next
+}
+
+function normalizeOrganizerTierCode(value = '') {
+  const safe = String(value || '').trim().toLowerCase()
+  if (['normal', 'verified', 'commercial', 'qualified'].includes(safe)) return safe
+  return ''
+}
+
+function organizerTierLabel(code = '') {
+  const map = {
+    normal: '普通发起者',
+    verified: '认证发起者',
+    commercial: '商业组织者',
+    qualified: '资质组织者',
+  }
+  return map[normalizeOrganizerTierCode(code)] || '普通发起者'
 }
 
 function parseAdminMeta(openid) {
@@ -567,6 +648,31 @@ exports.main = async (event) => {
       break
     }
 
+    case 'set_organizer_tier': {
+      finalTargetType = 'user'
+      beforeState = await getUserSnapshot(targetId)
+      if (!beforeState) {
+        return { success: false, error: 'NOT_FOUND', message: '用户不存在' }
+      }
+      const nextTier = normalizeOrganizerTierCode(event.organizerTier || event.tier || '')
+      if (!nextTier) {
+        return { success: false, error: 'INVALID_ORGANIZER_TIER', message: '组织者等级不合法' }
+      }
+      await db.collection('users').where({ _openid: targetId }).update({
+        data: {
+          organizerTier: nextTier,
+          organizerTierUpdatedAt: db.serverDate(),
+          organizerTierUpdatedBy: OPENID,
+          updatedAt: db.serverDate(),
+        },
+      })
+      afterState = await getUserSnapshot(targetId)
+      result = {
+        message: `组织者等级已设为${organizerTierLabel(nextTier)}`,
+      }
+      break
+    }
+
     case 'update_segment_rule_config': {
       finalTargetType = 'system'
       finalTargetId = 'user_segment_rule'
@@ -601,6 +707,51 @@ exports.main = async (event) => {
       }
       result = {
         message: '分群规则已更新，刷新后台后生效',
+      }
+      break
+    }
+
+    case 'update_publish_governance_config': {
+      finalTargetType = 'system'
+      finalTargetId = 'publish_governance'
+      let beforeDoc = null
+      try {
+        const docRes = await db.collection('opsConfigs').doc('publish_governance').get()
+        beforeDoc = docRes.data || null
+      } catch (e) {
+        beforeDoc = null
+      }
+      const beforeConfig = sanitizePublishGovernanceConfig(
+        beforeDoc?.publishGovernanceConfig || {},
+        DEFAULT_PUBLISH_GOVERNANCE_CONFIG
+      )
+      const payload = sanitizePublishGovernanceConfig(
+        event.publishGovernanceConfig || {},
+        beforeConfig
+      )
+      beforeState = beforeDoc ? {
+        publishGovernanceConfig: beforeConfig,
+        version: beforeDoc.version || '',
+      } : null
+
+      await db.collection('opsConfigs').doc('publish_governance').set({
+        data: {
+          _id: 'publish_governance',
+          key: 'publish_governance',
+          cityId: cityId || adminCityId || 'dali',
+          publishGovernanceConfig: payload,
+          version: `publish_governance_${Date.now()}`,
+          updatedBy: OPENID,
+          updatedAt: db.serverDate(),
+          createdAt: beforeDoc?.createdAt || db.serverDate(),
+        },
+      })
+      const afterDocRes = await db.collection('opsConfigs').doc('publish_governance').get().catch(() => null)
+      afterState = afterDocRes?.data || {
+        publishGovernanceConfig: payload,
+      }
+      result = {
+        message: '治理开关已更新，发布规则实时生效',
       }
       break
     }

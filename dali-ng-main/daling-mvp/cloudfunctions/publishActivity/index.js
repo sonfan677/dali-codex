@@ -315,6 +315,22 @@ const FESTIVAL_THEME_COLLECTION_CANDIDATES = ['festivalThemes', 'officialFestiva
 const MAX_FESTIVAL_THEME_TAGS = 5
 const DEFAULT_ACTIVITY_PUBLISH_RULES_VERSION = 'publish_rules_v1'
 const DEFAULT_ORGANIZER_SERVICE_AGREEMENT_VERSION = 'organizer_agreement_v1'
+const DEFAULT_PUBLISH_GOVERNANCE_CONFIG = {
+  publishRulesVersion: DEFAULT_ACTIVITY_PUBLISH_RULES_VERSION,
+  organizerAgreementVersion: DEFAULT_ORGANIZER_SERVICE_AGREEMENT_VERSION,
+  complaintDowngradeThreshold: 3,
+  complaintRestrictAllThreshold: 6,
+  enableComplaintRestriction: true,
+  enableTierGate: true,
+  userPublishNeedReview: true,
+  highRiskForceManualReview: true,
+  tierRules: {
+    normal: { maxRiskLevel: 'L2', allowPaid: false },
+    verified: { maxRiskLevel: 'L2', allowPaid: true },
+    commercial: { maxRiskLevel: 'L3', allowPaid: true },
+    qualified: { maxRiskLevel: 'L4', allowPaid: true },
+  },
+}
 const ORGANIZER_TIER_LABEL_MAP = {
   normal: '普通发起者',
   verified: '认证发起者',
@@ -363,17 +379,82 @@ function parseAdminMeta(openid) {
   }
 }
 
-function resolvePublishGovernanceConfig() {
-  const publishRulesVersion = String(process.env.ACTIVITY_PUBLISH_RULES_VERSION || DEFAULT_ACTIVITY_PUBLISH_RULES_VERSION).trim() || DEFAULT_ACTIVITY_PUBLISH_RULES_VERSION
-  const organizerAgreementVersion = String(process.env.ORGANIZER_SERVICE_AGREEMENT_VERSION || DEFAULT_ORGANIZER_SERVICE_AGREEMENT_VERSION).trim() || DEFAULT_ORGANIZER_SERVICE_AGREEMENT_VERSION
-  const complaintDowngradeThreshold = normalizeNumber(process.env.PUBLISH_COMPLAINT_DOWNGRADE_THRESHOLD, 3)
-  const complaintRestrictAllThreshold = normalizeNumber(process.env.PUBLISH_COMPLAINT_RESTRICT_ALL_THRESHOLD, 6)
+function parseBoolSafe(value, fallback = false) {
+  if (value === true || value === false) return value
+  const safe = String(value || '').trim().toLowerCase()
+  if (['true', '1', 'yes', 'on'].includes(safe)) return true
+  if (['false', '0', 'no', 'off'].includes(safe)) return false
+  return !!fallback
+}
+
+function normalizeRiskLevel(value = 'L2', fallback = 'L2') {
+  const safe = String(value || fallback).trim().toUpperCase()
+  if (['L1', 'L2', 'L3', 'L4'].includes(safe)) return safe
+  return fallback
+}
+
+function sanitizeTierRule(raw = {}, fallback = { maxRiskLevel: 'L2', allowPaid: false }) {
   return {
-    publishRulesVersion,
-    organizerAgreementVersion,
-    complaintDowngradeThreshold: Math.max(1, Math.min(20, Number(complaintDowngradeThreshold) || 3)),
-    complaintRestrictAllThreshold: Math.max(2, Math.min(30, Number(complaintRestrictAllThreshold) || 6)),
+    maxRiskLevel: normalizeRiskLevel(raw?.maxRiskLevel, fallback.maxRiskLevel),
+    allowPaid: parseBoolSafe(raw?.allowPaid, fallback.allowPaid),
   }
+}
+
+function sanitizePublishGovernanceConfig(raw = {}, current = DEFAULT_PUBLISH_GOVERNANCE_CONFIG) {
+  const source = raw && typeof raw === 'object' ? raw : {}
+  const base = current && typeof current === 'object'
+    ? current
+    : DEFAULT_PUBLISH_GOVERNANCE_CONFIG
+  const next = {
+    publishRulesVersion: String(source.publishRulesVersion || base.publishRulesVersion || DEFAULT_PUBLISH_GOVERNANCE_CONFIG.publishRulesVersion).trim() || DEFAULT_PUBLISH_GOVERNANCE_CONFIG.publishRulesVersion,
+    organizerAgreementVersion: String(source.organizerAgreementVersion || base.organizerAgreementVersion || DEFAULT_PUBLISH_GOVERNANCE_CONFIG.organizerAgreementVersion).trim() || DEFAULT_PUBLISH_GOVERNANCE_CONFIG.organizerAgreementVersion,
+    complaintDowngradeThreshold: Math.max(1, Math.min(20, Number(normalizeNumber(source.complaintDowngradeThreshold, base.complaintDowngradeThreshold || DEFAULT_PUBLISH_GOVERNANCE_CONFIG.complaintDowngradeThreshold)) || DEFAULT_PUBLISH_GOVERNANCE_CONFIG.complaintDowngradeThreshold)),
+    complaintRestrictAllThreshold: Math.max(2, Math.min(30, Number(normalizeNumber(source.complaintRestrictAllThreshold, base.complaintRestrictAllThreshold || DEFAULT_PUBLISH_GOVERNANCE_CONFIG.complaintRestrictAllThreshold)) || DEFAULT_PUBLISH_GOVERNANCE_CONFIG.complaintRestrictAllThreshold)),
+    enableComplaintRestriction: parseBoolSafe(source.enableComplaintRestriction, base.enableComplaintRestriction),
+    enableTierGate: parseBoolSafe(source.enableTierGate, base.enableTierGate),
+    userPublishNeedReview: parseBoolSafe(source.userPublishNeedReview, base.userPublishNeedReview),
+    highRiskForceManualReview: parseBoolSafe(source.highRiskForceManualReview, base.highRiskForceManualReview),
+  }
+  const tierSource = source.tierRules && typeof source.tierRules === 'object'
+    ? source.tierRules
+    : (base.tierRules || {})
+  next.tierRules = {
+    normal: sanitizeTierRule(tierSource.normal || {}, base.tierRules?.normal || DEFAULT_PUBLISH_GOVERNANCE_CONFIG.tierRules.normal),
+    verified: sanitizeTierRule(tierSource.verified || {}, base.tierRules?.verified || DEFAULT_PUBLISH_GOVERNANCE_CONFIG.tierRules.verified),
+    commercial: sanitizeTierRule(tierSource.commercial || {}, base.tierRules?.commercial || DEFAULT_PUBLISH_GOVERNANCE_CONFIG.tierRules.commercial),
+    qualified: sanitizeTierRule(tierSource.qualified || {}, base.tierRules?.qualified || DEFAULT_PUBLISH_GOVERNANCE_CONFIG.tierRules.qualified),
+  }
+  return next
+}
+
+function resolvePublishGovernanceConfigFromEnv() {
+  const envRaw = {
+    publishRulesVersion: process.env.ACTIVITY_PUBLISH_RULES_VERSION || DEFAULT_PUBLISH_GOVERNANCE_CONFIG.publishRulesVersion,
+    organizerAgreementVersion: process.env.ORGANIZER_SERVICE_AGREEMENT_VERSION || DEFAULT_PUBLISH_GOVERNANCE_CONFIG.organizerAgreementVersion,
+    complaintDowngradeThreshold: normalizeNumber(process.env.PUBLISH_COMPLAINT_DOWNGRADE_THRESHOLD, DEFAULT_PUBLISH_GOVERNANCE_CONFIG.complaintDowngradeThreshold),
+    complaintRestrictAllThreshold: normalizeNumber(process.env.PUBLISH_COMPLAINT_RESTRICT_ALL_THRESHOLD, DEFAULT_PUBLISH_GOVERNANCE_CONFIG.complaintRestrictAllThreshold),
+  }
+  return sanitizePublishGovernanceConfig(envRaw, DEFAULT_PUBLISH_GOVERNANCE_CONFIG)
+}
+
+async function loadPublishGovernanceConfig(cityId = 'dali') {
+  const safeCityId = String(cityId || '').trim() || 'dali'
+  const envFallback = resolvePublishGovernanceConfigFromEnv()
+  let raw = null
+  try {
+    const byId = await db.collection('opsConfigs').doc('publish_governance').get()
+    raw = byId?.data || null
+  } catch (e) {}
+  if (!raw) {
+    try {
+      const byKey = await db.collection('opsConfigs')
+        .where({ key: 'publish_governance', cityId: safeCityId })
+        .limit(1)
+        .get()
+      raw = byKey?.data?.[0] || null
+    } catch (e) {}
+  }
+  return sanitizePublishGovernanceConfig(raw?.publishGovernanceConfig || {}, envFallback)
 }
 
 function normalizeOrganizerConsents(raw = {}) {
@@ -625,16 +706,22 @@ function resolveTierPublishPermission({
   publishRiskLevel = 'L1',
   chargeType = 'free',
   isAdmin = false,
+  governanceConfig = DEFAULT_PUBLISH_GOVERNANCE_CONFIG,
 } = {}) {
   if (isAdmin) return { allowed: true, reasonCode: '', message: '', maxRiskLevel: 'L4', allowPaid: true }
-  const tierRuleMap = {
-    normal: { maxRiskLevel: 'L2', allowPaid: false },
-    verified: { maxRiskLevel: 'L2', allowPaid: true },
-    commercial: { maxRiskLevel: 'L3', allowPaid: true },
-    qualified: { maxRiskLevel: 'L4', allowPaid: true },
+  const normalizedConfig = sanitizePublishGovernanceConfig(
+    governanceConfig,
+    DEFAULT_PUBLISH_GOVERNANCE_CONFIG
+  )
+  if (!normalizedConfig.enableTierGate) {
+    return { allowed: true, reasonCode: '', message: '', maxRiskLevel: 'L4', allowPaid: true }
   }
+  const tierRuleMap = normalizedConfig.tierRules || DEFAULT_PUBLISH_GOVERNANCE_CONFIG.tierRules
   const tier = String(organizerTier || 'normal').trim().toLowerCase()
-  const rule = tierRuleMap[tier] || tierRuleMap.normal
+  const rule = sanitizeTierRule(
+    tierRuleMap[tier] || tierRuleMap.normal || DEFAULT_PUBLISH_GOVERNANCE_CONFIG.tierRules.normal,
+    DEFAULT_PUBLISH_GOVERNANCE_CONFIG.tierRules.normal
+  )
   const normalizedChargeType = String(chargeType || 'free').trim().toLowerCase()
   if (normalizedChargeType === 'paid' && !rule.allowPaid) {
     return {
@@ -680,13 +767,27 @@ function resolvePublishRestriction({
   user = {},
   publishRiskLevel = 'L1',
   chargeType = 'free',
-  governanceConfig = {},
+  governanceConfig = DEFAULT_PUBLISH_GOVERNANCE_CONFIG,
   nowMs = Date.now(),
 } = {}) {
   const normalizedChargeType = String(chargeType || 'free').trim().toLowerCase()
+  const normalizedConfig = sanitizePublishGovernanceConfig(
+    governanceConfig,
+    DEFAULT_PUBLISH_GOVERNANCE_CONFIG
+  )
+  if (!normalizedConfig.enableComplaintRestriction) {
+    return {
+      allowed: true,
+      code: '',
+      message: '',
+      snapshot: {
+        type: 'disabled',
+      },
+    }
+  }
   const reportAgainstCount = Number(user.reportAgainstCount || 0)
-  const complaintDowngradeThreshold = Number(governanceConfig.complaintDowngradeThreshold || 3)
-  const complaintRestrictAllThreshold = Number(governanceConfig.complaintRestrictAllThreshold || 6)
+  const complaintDowngradeThreshold = Number(normalizedConfig.complaintDowngradeThreshold || 3)
+  const complaintRestrictAllThreshold = Number(normalizedConfig.complaintRestrictAllThreshold || 6)
 
   const explicitRestriction = user.publishRestriction && typeof user.publishRestriction === 'object'
     ? user.publishRestriction
@@ -1547,7 +1648,7 @@ async function markHighFrequencyOrganizerIfNeeded(openid = '') {
 exports.main = async (event, context) => {
   const { OPENID } = cloud.getWXContext()
   const { isAdmin } = parseAdminMeta(OPENID)
-  const publishGovernanceConfig = resolvePublishGovernanceConfig()
+  let publishGovernanceConfig = resolvePublishGovernanceConfigFromEnv()
 
   // 1. 校验身份核验状态
   const { data: users } = await db.collection('users')
@@ -1644,6 +1745,7 @@ exports.main = async (event, context) => {
 
   const cityConfig = await loadCityConfig(cityId || DEFAULT_CITY_CONFIG.cityId)
   const finalCityId = cityConfig.cityId
+  publishGovernanceConfig = await loadPublishGovernanceConfig(finalCityId)
   const latNum = Number(lat)
   const lngNum = Number(lng)
   const sceneType = resolveSceneTypeForPublish({ sceneId, typeId, categoryId, customTypeName, typeName })
@@ -1912,6 +2014,7 @@ exports.main = async (event, context) => {
     publishRiskLevel: publishGovernanceRiskLevel,
     chargeType: finalChargeType,
     isAdmin,
+    governanceConfig: publishGovernanceConfig,
   })
   if (!organizerTierPermission.allowed) {
     return {
@@ -1987,14 +2090,18 @@ exports.main = async (event, context) => {
     user.organizerConsents = consentValidation.mergedConsents
   }
 
-  const governanceForceManualReview = !isAdmin && compareRiskLevel(publishGovernanceRiskLevel, 'L3') >= 0
-  const publishReviewStatus = isAdmin ? 'approved' : 'pending'
-  const publishReviewRequired = !isAdmin
+  const governanceForceManualReview = !isAdmin
+    && !!publishGovernanceConfig.highRiskForceManualReview
+    && compareRiskLevel(publishGovernanceRiskLevel, 'L3') >= 0
+  const publishReviewRequired = !isAdmin && !!publishGovernanceConfig.userPublishNeedReview
+  const publishReviewStatus = publishReviewRequired ? 'pending' : 'approved'
   const publishStatus = publishReviewStatus === 'approved'
     ? 'OPEN'
     : PUBLISH_REVIEW_PENDING_STATUS
   const isOfficial = !!isAdmin
-  const publishReviewSource = isAdmin ? 'admin_publish' : 'user_submit'
+  const publishReviewSource = isAdmin
+    ? 'admin_publish'
+    : (publishReviewRequired ? 'user_submit' : 'system_rule_auto_approved')
   const publisherNickname = String(user.nickname || '').trim() || (isAdmin ? '官方活动' : '搭里用户')
   const participantCapApplied = !isAdmin
     && hasExplicitMaxParticipants
@@ -2081,9 +2188,11 @@ exports.main = async (event, context) => {
       publishReviewStatus,
       publishReviewSubmittedAt: db.serverDate(),
       publishReviewSource,
-      publishReviewedAt: isAdmin ? db.serverDate() : null,
-      publishReviewedBy: isAdmin ? OPENID : '',
-      publishReviewReason: isAdmin ? '管理员发布，自动通过' : '待管理员审核',
+      publishReviewedAt: (isAdmin || !publishReviewRequired) ? db.serverDate() : null,
+      publishReviewedBy: isAdmin ? OPENID : (!publishReviewRequired ? 'system' : ''),
+      publishReviewReason: isAdmin
+        ? '管理员发布，自动通过'
+        : (publishReviewRequired ? '待管理员审核' : '治理开关：用户发布免审'),
       publishRiskLevel: publishRiskGate.level,
       publishGovernanceRiskLevel,
       publishRiskReasonCodes: publishRiskGate.reasonCodes,
