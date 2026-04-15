@@ -454,6 +454,39 @@ async function loadPublishGovernanceConfig(cityId = 'dali') {
       raw = byKey?.data?.[0] || null
     } catch (e) {}
   }
+  if (!raw) {
+    try {
+      let byAction = await db.collection('adminActions')
+        .where({
+          action: 'update_publish_governance_config',
+          targetId: 'publish_governance',
+          cityId: safeCityId,
+        })
+        .orderBy('createdAt', 'desc')
+        .limit(1)
+        .get()
+      let row = byAction?.data?.[0] || null
+      if (!row) {
+        byAction = await db.collection('adminActions')
+          .where({
+            action: 'update_publish_governance_config',
+            targetId: 'publish_governance',
+          })
+          .orderBy('createdAt', 'desc')
+          .limit(1)
+          .get()
+        row = byAction?.data?.[0] || null
+      }
+      if (row?.afterState?.publishGovernanceConfig) {
+        raw = {
+          publishGovernanceConfig: row.afterState.publishGovernanceConfig,
+          version: row.afterState.version || '',
+          updatedAt: row.afterState.updatedAt || row.createdAt || null,
+          updatedBy: row.afterState.updatedBy || row.adminOpenid || '',
+        }
+      }
+    } catch (e) {}
+  }
   return sanitizePublishGovernanceConfig(raw?.publishGovernanceConfig || {}, envFallback)
 }
 

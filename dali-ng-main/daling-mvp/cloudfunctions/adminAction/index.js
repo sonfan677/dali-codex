@@ -148,6 +148,64 @@ function organizerTierLabel(code = '') {
   return map[normalizeOrganizerTierCode(code)] || '普通发起者'
 }
 
+function isCollectionMissingError(err) {
+  const msg = String(err?.errMsg || err?.message || err || '')
+  return /COLLECTION_NOT_EXIST|collection not exists|Db or Table not exist|DATABASE_COLLECTION_NOT_EXIST/i.test(msg)
+}
+
+async function loadPublishGovernanceSnapshot(cityId = 'dali') {
+  const safeCityId = String(cityId || '').trim() || 'dali'
+  let raw = null
+  try {
+    const byId = await db.collection('opsConfigs').doc('publish_governance').get()
+    raw = byId?.data || null
+  } catch (e) {}
+  if (!raw) {
+    try {
+      const byKey = await db.collection('opsConfigs')
+        .where({ key: 'publish_governance', cityId: safeCityId })
+        .limit(1)
+        .get()
+      raw = byKey?.data?.[0] || null
+    } catch (e) {}
+  }
+  if (raw) return raw
+  try {
+    let byAction = await db.collection('adminActions')
+      .where({
+        action: 'update_publish_governance_config',
+        targetId: 'publish_governance',
+        cityId: safeCityId,
+      })
+      .orderBy('createdAt', 'desc')
+      .limit(1)
+      .get()
+    let row = byAction?.data?.[0] || null
+    if (!row) {
+      byAction = await db.collection('adminActions')
+        .where({
+          action: 'update_publish_governance_config',
+          targetId: 'publish_governance',
+        })
+        .orderBy('createdAt', 'desc')
+        .limit(1)
+        .get()
+      row = byAction?.data?.[0] || null
+    }
+    if (row && row.afterState && row.afterState.publishGovernanceConfig) {
+      return {
+        key: 'publish_governance',
+        cityId: safeCityId,
+        version: row.afterState.version || '',
+        publishGovernanceConfig: row.afterState.publishGovernanceConfig,
+        updatedAt: row.createdAt || null,
+        updatedBy: row.adminOpenid || '',
+      }
+    }
+  } catch (e) {}
+  return null
+}
+
 function parseAdminMeta(openid) {
   const adminOpenids = (process.env.ADMIN_OPENIDS || '')
     .split(',')
@@ -714,13 +772,8 @@ exports.main = async (event) => {
     case 'update_publish_governance_config': {
       finalTargetType = 'system'
       finalTargetId = 'publish_governance'
-      let beforeDoc = null
-      try {
-        const docRes = await db.collection('opsConfigs').doc('publish_governance').get()
-        beforeDoc = docRes.data || null
-      } catch (e) {
-        beforeDoc = null
-      }
+      const safeCityId = cityId || adminCityId || 'dali'
+      const beforeDoc = await loadPublishGovernanceSnapshot(safeCityId)
       const beforeConfig = sanitizePublishGovernanceConfig(
         beforeDoc?.publishGovernanceConfig || {},
         DEFAULT_PUBLISH_GOVERNANCE_CONFIG
@@ -733,25 +786,56 @@ exports.main = async (event) => {
         publishGovernanceConfig: beforeConfig,
         version: beforeDoc.version || '',
       } : null
-
-      await db.collection('opsConfigs').doc('publish_governance').set({
-        data: {
-          _id: 'publish_governance',
+      const version = `publish_governance_${Date.now()}`
+      try {
+        await db.collection('opsConfigs').doc('publish_governance').set({
+          data: {
+            _id: 'publish_governance',
+            key: 'publish_governance',
+            cityId: safeCityId,
+            publishGovernanceConfig: payload,
+            version,
+            updatedBy: OPENID,
+            updatedAt: db.serverDate(),
+            createdAt: beforeDoc?.createdAt || db.serverDate(),
+          },
+        })
+        const afterDocRes = await db.collection('opsConfigs').doc('publish_governance').get().catch(() => null)
+        afterState = afterDocRes?.data || {
           key: 'publish_governance',
-          cityId: cityId || adminCityId || 'dali',
+          cityId: safeCityId,
+          version,
           publishGovernanceConfig: payload,
-          version: `publish_governance_${Date.now()}`,
           updatedBy: OPENID,
-          updatedAt: db.serverDate(),
-          createdAt: beforeDoc?.createdAt || db.serverDate(),
-        },
-      })
-      const afterDocRes = await db.collection('opsConfigs').doc('publish_governance').get().catch(() => null)
-      afterState = afterDocRes?.data || {
-        publishGovernanceConfig: payload,
-      }
-      result = {
-        message: '治理开关已更新，发布规则实时生效',
+          updatedAt: new Date(),
+        }
+        result = {
+          message: '治理开关已更新，发布规则实时生效',
+          persistMode: 'opsConfigs',
+        }
+      } catch (e) {
+        if (!isCollectionMissingError(e)) {
+          return {
+            success: false,
+            error: 'UPDATE_GOVERNANCE_FAILED',
+            message: `治理开关更新失败：${String(e?.errMsg || e?.message || 'unknown').slice(0, 120)}`,
+          }
+        }
+        // 兼容：未建 opsConfigs 集合时，先把配置快照写入 adminActions 日志，保持功能可用。
+        afterState = {
+          key: 'publish_governance',
+          cityId: safeCityId,
+          version,
+          publishGovernanceConfig: payload,
+          updatedBy: OPENID,
+          updatedAt: new Date(),
+          persistMode: 'adminActions_fallback',
+        }
+        result = {
+          message: '治理开关已更新（兼容模式）',
+          tip: '建议创建 opsConfigs 集合后再试，可获得稳定配置读写能力',
+          persistMode: 'adminActions_fallback',
+        }
       }
       break
     }

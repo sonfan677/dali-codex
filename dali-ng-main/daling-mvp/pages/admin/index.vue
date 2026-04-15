@@ -335,29 +335,29 @@
           <text class="card-openid">
             投诉阈值：降档 {{ publishGovernanceConfig.complaintDowngradeThreshold }} / 全禁 {{ publishGovernanceConfig.complaintRestrictAllThreshold }}
           </text>
-          <view class="card-actions">
+          <view class="card-actions governance-actions">
             <button
-              class="action-btn action-btn--detail mini-btn"
+              class="action-btn action-btn--detail"
               :disabled="publishGovernanceSaving"
               @tap="togglePublishGovernance('userPublishNeedReview')"
             >切换发布审核</button>
             <button
-              class="action-btn action-btn--detail mini-btn"
+              class="action-btn action-btn--detail"
               :disabled="publishGovernanceSaving"
               @tap="togglePublishGovernance('enableTierGate')"
             >切换等级门槛</button>
             <button
-              class="action-btn action-btn--detail mini-btn"
+              class="action-btn action-btn--detail"
               :disabled="publishGovernanceSaving"
               @tap="togglePublishGovernance('enableComplaintRestriction')"
             >切换投诉限制</button>
             <button
-              class="action-btn action-btn--detail mini-btn"
+              class="action-btn action-btn--detail"
               :disabled="publishGovernanceSaving"
               @tap="togglePublishGovernance('highRiskForceManualReview')"
             >切换高风险强审</button>
             <button
-              class="action-btn action-btn--approve mini-btn"
+              class="action-btn action-btn--approve"
               :disabled="publishGovernanceSaving"
               @tap="editPublishGovernanceConfig"
             >编辑细项</button>
@@ -413,7 +413,7 @@
             <text class="card-openid">分群：{{ segmentLabelText(item.userSegment?.finalLabel) }}（{{ segmentConfidenceText(item.userSegment?.confidence) }}）</text>
             <text class="card-openid">组织者等级：{{ organizerTierLabelText(item.organizerTier) }}</text>
             <text class="card-openid">发布7天：{{ item.recentPublish7dCount || 0 }} · 被举报：{{ item.reportAgainstCount || 0 }} · 状态：{{ scheme2StatusText(item.identityCheckStatus) }}</text>
-            <view class="card-actions">
+            <view class="card-actions card-actions--wrap">
               <button class="action-btn action-btn--detail mini-btn" :disabled="segmentLockSavingOpenid===item.openid" @tap="setUserSegmentLock(item.openid, 'visitor')">锁为游客</button>
               <button class="action-btn action-btn--detail mini-btn" :disabled="segmentLockSavingOpenid===item.openid" @tap="setUserSegmentLock(item.openid, 'nomad')">锁为旅居</button>
               <button class="action-btn action-btn--detail mini-btn" :disabled="segmentLockSavingOpenid===item.openid" @tap="setUserSegmentLock(item.openid, 'local')">锁为本地</button>
@@ -4725,7 +4725,21 @@ export default {
         uni.showToast({ title: ret?.message || '更新失败', icon: 'none' })
         return false
       } catch (e) {
-        uni.showToast({ title: '更新失败，请重试', icon: 'none' })
+        const errMsg = String(e?.errMsg || e?.message || '').trim()
+        const missingCollection = /COLLECTION_NOT_EXIST|collection not exists|Db or Table not exist|DATABASE_COLLECTION_NOT_EXIST/i.test(errMsg)
+        if (missingCollection) {
+          uni.showModal({
+            title: '治理配置未初始化',
+            content: '云数据库缺少 opsConfigs 集合。请先在云开发控制台创建集合：opsConfigs（权限建议：仅创建者可读写），然后重试。',
+            showCancel: false,
+          })
+        } else {
+          uni.showToast({
+            title: errMsg ? `更新失败：${errMsg.slice(0, 28)}` : '更新失败，请重试',
+            icon: 'none',
+            duration: 2800,
+          })
+        }
         return false
       } finally {
         this.publishGovernanceSaving = false
@@ -7266,8 +7280,24 @@ export default {
 
 .card-actions { display: flex; gap: 16rpx; }
 .card-actions--single { margin-top: 16rpx; }
+.card-actions--wrap {
+  flex-wrap: wrap;
+}
+.governance-actions {
+  margin-top: 12rpx;
+  flex-wrap: wrap;
+  gap: 12rpx;
+}
+.governance-actions .action-btn {
+  flex: 0 0 calc((100% - 12rpx) / 2);
+  min-width: 0;
+  height: 64rpx;
+  line-height: 64rpx;
+  font-size: 24rpx;
+}
 .action-btn {
   flex: 1; height: 72rpx; border-radius: 12rpx;
+  line-height: 72rpx;
   font-size: 26rpx; font-weight: bold; border: none;
 }
 .action-btn--approve    { background: #EEF7EE; color: #1E7145; }
