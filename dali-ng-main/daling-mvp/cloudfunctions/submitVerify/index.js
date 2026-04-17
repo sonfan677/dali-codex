@@ -1,4 +1,5 @@
 const cloud = require('wx-server-sdk')
+const crypto = require('crypto')
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 const db = cloud.database()
 
@@ -14,9 +15,31 @@ const ID_CARD_REGION_PREFIX = new Set([
   '71', '81', '82', '91',
 ])
 
-// 简单加密（Base64，MVP阶段够用）
-function encrypt(str) {
-  return Buffer.from(str).toString('base64')
+const SENSITIVE_CIPHER_PREFIX = 'enc:v1'
+
+function getSensitiveCipherKey() {
+  const raw = String(
+    process.env.SENSITIVE_DATA_KEY
+    || process.env.ADMIN_TOKEN
+    || 'dali_sensitive_fallback_v1_change_me'
+  ).trim()
+  return crypto.createHash('sha256').update(raw).digest()
+}
+
+function encryptSensitive(str) {
+  const safe = String(str || '')
+  if (!safe) return ''
+  const key = getSensitiveCipherKey()
+  const iv = crypto.randomBytes(12)
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv)
+  const encrypted = Buffer.concat([cipher.update(safe, 'utf8'), cipher.final()])
+  const authTag = cipher.getAuthTag()
+  return [
+    SENSITIVE_CIPHER_PREFIX,
+    iv.toString('base64'),
+    authTag.toString('base64'),
+    encrypted.toString('base64'),
+  ].join(':')
 }
 
 function isValidBirthDate(yyyymmdd = '') {
@@ -90,8 +113,9 @@ exports.main = async (event, context) => {
   const cityId = users[0].cityId || 'dali'
   await db.collection('users').where({ _openid: OPENID }).update({
     data: {
-      realName: encrypt(realName.trim()),
-      idCard: encrypt(idCardValidation.normalized),
+      realName: encryptSensitive(realName.trim()),
+      idCard: encryptSensitive(idCardValidation.normalized),
+      sensitiveCipherVersion: 'aes-256-gcm-v1',
       verifyStatus: 'pending',
       verifyProvider: provider,
       identityCheckRequired: true,

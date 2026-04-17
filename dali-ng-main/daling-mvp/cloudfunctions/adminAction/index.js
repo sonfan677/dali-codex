@@ -1,6 +1,7 @@
 const cloud = require('wx-server-sdk')
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 const db = cloud.database()
+const _ = db.command
 
 function normalizeSegmentCode(raw = '') {
   const safe = String(raw || '').trim().toLowerCase()
@@ -324,6 +325,249 @@ function formatActivityTime(value) {
   return `${mo}月${day}日 ${h}:${m}`
 }
 
+function toNumberSafe(value, fallback = NaN) {
+  const n = Number(value)
+  return Number.isFinite(n) ? n : fallback
+}
+
+function haversineDistanceMeters(lat1, lng1, lat2, lng2) {
+  const la1 = toNumberSafe(lat1)
+  const lo1 = toNumberSafe(lng1)
+  const la2 = toNumberSafe(lat2)
+  const lo2 = toNumberSafe(lng2)
+  if (![la1, lo1, la2, lo2].every(Number.isFinite)) return NaN
+  const toRad = (deg) => deg * Math.PI / 180
+  const R = 6371000
+  const dLat = toRad(la2 - la1)
+  const dLng = toRad(lo2 - lo1)
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(toRad(la1)) * Math.cos(toRad(la2)) * Math.sin(dLng / 2) ** 2
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+  return R * c
+}
+
+function normalizeAddressToken(address = '') {
+  return String(address || '').trim().replace(/\s+/g, '').slice(0, 8)
+}
+
+async function summarizeParticipantsByActivity(activityId = '') {
+  if (!activityId) {
+    return { total: 0, joined: 0, pendingApproval: 0, waitlist: 0, cancelled: 0 }
+  }
+  try {
+    const { data } = await db.collection('participations')
+      .where({ activityId })
+      .limit(500)
+      .field({ status: true })
+      .get()
+    const summary = { total: 0, joined: 0, pendingApproval: 0, waitlist: 0, cancelled: 0 }
+    ;(data || []).forEach((item) => {
+      summary.total += 1
+      const status = String(item?.status || '').toLowerCase()
+      if (status === 'joined') summary.joined += 1
+      else if (status === 'pending_approval') summary.pendingApproval += 1
+      else if (status === 'waitlist') summary.waitlist += 1
+      else if (status === 'cancelled') summary.cancelled += 1
+    })
+    return summary
+  } catch (e) {
+    return { total: 0, joined: 0, pendingApproval: 0, waitlist: 0, cancelled: 0 }
+  }
+}
+
+async function findRelatedActivities(activity = {}, limit = 6) {
+  if (!activity || !activity._id) return []
+  const safeCityId = String(activity.cityId || '').trim() || ''
+  let candidates = []
+  try {
+    const query = safeCityId
+      ? { cityId: safeCityId, status: _.in(['OPEN', 'FULL', 'PUBLISH_PENDING', 'ENDED']) }
+      : { status: _.in(['OPEN', 'FULL', 'PUBLISH_PENDING', 'ENDED']) }
+    const { data } = await db.collection('activities')
+      .where(query)
+      .limit(120)
+      .field({
+        _id: true,
+        title: true,
+        status: true,
+        cityId: true,
+        sceneId: true,
+        sceneName: true,
+        typeId: true,
+        typeName: true,
+        publisherId: true,
+        publisherNickname: true,
+        location: true,
+        startTime: true,
+        createdAt: true,
+      })
+      .get()
+    candidates = data || []
+  } catch (e) {
+    candidates = []
+  }
+
+  const baseAddressToken = normalizeAddressToken(activity?.location?.address || '')
+  const now = Date.now()
+  const scored = candidates
+    .filter((row) => row && row._id && row._id !== activity._id)
+    .map((row) => {
+      let score = 0
+      const reasons = []
+      if (row.publisherId && row.publisherId === activity.publisherId) {
+        score += 4
+        reasons.push('同发布者')
+      }
+      if (row.sceneId && activity.sceneId && row.sceneId === activity.sceneId) {
+        score += 3
+        reasons.push('同场景')
+      }
+      if (row.typeId && activity.typeId && row.typeId === activity.typeId) {
+        score += 2
+        reasons.push('同活动类型')
+      }
+      const dist = haversineDistanceMeters(
+        activity?.location?.lat,
+        activity?.location?.lng,
+        row?.location?.lat,
+        row?.location?.lng
+      )
+      if (Number.isFinite(dist)) {
+        if (dist <= 3000) {
+          score += 2
+          reasons.push('3km内')
+        } else if (dist <= 10000) {
+          score += 1
+          reasons.push('10km内')
+        }
+      }
+      const token = normalizeAddressToken(row?.location?.address || '')
+      if (baseAddressToken && token && baseAddressToken === token) {
+        score += 1
+        reasons.push('同地点片区')
+      }
+      const createdMs = new Date(row.createdAt).getTime()
+      if (Number.isFinite(createdMs) && Math.abs(now - createdMs) <= 7 * 24 * 60 * 60 * 1000) {
+        score += 1
+        reasons.push('近7天发布')
+      }
+      return {
+        _id: row._id,
+        title: row.title || '未命名活动',
+        status: row.status || '',
+        sceneName: row.sceneName || '',
+        typeName: row.typeName || '',
+        publisherNickname: row.publisherNickname || '',
+        startTime: row.startTime || null,
+        distanceMeters: Number.isFinite(dist) ? Math.round(dist) : null,
+        score,
+        reasons,
+      }
+    })
+    .filter((row) => row.score > 0)
+    .sort((a, b) => b.score - a.score || (a.distanceMeters || 1e9) - (b.distanceMeters || 1e9))
+    .slice(0, Math.max(1, Number(limit) || 6))
+
+  return scored
+}
+
+async function buildIncidentEvidenceSnapshot({
+  activity = null,
+  report = null,
+  operatorOpenid = '',
+  reason = '',
+}) {
+  const participantSummary = await summarizeParticipantsByActivity(activity?._id || '')
+  const relatedActivities = await findRelatedActivities(activity, 8)
+  const snapshot = {
+    capturedAt: new Date().toISOString(),
+    operatorOpenid: operatorOpenid || '',
+    reason: String(reason || ''),
+    activity: activity
+      ? {
+          _id: activity._id,
+          title: activity.title || '',
+          status: activity.status || '',
+          cityId: activity.cityId || '',
+          publisherId: activity.publisherId || activity._openid || '',
+          publisherNickname: activity.publisherNickname || '',
+          sceneId: activity.sceneId || '',
+          sceneName: activity.sceneName || '',
+          typeId: activity.typeId || '',
+          typeName: activity.typeName || '',
+          location: activity.location || null,
+          startTime: activity.startTime || null,
+          endTime: activity.endTime || null,
+          currentParticipants: Number(activity.currentParticipants || 0),
+          maxParticipants: Number(activity.maxParticipants || 0),
+          chargeType: activity.chargeType || activity?.pricing?.chargeType || 'free',
+          pricing: activity.pricing || null,
+          riskLevel: activity.riskLevel || '',
+          riskScore: Number(activity.riskScore || 0),
+          riskReasonCodes: Array.isArray(activity.riskReasonCodes) ? activity.riskReasonCodes.slice(0, 10) : [],
+        }
+      : null,
+    report: report
+      ? {
+          _id: report._id || '',
+          reason: report.reason || '',
+          reporterOpenid: report.reporterOpenid || '',
+          reporterNickname: report.reporterNickname || '',
+          reportStatus: report.reportStatus || 'PENDING',
+          createdAt: report.createdAt || null,
+          targetId: report.targetId || '',
+        }
+      : null,
+    participantSummary,
+    relatedActivities,
+  }
+  return {
+    snapshot,
+    relatedActivities,
+    participantSummary,
+  }
+}
+
+async function writeFlowAuditEvent({
+  action = '',
+  activityId = '',
+  cityId = '',
+  actorOpenid = '',
+  reason = '',
+  result = '',
+  payload = null,
+  linkedReportId = '',
+}) {
+  const safeAction = String(action || '').trim()
+  const safeActivityId = String(activityId || '').trim()
+  if (!safeAction || !safeActivityId) return
+  try {
+    await db.collection('adminActions').add({
+      data: {
+        actionId: `flow_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        action: safeAction,
+        actionType: safeAction,
+        targetId: safeActivityId,
+        targetType: 'activity',
+        linkedActivityId: safeActivityId,
+        linkedReportId: linkedReportId || '',
+        cityId: cityId || 'dali',
+        adminId: actorOpenid || 'system',
+        adminOpenid: actorOpenid || 'system',
+        adminRole: actorOpenid ? 'superAdmin' : 'system',
+        actionSource: 'system',
+        canAutoExecute: true,
+        manualOverride: true,
+        reason: String(reason || '').slice(0, 120),
+        result: String(result || '').slice(0, 120),
+        flowPayload: payload && typeof payload === 'object' ? payload : null,
+        createdAt: db.serverDate(),
+        updatedAt: db.serverDate(),
+      },
+    })
+  } catch (e) {}
+}
+
 async function notifyActivityCancelled({
   activity = null,
   reason = '',
@@ -606,6 +850,71 @@ exports.main = async (event) => {
       break
     }
 
+    case 'freeze_activity': {
+      finalTargetType = 'activity'
+      linkedActivityId = targetId
+      const activityBefore = await getActivitySnapshot(targetId)
+      if (!activityBefore) {
+        return { success: false, error: 'NOT_FOUND', message: '活动不存在' }
+      }
+      if (adminRole === 'cityAdmin' && activityBefore.cityId && activityBefore.cityId !== adminCityId) {
+        return { success: false, error: 'CITY_SCOPE_DENIED', message: '无该城市权限' }
+      }
+      const incidentCaseId = `inc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+      const evidencePack = await buildIncidentEvidenceSnapshot({
+        activity: activityBefore,
+        report: null,
+        operatorOpenid: OPENID,
+        reason: normalizedReason,
+      })
+      const freezePatch = {
+        status: 'CANCELLED',
+        incidentControl: {
+          frozen: true,
+          freezeType: 'manual_freeze',
+          freezeReason: normalizedReason,
+          frozenBy: OPENID,
+          frozenAt: db.serverDate(),
+          linkedReportId: '',
+          incidentCaseId,
+          evidenceVersion: 'incident_v1',
+          relatedScanCount: evidencePack.relatedActivities.length,
+          relatedScanUpdatedAt: db.serverDate(),
+        },
+        updatedAt: db.serverDate(),
+      }
+      await db.collection('activities').doc(targetId).update({ data: freezePatch })
+      const activityAfter = await getActivitySnapshot(targetId)
+      beforeState = {
+        activity: activityBefore,
+        evidenceSnapshot: evidencePack.snapshot,
+      }
+      afterState = {
+        activity: activityAfter,
+        incidentCaseId,
+        relatedActivities: evidencePack.relatedActivities,
+      }
+      activityForNotify = activityAfter || activityBefore || null
+      result = {
+        message: `活动已冻结，并完成证据保全（关联排查 ${evidencePack.relatedActivities.length} 条）`,
+        incidentCaseId,
+        relatedActivityCount: evidencePack.relatedActivities.length,
+      }
+      await writeFlowAuditEvent({
+        action: 'flow_report_handled',
+        activityId: targetId,
+        cityId: activityBefore.cityId || adminCityId || 'dali',
+        actorOpenid: OPENID,
+        reason: normalizedReason,
+        result: 'manual_freeze',
+        payload: {
+          incidentCaseId,
+          relatedActivityCount: evidencePack.relatedActivities.length,
+        },
+      })
+      break
+    }
+
     case 'resolve_report_hide':
     case 'resolve_report_ignore': {
       const reportId = event.reportId || targetId
@@ -631,7 +940,7 @@ exports.main = async (event) => {
 
       const reportPatch = {
         reportStatus: action === 'resolve_report_hide' ? 'HANDLED' : 'IGNORED',
-        handleAction: action === 'resolve_report_hide' ? 'HIDE_ACTIVITY' : 'IGNORE',
+        handleAction: action === 'resolve_report_hide' ? 'FREEZE_ACTIVITY' : 'IGNORE',
         handleNote: normalizedReason,
         handlerOpenid: OPENID,
         handledAt: db.serverDate(),
@@ -648,26 +957,90 @@ exports.main = async (event) => {
           return { success: false, error: 'CITY_SCOPE_DENIED', message: '无该城市权限' }
         }
 
+        const incidentCaseId = `inc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+        const evidencePack = await buildIncidentEvidenceSnapshot({
+          activity: activityBefore,
+          report: reportBefore,
+          operatorOpenid: OPENID,
+          reason: normalizedReason,
+        })
         await db.collection('activities').doc(activityId).update({
           data: {
             status: 'CANCELLED',
+            incidentControl: {
+              frozen: true,
+              freezeType: 'report_handle',
+              freezeReason: normalizedReason,
+              frozenBy: OPENID,
+              frozenAt: db.serverDate(),
+              linkedReportId: reportId,
+              incidentCaseId,
+              evidenceVersion: 'incident_v1',
+              relatedScanCount: evidencePack.relatedActivities.length,
+              relatedScanUpdatedAt: db.serverDate(),
+            },
             updatedAt: db.serverDate(),
           }
         })
-        await db.collection('adminActions').doc(reportId).update({ data: reportPatch })
+        await db.collection('adminActions').doc(reportId).update({
+          data: {
+            ...reportPatch,
+            incidentCaseId,
+            evidenceSnapshot: evidencePack.snapshot,
+            relatedActivityScan: evidencePack.relatedActivities,
+            incidentChainVersion: 'incident_v1',
+          }
+        })
 
         const activityAfter = await getActivitySnapshot(activityId)
         const reportAfter = await getReportSnapshot(reportId)
-        beforeState = { report: reportBefore, activity: activityBefore }
-        afterState = { report: reportAfter, activity: activityAfter }
+        beforeState = {
+          report: reportBefore,
+          activity: activityBefore,
+          evidenceSnapshot: evidencePack.snapshot,
+        }
+        afterState = {
+          report: reportAfter,
+          activity: activityAfter,
+          incidentCaseId,
+          relatedActivities: evidencePack.relatedActivities,
+        }
         activityForNotify = activityAfter || activityBefore || null
-        result = { message: '举报已处理，活动已下架' }
+        result = {
+          message: `举报已处理，活动已冻结（保全证据，关联排查 ${evidencePack.relatedActivities.length} 条）`,
+          incidentCaseId,
+          relatedActivityCount: evidencePack.relatedActivities.length,
+        }
+        await writeFlowAuditEvent({
+          action: 'flow_report_handled',
+          activityId,
+          cityId: activityBefore.cityId || reportBefore.cityId || adminCityId || 'dali',
+          actorOpenid: OPENID,
+          reason: normalizedReason,
+          result: 'freeze_activity',
+          payload: {
+            reportId,
+            incidentCaseId,
+            relatedActivityCount: evidencePack.relatedActivities.length,
+          },
+          linkedReportId: reportId,
+        })
       } else {
         await db.collection('adminActions').doc(reportId).update({ data: reportPatch })
         const reportAfter = await getReportSnapshot(reportId)
         beforeState = reportBefore
         afterState = reportAfter
         result = { message: '举报已标记忽略' }
+        await writeFlowAuditEvent({
+          action: 'flow_report_handled',
+          activityId: reportBefore.targetId || '',
+          cityId: reportBefore.cityId || adminCityId || 'dali',
+          actorOpenid: OPENID,
+          reason: normalizedReason,
+          result: 'ignore_report',
+          payload: { reportId },
+          linkedReportId: reportId,
+        })
       }
       break
     }
@@ -850,7 +1223,7 @@ exports.main = async (event) => {
       return { success: false, error: 'UNKNOWN_ACTION', message: '未知操作类型' }
   }
 
-  if (notifyAfterAction && (action === 'hide' || action === 'resolve_report_hide')) {
+  if (notifyAfterAction && (action === 'hide' || action === 'freeze_activity' || action === 'resolve_report_hide')) {
     try {
       notifySummary = await notifyActivityCancelled({
         activity: activityForNotify,

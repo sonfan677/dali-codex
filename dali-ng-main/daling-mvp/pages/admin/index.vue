@@ -586,7 +586,7 @@
                 class="action-btn action-btn--approve"
                 :disabled="isHandlingReport(item.raw._id)"
                 @tap="handleReportQuick(item.raw)"
-              >一键下架</button>
+              >一键冻结</button>
               <button
                 v-if="item.type === 'report'"
                 class="action-btn action-btn--reject"
@@ -666,7 +666,7 @@
                 class="mini-btn"
                 :disabled="batchSelectedReportCount === 0 || reportBatchProcessing"
                 @tap="batchHandleReports('resolve_report_hide')"
-              >批量下架({{ batchSelectedReportCount }})</button>
+              >批量冻结({{ batchSelectedReportCount }})</button>
               <button
                 class="mini-btn mini-btn--ghost"
                 :disabled="batchSelectedReportCount === 0 || reportBatchProcessing"
@@ -707,7 +707,7 @@
             <text class="card-openid">活动：{{ item.targetActivity?.title || item.targetId }}{{ item.startInText ? ` · 距开始 ${item.startInText}` : '' }}</text>
             <view class="card-actions">
               <button class="action-btn action-btn--detail" @tap="goActivityDetail(item.targetId)">查看</button>
-              <button class="action-btn action-btn--approve" :disabled="isHandlingReport(item._id)" @tap="handleReportQuick(item)">一键下架</button>
+              <button class="action-btn action-btn--approve" :disabled="isHandlingReport(item._id)" @tap="handleReportQuick(item)">一键冻结</button>
               <button class="action-btn action-btn--reject" :disabled="isHandlingReport(item._id)" @tap="ignoreReportQuick(item)">一键忽略</button>
             </view>
           </view>
@@ -1035,7 +1035,7 @@
               :loading="isHandlingReport(item._id, 'resolve_report_hide')"
               :disabled="isHandlingReport(item._id)"
               @tap="handleReport(item)"
-            >下架并处理</button>
+            >冻结并处理</button>
             <button
               class="action-btn action-btn--reject"
               :loading="isHandlingReport(item._id, 'resolve_report_ignore')"
@@ -1287,8 +1287,8 @@
             <button
               v-if="item.status !== 'CANCELLED'"
               class="action-btn action-btn--reject"
-              @tap="hideActivity(item._id)"
-            >下架</button>
+              @tap="freezeActivity(item._id)"
+            >冻结</button>
             <button
               class="action-btn action-btn--detail"
               :disabled="festivalThemeSaving"
@@ -1518,6 +1518,42 @@
 
             <view class="export-actions">
               <button class="mini-btn mini-btn--ghost" @tap="copyTrendInsight">复制看板解读</button>
+            </view>
+          </view>
+        </view>
+
+        <view class="card">
+          <view class="title-row">
+            <text class="card-title">全链路审计追踪</text>
+            <text class="status-pill status-pill--log">风险→确认→报名→投诉→处理</text>
+          </view>
+          <view v-if="auditFlowTraceDisplayList.length === 0" class="empty empty--inline">
+            <text class="empty-text">暂无全链路审计数据</text>
+          </view>
+          <view
+            v-for="item in auditFlowTraceDisplayList.slice(0, 10)"
+            :key="`audit_trace_${item.activityId}`"
+            class="todo-item"
+          >
+            <view class="title-row">
+              <text class="card-sub">{{ item.title || '未命名活动' }}</text>
+              <text class="card-openid">进度 {{ item.stageProgressText }}</text>
+            </view>
+            <view class="inline-badges">
+              <text
+                v-for="stage in item.stageStatus"
+                :key="`${item.activityId}_${stage.key}`"
+                class="mini-pill"
+                :class="stage.hit ? 'mini-pill--handled' : 'mini-pill--log'"
+              >
+                {{ stage.label }}{{ stage.hit ? `(${stage.count})` : '(0)' }}
+              </text>
+            </view>
+            <text class="card-openid">
+              投诉：{{ item.reportTotal }}（待处理 {{ item.reportPending }}） · 最近事件：{{ formatTime(item.latestAt) }}
+            </text>
+            <view class="card-actions card-actions--single">
+              <button class="action-btn action-btn--detail" @tap="goActivityDetail(item.activityId)">查看活动详情</button>
             </view>
           </view>
         </view>
@@ -1768,6 +1804,7 @@ export default {
         loadedAt: null,
       },
       reportList: [],
+      auditFlowTraceList: [],
       pendingPublishList: [],
       opsTagOverview: {
         total: 0,
@@ -2509,19 +2546,25 @@ export default {
           { label: '全部', value: 'all' },
           { label: '设为推荐', value: 'recommend' },
           { label: '取消推荐', value: 'unrecommend' },
-          { label: '手动下架', value: 'hide' },
+          { label: '手动下架(旧)', value: 'hide' },
+          { label: '手动冻结', value: 'freeze_activity' },
           { label: '通过认证', value: 'verify' },
           { label: '拒绝认证', value: 'reject_verify' },
           { label: '分群锁定', value: 'set_segment_lock' },
           { label: '规则更新', value: 'update_segment_rule_config' },
           { label: '分群切换', value: 'segment_auto_switch' },
-          { label: '举报下架', value: 'resolve_report_hide' },
+          { label: '举报冻结', value: 'resolve_report_hide' },
           { label: '举报忽略', value: 'resolve_report_ignore' },
           { label: '发布通过', value: 'approve_publish' },
           { label: '发布驳回', value: 'reject_publish' },
           { label: '节庆标签覆盖', value: 'set_festival_tags' },
           { label: '巡检执行', value: 'ops_patrol_run' },
           { label: '巡检告警', value: 'ops_patrol_alert' },
+          { label: '风险命中', value: 'flow_risk_hit' },
+          { label: '弹窗确认', value: 'flow_risk_confirmed' },
+          { label: '报名提交', value: 'flow_join_submitted' },
+          { label: '投诉提交', value: 'flow_report_submitted' },
+          { label: '投诉处理', value: 'flow_report_handled' },
         ]
       }
       return []
@@ -2594,7 +2637,7 @@ export default {
 
     logOverview() {
       const list = this.filteredActionLogList
-      const highRiskActions = ['hide', 'ban', 'resolve_report_hide', 'reject_verify', 'ops_patrol_alert']
+      const highRiskActions = ['hide', 'freeze_activity', 'ban', 'resolve_report_hide', 'reject_verify', 'ops_patrol_alert']
       const reportRelatedActions = ['resolve_report_hide', 'resolve_report_ignore']
       return {
         total: list.length,
@@ -2735,7 +2778,7 @@ export default {
         return acc
       }, {})
       const groups = {}
-      const highRiskActions = ['hide', 'ban', 'resolve_report_hide', 'reject_verify', 'ops_patrol_alert']
+      const highRiskActions = ['hide', 'freeze_activity', 'ban', 'resolve_report_hide', 'reject_verify', 'ops_patrol_alert']
 
       const toTs = (value) => {
         const ms = new Date(value).getTime()
@@ -2832,6 +2875,25 @@ export default {
 
       list.sort((a, b) => toTs(b.latestAt) - toTs(a.latestAt))
       return list
+    },
+
+    auditFlowTraceDisplayList() {
+      const keyword = this.normalizeKeyword(this.searchKeyword)
+      const list = Array.isArray(this.auditFlowTraceList) ? this.auditFlowTraceList : []
+      const filtered = list.filter((item) => {
+        if (!this.isLogInTimeRange(item.latestAt)) return false
+        if (!keyword) return true
+        const stageText = Array.isArray(item.stageStatus)
+          ? item.stageStatus.map((stage) => stage.label).join(' ')
+          : ''
+        return this.matchAny(keyword, [
+          item.title,
+          item.activityId,
+          item.status,
+          stageText,
+        ])
+      })
+      return filtered
     },
 
     filteredPendingVerifyList() {
@@ -3740,7 +3802,7 @@ export default {
 
     formatBatchActionLabel(action) {
       const map = {
-        resolve_report_hide: '批量下架举报',
+        resolve_report_hide: '批量冻结举报',
         resolve_report_ignore: '批量忽略举报',
         verify: '批量通过认证',
         reject_verify: '批量拒绝认证',
@@ -3824,7 +3886,7 @@ export default {
 
       const reason = await this.pickReasonTemplate(action)
       if (!reason) return
-      const actionText = action === 'resolve_report_hide' ? '批量下架并处理' : '批量忽略并处理'
+      const actionText = action === 'resolve_report_hide' ? '批量冻结并处理' : '批量忽略并处理'
       uni.showModal({
         title: `确认${actionText}？`,
         content: `将处理 ${selectedRows.length} 条举报，原因：${reason}`,
@@ -4121,7 +4183,7 @@ export default {
         reject_verify: ['资料不完整，请补充后重试', '信息不一致，暂不通过'],
         approve_publish: ['活动内容合规，允许发布', '信息完整，审核通过上线'],
         reject_publish: ['活动信息不完整，请补充后重提', '活动内容存在风险，暂不通过'],
-        resolve_report_hide: ['举报成立，先下架复核', '内容违规，按规则下架处理'],
+        resolve_report_hide: ['举报成立，先冻结复核', '内容违规，按规则冻结处理'],
         resolve_report_ignore: ['举报不成立，已记录并忽略', '核查无异常，本次不处理'],
         recommend: ['活动质量高，进入推荐位', '符合运营主题，给予推荐'],
         unrecommend: ['活动热度下降，退出推荐位', '推荐策略调整，先取消推荐'],
@@ -4351,6 +4413,7 @@ export default {
           runs: [],
         }
         this.reportList = res.reportList || []
+        this.auditFlowTraceList = Array.isArray(res.auditFlowTraceList) ? res.auditFlowTraceList : []
         this.pendingPublishList = res.pendingPublishList || []
         this.opsTagOverview = res.opsTagOverview || {
           total: 0,
@@ -5028,7 +5091,7 @@ export default {
       await this.verifyUser(openid, action, reason)
     },
 
-    // 处理举报：下架活动（支持快捷模板）
+    // 处理举报：冻结活动（支持快捷模板）
     async handleReport(reportItem, presetReason = '') {
       const execute = async (reasonText) => {
         this.reportHandlingId = reportItem._id
@@ -5060,7 +5123,7 @@ export default {
 
       if (presetReason) {
         uni.showModal({
-          title: '确认下架并处理？',
+          title: '确认冻结并处理？',
           content: `将使用模板原因：${presetReason}`,
           success: async (res) => {
             if (!res.confirm) return
@@ -5071,9 +5134,9 @@ export default {
       }
 
       uni.showModal({
-        title: '确认下架此活动？',
+        title: '确认冻结此活动？',
         editable: true,
-        placeholderText: '填写下架原因（必填）',
+        placeholderText: '填写冻结原因（必填）',
         success: async (res) => {
           if (!res.confirm) return
           if (!res.content || res.content.trim().length < 2) {
@@ -5186,12 +5249,12 @@ export default {
       })
     },
 
-    // 下架活动
-    async hideActivity(activityId) {
+    // 冻结活动（事故处置）
+    async freezeActivity(activityId) {
       uni.showModal({
-        title: '确认下架此活动？',
+        title: '确认冻结此活动？',
         editable: true,
-        placeholderText: '填写下架原因（必填）',
+        placeholderText: '填写冻结原因（必填）',
         success: async (res) => {
           if (!res.confirm) return
           if (!res.content || res.content.trim().length < 2) {
@@ -5200,14 +5263,14 @@ export default {
           }
           try {
             const result = await callCloud('adminAction', {
-              action: 'hide',
+              action: 'freeze_activity',
               targetId: activityId,
               targetType: 'activity',
               reason: res.content,
               notifyAfterAction: this.todoNotifyAfterActionEnabled,
             })
             if (result.success) {
-              uni.showToast({ title: '活动已下架', icon: 'success' })
+              uni.showToast({ title: result.message || '活动已冻结', icon: 'success' })
               await this.loadData()
             }
           } catch(e) {
@@ -5215,6 +5278,11 @@ export default {
           }
         }
       })
+    },
+
+    // 兼容旧入口（保留调用不报错）
+    async hideActivity(activityId) {
+      await this.freezeActivity(activityId)
     },
 
     goActivityDetail(activityId) {
@@ -5251,6 +5319,7 @@ export default {
     handleActionText(action) {
       const map = {
         HIDE_ACTIVITY: '已下架活动',
+        FREEZE_ACTIVITY: '已冻结活动',
         IGNORE: '已忽略举报',
       }
       return map[action] || '已处理'
@@ -5302,7 +5371,8 @@ export default {
       const map = {
         recommend: '设为推荐',
         unrecommend: '取消推荐',
-        hide: '手动下架活动',
+        hide: '手动下架活动（旧）',
+        freeze_activity: '手动冻结活动',
         set_festival_tags: '节庆标签人工覆盖',
         approve_publish: '通过发布审核',
         reject_publish: '驳回发布审核',
@@ -5318,8 +5388,13 @@ export default {
         ops_patrol_alert: '运营巡检风险告警',
         mark_attendance: '到场/爽约标记',
         ban: '封禁用户',
-        resolve_report_hide: '举报处理并下架',
+        resolve_report_hide: '举报处理并冻结',
         resolve_report_ignore: '举报处理并忽略',
+        flow_risk_hit: '风险命中',
+        flow_risk_confirmed: '弹窗确认',
+        flow_join_submitted: '报名提交',
+        flow_report_submitted: '投诉提交',
+        flow_report_handled: '投诉处理',
       }
       return map[action] || action
     },
@@ -5363,7 +5438,13 @@ export default {
         set_organizer_tier: 'status-pill--result-neutral',
         update_publish_governance_config: 'status-pill--result-neutral',
         segment_auto_switch: 'status-pill--result-neutral',
+        flow_risk_hit: 'status-pill--result-neutral',
+        flow_risk_confirmed: 'status-pill--result-neutral',
+        flow_join_submitted: 'status-pill--result-neutral',
+        flow_report_submitted: 'status-pill--result-neutral',
+        flow_report_handled: 'status-pill--result-neutral',
         hide: 'status-pill--result-risk',
+        freeze_activity: 'status-pill--result-risk',
         ban: 'status-pill--result-risk',
         reject_publish: 'status-pill--result-risk',
         reject_verify: 'status-pill--result-risk',
@@ -5598,7 +5679,7 @@ export default {
     },
 
     buildTrendRows(periods = []) {
-      const highRiskActionSet = new Set(['hide', 'ban', 'resolve_report_hide', 'reject_verify', 'reject_publish', 'ops_patrol_alert'])
+      const highRiskActionSet = new Set(['hide', 'freeze_activity', 'ban', 'resolve_report_hide', 'reject_verify', 'reject_publish', 'ops_patrol_alert'])
       const reportHandledStatusSet = new Set(['HANDLED', 'IGNORED'])
       const reportHandleActionSet = new Set(['resolve_report_hide', 'resolve_report_ignore'])
 
@@ -6044,7 +6125,7 @@ export default {
       const append = (values = []) => lines.push(this.buildCsvLine(values))
       const now = new Date()
       const { exportLogList, exportRangeText, selectedFieldText } = this.getCurrentLogExportContext()
-      const highRiskActionSet = new Set(['hide', 'ban', 'resolve_report_hide', 'reject_verify', 'reject_publish', 'ops_patrol_alert'])
+      const highRiskActionSet = new Set(['hide', 'freeze_activity', 'ban', 'resolve_report_hide', 'reject_verify', 'reject_publish', 'ops_patrol_alert'])
       const reportHandleActionSet = new Set(['resolve_report_hide', 'resolve_report_ignore'])
       const activityMap = this.activityList.reduce((acc, item) => {
         if (item && item._id) acc[item._id] = item
@@ -6237,7 +6318,7 @@ export default {
       append(['城市范围', this.cityIdLabel])
       append(['记录数量', users.length])
       append(['方案2触发数量', triggeredUsers.length])
-      append(['导出类型', includeSensitive ? '含敏感字段（姓名/手机号明文）' : '脱敏导出'])
+      append(['导出类型', '脱敏导出（姓名/手机号仅展示脱敏值）'])
       append([])
 
       append([
@@ -6258,8 +6339,8 @@ export default {
         '累计报名',
         '累计到场',
         '累计爽约',
-        '姓名',
-        '手机号',
+        '姓名(脱敏)',
+        '手机号(脱敏)',
         '创建时间',
         '更新时间',
       ])
@@ -6286,8 +6367,8 @@ export default {
             Number(item.joinCount || 0),
             Number(item.attendCount || 0),
             Number(item.noShowCount || 0),
-            includeSensitive ? (item.realNamePlain || '') : (item.realNameMasked || ''),
-            includeSensitive ? (item.phonePlain || '') : (item.phoneMasked || ''),
+            item.realNameMasked || '',
+            item.phoneMasked || '',
             this.formatTime(item.createdAt),
             this.formatTime(item.updatedAt),
           ])
@@ -6343,35 +6424,10 @@ export default {
 
     async exportUserProfileCsv() {
       if (this.userProfileCsvExporting || this.csvExporting || this.csvExportingV2 || this.trendCsvExporting) return
-      const includeSensitive = await new Promise((resolve) => {
-        uni.showActionSheet({
-          itemList: ['导出脱敏版（推荐）', '导出含敏感字段（姓名/手机号明文）'],
-          success: (res) => resolve(res.tapIndex === 1),
-          fail: () => resolve(null),
-        })
-      })
-      if (includeSensitive === null) return
-
-      if (includeSensitive) {
-        const confirmed = await new Promise((resolve) => {
-          uni.showModal({
-            title: '确认敏感导出',
-            content: '该文件将包含用户真实姓名与手机号明文。请仅用于必要运营，避免外传。',
-            confirmText: '确认导出',
-            cancelText: '取消',
-            success: (res) => resolve(!!res.confirm),
-            fail: () => resolve(false),
-          })
-        })
-        if (!confirmed) return
-      }
-
       this.userProfileCsvExporting = true
       try {
-        const csvText = this.buildUserProfileCsv(includeSensitive)
-        const fileName = includeSensitive
-          ? `dali_user_profile_sensitive_${this.formatDateToken(new Date())}.csv`
-          : `dali_user_profile_masked_${this.formatDateToken(new Date())}.csv`
+        const csvText = this.buildUserProfileCsv(false)
+        const fileName = `dali_user_profile_masked_${this.formatDateToken(new Date())}.csv`
 
         try {
           const filePath = await this.saveCsvToFile(csvText, fileName)

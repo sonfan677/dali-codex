@@ -1,4 +1,5 @@
 const cloud = require('wx-server-sdk')
+const crypto = require('crypto')
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 const db = cloud.database()
 const _ = db.command
@@ -258,6 +259,115 @@ function buildOpsTagOverview(activityList = []) {
   }
 }
 
+function buildAuditFlowTraceList(activityRows = [], reportRows = [], actionRows = []) {
+  const activityMap = {}
+  ;(activityRows || []).forEach((item) => {
+    if (!item?._id) return
+    activityMap[item._id] = item
+  })
+
+  const stageActionMap = {
+    riskHit: 'flow_risk_hit',
+    popupConfirmed: 'flow_risk_confirmed',
+    joinSubmitted: 'flow_join_submitted',
+    reportSubmitted: 'flow_report_submitted',
+    reportHandled: 'flow_report_handled',
+  }
+
+  const groups = {}
+  const toTs = (value) => {
+    const ms = new Date(value).getTime()
+    return Number.isFinite(ms) ? ms : 0
+  }
+  const ensure = (activityId = '') => {
+    const safe = String(activityId || '').trim()
+    if (!safe) return null
+    if (!groups[safe]) {
+      const base = activityMap[safe] || {}
+      groups[safe] = {
+        activityId: safe,
+        title: base.title || '活动',
+        status: base.status || '',
+        cityId: base.cityId || '',
+        stageCounts: {
+          riskHit: 0,
+          popupConfirmed: 0,
+          joinSubmitted: 0,
+          reportSubmitted: 0,
+          reportHandled: 0,
+        },
+        reportTotal: 0,
+        reportPending: 0,
+        reportHandledCount: 0,
+        latestAt: null,
+      }
+    }
+    return groups[safe]
+  }
+
+  ;(actionRows || []).forEach((item) => {
+    const activityId = item?.linkedActivityId
+      || (item?.targetType === 'activity' ? item?.targetId : '')
+    const group = ensure(activityId)
+    if (!group) return
+    const ts = toTs(item?.createdAt)
+    if (!group.latestAt || ts > toTs(group.latestAt)) group.latestAt = item.createdAt
+    const action = String(item?.action || '')
+    if (action === stageActionMap.riskHit) group.stageCounts.riskHit += 1
+    else if (action === stageActionMap.popupConfirmed) group.stageCounts.popupConfirmed += 1
+    else if (action === stageActionMap.joinSubmitted) group.stageCounts.joinSubmitted += 1
+    else if (action === stageActionMap.reportSubmitted) group.stageCounts.reportSubmitted += 1
+    else if (action === stageActionMap.reportHandled) group.stageCounts.reportHandled += 1
+  })
+
+  ;(reportRows || []).forEach((item) => {
+    const group = ensure(item?.targetId || '')
+    if (!group) return
+    group.reportTotal += 1
+    if (String(item?.reportStatus || '').toUpperCase() === 'PENDING') group.reportPending += 1
+    else group.reportHandledCount += 1
+    if (String(item?.reportStatus || '').toUpperCase() !== 'PENDING') {
+      group.stageCounts.reportHandled += 1
+    }
+    if (!group.stageCounts.reportSubmitted) {
+      group.stageCounts.reportSubmitted += 1
+    }
+    const reportCreatedTs = toTs(item?.createdAt)
+    const reportHandledTs = toTs(item?.handledAt)
+    const latestTs = Math.max(reportCreatedTs, reportHandledTs)
+    if (!group.latestAt || latestTs > toTs(group.latestAt)) {
+      group.latestAt = reportHandledTs > reportCreatedTs ? item.handledAt : item.createdAt
+    }
+  })
+
+  const stageKeys = ['riskHit', 'popupConfirmed', 'joinSubmitted', 'reportSubmitted', 'reportHandled']
+  const stageLabels = {
+    riskHit: '风险命中',
+    popupConfirmed: '弹窗确认',
+    joinSubmitted: '报名提交',
+    reportSubmitted: '投诉举报',
+    reportHandled: '处理闭环',
+  }
+
+  return Object.values(groups)
+    .map((item) => {
+      const completed = stageKeys.filter((key) => Number(item.stageCounts[key] || 0) > 0).length
+      return {
+        ...item,
+        completedStageCount: completed,
+        stageProgressText: `${completed}/5`,
+        stageStatus: stageKeys.map((key) => ({
+          key,
+          label: stageLabels[key],
+          hit: Number(item.stageCounts[key] || 0) > 0,
+          count: Number(item.stageCounts[key] || 0),
+        })),
+      }
+    })
+    .sort((a, b) => toTs(b.latestAt) - toTs(a.latestAt))
+    .slice(0, 60)
+}
+
 function resolveActionLinkedActivityId(item = {}) {
   if (item.targetType === 'activity' && item.targetId) return item.targetId
   if (item.linkedActivityId) return item.linkedActivityId
@@ -268,9 +378,43 @@ function resolveActionLinkedActivityId(item = {}) {
   return ''
 }
 
+const SENSITIVE_CIPHER_PREFIX = 'enc:v1'
+
+function getSensitiveCipherKey() {
+  const raw = String(
+    process.env.SENSITIVE_DATA_KEY
+    || process.env.ADMIN_TOKEN
+    || 'dali_sensitive_fallback_v1_change_me'
+  ).trim()
+  return crypto.createHash('sha256').update(raw).digest()
+}
+
+function decryptSensitiveV1(raw = '') {
+  const text = String(raw || '').trim()
+  if (!text || !text.startsWith(`${SENSITIVE_CIPHER_PREFIX}:`)) return ''
+  const parts = text.split(':')
+  if (parts.length !== 4) return ''
+  try {
+    const iv = Buffer.from(parts[1], 'base64')
+    const authTag = Buffer.from(parts[2], 'base64')
+    const encrypted = Buffer.from(parts[3], 'base64')
+    const decipher = crypto.createDecipheriv('aes-256-gcm', getSensitiveCipherKey(), iv)
+    decipher.setAuthTag(authTag)
+    const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]).toString('utf8')
+    return String(decrypted || '')
+  } catch (e) {
+    return ''
+  }
+}
+
 function maybeDecodeSensitive(raw = '') {
   const text = String(raw || '').trim()
   if (!text) return ''
+  if (text.startsWith(`${SENSITIVE_CIPHER_PREFIX}:`)) {
+    return decryptSensitiveV1(text)
+  }
+  const encryptedDecoded = decryptSensitiveV1(text)
+  if (encryptedDecoded) return encryptedDecoded
   if (!/^[A-Za-z0-9+/=]+$/.test(text) || text.length % 4 !== 0) return text
   try {
     const decoded = Buffer.from(text, 'base64').toString('utf8')
@@ -1489,6 +1633,8 @@ exports.main = async () => {
         handleAction: true,
         handleNote: true,
         handledAt: true,
+        incidentCaseId: true,
+        relatedActivityScan: true,
         reporterOpenid: true,
         reporterNickname: true,
       })
@@ -1535,6 +1681,7 @@ exports.main = async () => {
         riskScore: true,
         riskReasonCodes: true,
         opsTagProfile: true,
+        incidentControl: true,
         location: true,
         startTime: true,
         endTime: true,
@@ -1563,6 +1710,12 @@ exports.main = async () => {
           'set_segment_lock',
           'update_segment_rule_config',
           'segment_auto_switch',
+          'freeze_activity',
+          'flow_risk_hit',
+          'flow_risk_confirmed',
+          'flow_join_submitted',
+          'flow_report_submitted',
+          'flow_report_handled',
         ]),
       })
       .orderBy('createdAt', 'desc')
@@ -1581,6 +1734,7 @@ exports.main = async () => {
         linkedReportId: true,
         notifyAfterAction: true,
         notifySummary: true,
+        flowPayload: true,
         beforeState: true,
         afterState: true,
         patrolLevel: true,
@@ -1799,6 +1953,11 @@ exports.main = async () => {
       }
     })
     .slice(0, 80)
+  const auditFlowTraceList = buildAuditFlowTraceList(
+    enrichedActivityList,
+    reportList,
+    actionLogList
+  )
 
   const participationList = rawParticipations
     .map((item) => ({
@@ -1892,8 +2051,6 @@ exports.main = async () => {
         organizerTier: String(item.organizerTier || '').trim().toLowerCase() || 'normal',
         organizerTierUpdatedAt: item.organizerTierUpdatedAt || null,
         organizerTierUpdatedBy: item.organizerTierUpdatedBy || '',
-        realNamePlain,
-        phonePlain,
         createdAt: item.createdAt || null,
         updatedAt: item.updatedAt || null,
       }
@@ -1981,6 +2138,7 @@ exports.main = async () => {
     publishGovernanceConfigUpdatedAt,
     activityList: enrichedActivityList,
     actionLogList,
+    auditFlowTraceList,
     userProfileList,
     serverTimestamp: Date.now(),
   }

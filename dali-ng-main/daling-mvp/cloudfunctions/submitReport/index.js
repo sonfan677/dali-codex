@@ -37,6 +37,45 @@ async function markTargetPublisherForScheme2(publisherOpenid = '') {
   }
 }
 
+async function writeReportFlowAudit({
+  openid = '',
+  activityId = '',
+  reportId = '',
+  cityId = '',
+  reason = '',
+}) {
+  const safeActivityId = String(activityId || '').trim()
+  if (!safeActivityId) return
+  try {
+    await db.collection('adminActions').add({
+      data: {
+        actionId: `flow_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        action: 'flow_report_submitted',
+        actionType: 'flow_report_submitted',
+        targetId: safeActivityId,
+        targetType: 'activity',
+        linkedActivityId: safeActivityId,
+        linkedReportId: reportId || '',
+        cityId: cityId || 'dali',
+        adminId: openid || 'system',
+        adminOpenid: openid || 'system',
+        adminRole: openid ? 'user' : 'system',
+        actionSource: 'user',
+        canAutoExecute: false,
+        manualOverride: false,
+        reason: String(reason || '用户提交投诉举报').slice(0, 120),
+        result: 'report_created',
+        flowPayload: {
+          reportId: reportId || '',
+          reporterOpenid: openid || '',
+        },
+        createdAt: db.serverDate(),
+        updatedAt: db.serverDate(),
+      }
+    })
+  } catch (e) {}
+}
+
 exports.main = async (event) => {
   const { OPENID } = cloud.getWXContext()
   const { targetId, targetType = 'activity', reason } = event || {}
@@ -86,7 +125,7 @@ exports.main = async (event) => {
     reporterNickname = ''
   }
 
-  await db.collection('adminActions').add({
+  const addRes = await db.collection('adminActions').add({
     data: {
       actionId: `report_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       action: 'report',
@@ -110,6 +149,15 @@ exports.main = async (event) => {
       createdAt: db.serverDate(),
       updatedAt: db.serverDate(),
     }
+  })
+
+  const reportId = addRes?._id || ''
+  await writeReportFlowAudit({
+    openid: OPENID,
+    activityId: targetId,
+    reportId,
+    cityId: activity.cityId || 'dali',
+    reason: normalizedReason,
   })
 
   await markTargetPublisherForScheme2(activity.publisherId || activity._openid || '')

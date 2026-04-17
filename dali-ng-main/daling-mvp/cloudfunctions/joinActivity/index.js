@@ -90,6 +90,45 @@ function validateRiskConfirmPayload(disclosure = {}, riskConfirm = null) {
   }
 }
 
+async function writeJoinFlowAudit({
+  action = '',
+  openid = '',
+  activityId = '',
+  cityId = 'dali',
+  reason = '',
+  result = '',
+  payload = null,
+}) {
+  const safeAction = String(action || '').trim()
+  const safeActivityId = String(activityId || '').trim()
+  if (!safeAction || !safeActivityId) return
+  try {
+    await db.collection('adminActions').add({
+      data: {
+        actionId: `flow_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        action: safeAction,
+        actionType: safeAction,
+        targetId: safeActivityId,
+        targetType: 'activity',
+        linkedActivityId: safeActivityId,
+        linkedReportId: '',
+        cityId: cityId || 'dali',
+        adminId: openid || 'system',
+        adminOpenid: openid || 'system',
+        adminRole: openid ? 'user' : 'system',
+        actionSource: 'user',
+        canAutoExecute: false,
+        manualOverride: false,
+        reason: String(reason || '').slice(0, 120),
+        result: String(result || '').slice(0, 120),
+        flowPayload: payload && typeof payload === 'object' ? payload : null,
+        createdAt: db.serverDate(),
+        updatedAt: db.serverDate(),
+      },
+    })
+  } catch (e) {}
+}
+
 exports.main = async (event, context) => {
   const { OPENID } = cloud.getWXContext()
   const { activityId, riskConfirm = null } = event
@@ -163,6 +202,21 @@ exports.main = async (event, context) => {
 
     const riskDisclosure = resolveJoinRiskDisclosure(activity)
     const riskConfirmValidation = validateRiskConfirmPayload(riskDisclosure, riskConfirm)
+    if (riskConfirmValidation.strictRequired) {
+      await writeJoinFlowAudit({
+        action: 'flow_risk_hit',
+        openid: OPENID,
+        activityId,
+        cityId: activity.cityId || user.cityId || 'dali',
+        reason: '命中风险确认门槛',
+        result: riskConfirmValidation.ok ? 'required_and_passed' : 'required_and_blocked',
+        payload: {
+          level: riskDisclosure.level,
+          chargeType: riskDisclosure.chargeType,
+          missingChecks: riskConfirmValidation.missingChecks,
+        },
+      })
+    }
     if (!riskConfirmValidation.ok) {
       await transaction.rollback()
       return {
@@ -181,6 +235,22 @@ exports.main = async (event, context) => {
       version: String(riskDisclosure.version || 'p0_v1'),
       clientConfirmedAtMs: 0,
       source: 'basic_confirmed',
+    }
+    if (riskConfirmValidation.strictRequired) {
+      await writeJoinFlowAudit({
+        action: 'flow_risk_confirmed',
+        openid: OPENID,
+        activityId,
+        cityId: activity.cityId || user.cityId || 'dali',
+        reason: '用户已确认风险弹窗',
+        result: 'confirmed',
+        payload: {
+          level: riskConfirmAudit.level,
+          chargeType: riskConfirmAudit.chargeType,
+          checks: riskConfirmAudit.checks,
+          version: riskConfirmAudit.version,
+        },
+      })
     }
 
     const allowWaitlist = !!(activity.joinPolicy?.allowWaitlist ?? activity.allowWaitlist)
@@ -321,6 +391,21 @@ exports.main = async (event, context) => {
         }
       }).catch(e => console.error('发送报名通知失败', e))
     }
+
+    await writeJoinFlowAudit({
+      action: 'flow_join_submitted',
+      openid: OPENID,
+      activityId,
+      cityId: activity.cityId || user.cityId || 'dali',
+      reason: '用户提交报名',
+      result: targetStatus,
+      payload: {
+        joinStatus: targetStatus,
+        requiresApproval: requireApproval,
+        isWaitlist: targetStatus === 'waitlist',
+        riskLevel: riskConfirmAudit.level,
+      },
+    })
     
     return {
       success: true,
