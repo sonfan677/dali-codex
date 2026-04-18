@@ -20,6 +20,251 @@ export const ACTIVITY_SCENE_DEFINITIONS = [
   { id: 'festival_theme', label: '节庆主题', desc: '三月街、火把节、节日和时令主题', iconHint: '火把/灯笼' },
 ]
 
+const PUBLISH_TEMPLATE_BY_SCENE = {
+  local_explore: {
+    emoji: '🧭',
+    title: '大理在地探索同行',
+    blocks: {
+      highlight: '一起探索在地点位，边走边聊，发现大理新的生活灵感。',
+      process: '集合破冰 → 在地路线漫游 → 自由交流与拍照打卡。',
+      tips: '请穿舒适鞋服，按时到达集合点；注意保管随身物品。',
+      suitableFor: '适合新朋友、游客、旅居者，一个人来也能参加。',
+    },
+    visibleTags: ['适合新朋友', '一个人也能来', '适合游客', '适合拍照'],
+    defaults: {
+      chargeType: 'free',
+      allowWaitlist: true,
+      requireApproval: false,
+      isOutdoorActivity: 'yes',
+      hasAlcohol: 'no',
+      hasCarpool: 'no',
+      hasOvernight: 'no',
+      hasMinors: 'no',
+      isCommercialActivity: 'no',
+    },
+  },
+  casual_gathering: {
+    emoji: '☕',
+    title: '轻松聚会搭子局',
+    blocks: {
+      highlight: '低门槛轻社交，来就能聊，快速找到同频伙伴。',
+      process: '签到入场 → 自我介绍/破冰小游戏 → 自由交流。',
+      tips: '请保持礼貌沟通，尊重彼此边界；临时有事请提前取消报名。',
+      suitableFor: '适合新朋友、同城常住与旅居者，社交压力较小。',
+    },
+    visibleTags: ['轻松', '热闹', '一个人也能来', '同频交流'],
+    defaults: {
+      chargeType: 'aa',
+      allowWaitlist: true,
+      requireApproval: false,
+      isOutdoorActivity: 'no',
+      hasAlcohol: 'no',
+      hasCarpool: 'no',
+      hasOvernight: 'no',
+      hasMinors: 'no',
+      isCommercialActivity: 'no',
+    },
+  },
+  social_networking: {
+    emoji: '🤝',
+    title: '同频社交连接局',
+    blocks: {
+      highlight: '围绕明确主题进行连接，帮助你认识更多同频伙伴。',
+      process: '主题引导 → 分组交流 → 自由互链与后续对接。',
+      tips: '请遵守平台规范，不做骚扰与虚假信息展示。',
+      suitableFor: '适合想拓展社交圈、行业交流或深入结识新朋友的人群。',
+    },
+    visibleTags: ['同频交流', '热闹', '需要预约', '一个人也能来'],
+    defaults: {
+      chargeType: 'aa',
+      allowWaitlist: true,
+      requireApproval: true,
+      isOutdoorActivity: 'no',
+      hasAlcohol: 'no',
+      hasCarpool: 'no',
+      hasOvernight: 'no',
+      hasMinors: 'no',
+      isCommercialActivity: 'no',
+    },
+  },
+  learning_sharing: {
+    emoji: '📚',
+    title: '学习分享交流会',
+    blocks: {
+      highlight: '围绕一个清晰主题高效输入与讨论，沉淀有价值观点。',
+      process: '主题开场 → 内容分享 → 提问交流 → 总结沉淀。',
+      tips: '建议提前了解主题背景，现场按节奏提问发言。',
+      suitableFor: '适合希望深度交流、知识共创与认知提升的人群。',
+    },
+    visibleTags: ['专业', '深聊', '同频交流', '可反复参与'],
+    defaults: {
+      chargeType: 'free',
+      allowWaitlist: true,
+      requireApproval: false,
+      isOutdoorActivity: 'no',
+      hasAlcohol: 'no',
+      hasCarpool: 'no',
+      hasOvernight: 'no',
+      hasMinors: 'no',
+      isCommercialActivity: 'no',
+    },
+  },
+  workshop_experience: {
+    emoji: '🎨',
+    title: '体验工作坊报名',
+    blocks: {
+      highlight: '动手参与、即时体验，关注过程与现场感。',
+      process: '签到分组 → 导师示范 → 实操体验 → 作品展示/复盘。',
+      tips: '部分活动涉及物料消耗，请按说明准备并准时到场。',
+      suitableFor: '适合初学者和体验爱好者，欢迎零基础参与。',
+    },
+    visibleTags: ['沉浸体验', '新手友好', '适合初学者', '需要预约'],
+    defaults: {
+      chargeType: 'paid',
+      allowWaitlist: true,
+      requireApproval: true,
+      isOutdoorActivity: 'no',
+      hasAlcohol: 'no',
+      hasCarpool: 'no',
+      hasOvernight: 'no',
+      hasMinors: 'no',
+      isCommercialActivity: 'yes',
+    },
+  },
+  music_performance: {
+    emoji: '🎵',
+    title: '音乐演出现场',
+    blocks: {
+      highlight: '现场演出氛围拉满，和同城伙伴共享音乐时刻。',
+      process: '检票/签到 → 演出观看 → 结束后自由交流。',
+      tips: '请遵守场地秩序，不录制侵权内容，注意夜间返程安全。',
+      suitableFor: '适合文艺、热闹氛围偏好用户与音乐爱好者。',
+    },
+    visibleTags: ['热闹', '文艺', '沉浸体验', '节日氛围'],
+    defaults: {
+      chargeType: 'paid',
+      allowWaitlist: true,
+      requireApproval: false,
+      isOutdoorActivity: 'no',
+      hasAlcohol: 'no',
+      hasCarpool: 'no',
+      hasOvernight: 'no',
+      hasMinors: 'no',
+      isCommercialActivity: 'yes',
+    },
+  },
+  market_popups: {
+    emoji: '🛍️',
+    title: '市集摆摊活动',
+    blocks: {
+      highlight: '围绕市集逛吃、摆摊、互动体验，适合边逛边社交。',
+      process: '集合 → 自由逛摊/互动体验 → 集中交流与拍照。',
+      tips: '现场人流较大，请注意随身物品；商家交易自行判断。',
+      suitableFor: '适合游客、旅居者与周末休闲人群。',
+    },
+    visibleTags: ['热闹', '有吃有喝', '适合拍照', '适合游客'],
+    defaults: {
+      chargeType: 'free',
+      allowWaitlist: true,
+      requireApproval: false,
+      isOutdoorActivity: 'yes',
+      hasAlcohol: 'no',
+      hasCarpool: 'no',
+      hasOvernight: 'no',
+      hasMinors: 'no',
+      isCommercialActivity: 'yes',
+    },
+  },
+  outdoor_nature: {
+    emoji: '🏕️',
+    title: '户外活动组局',
+    blocks: {
+      highlight: '一起走进自然，兼顾运动强度与同行安全。',
+      process: '集合检查装备 → 路线活动 → 返程复盘。',
+      tips: '请评估体能与天气风险，户外活动建议购买保险。',
+      suitableFor: '适合户外自然偏好用户，初学者请选择轻量路线。',
+    },
+    visibleTags: ['户外自然', '适合初学者', '需要预约', '可反复参与'],
+    defaults: {
+      chargeType: 'aa',
+      allowWaitlist: true,
+      requireApproval: true,
+      isOutdoorActivity: 'yes',
+      hasAlcohol: 'no',
+      hasCarpool: 'yes',
+      hasOvernight: 'no',
+      hasMinors: 'no',
+      isCommercialActivity: 'no',
+    },
+  },
+  family_pet: {
+    emoji: '🐾',
+    title: '亲子宠物友好局',
+    blocks: {
+      highlight: '亲子/宠物友好氛围，轻松参与、低压力社交。',
+      process: '签到集合 → 轻互动/自由活动 → 合照留念。',
+      tips: '请照看好儿童与宠物，注意活动现场秩序与卫生。',
+      suitableFor: '适合亲子家庭、宠物主人和慢节奏社交人群。',
+    },
+    visibleTags: ['适合亲子', '可带宠物', '轻松', '新手友好'],
+    defaults: {
+      chargeType: 'free',
+      allowWaitlist: true,
+      requireApproval: false,
+      isOutdoorActivity: 'no',
+      hasAlcohol: 'no',
+      hasCarpool: 'no',
+      hasOvernight: 'no',
+      hasMinors: 'yes',
+      isCommercialActivity: 'no',
+    },
+  },
+  public_welfare: {
+    emoji: '🌱',
+    title: '公益社区行动',
+    blocks: {
+      highlight: '通过小行动推动社区共建，让参与更有意义。',
+      process: '任务说明 → 分组执行 → 回顾与成果记录。',
+      tips: '请按组织者安排行动，尊重公共空间与他人权益。',
+      suitableFor: '适合想参与志愿、环保、社区共建的用户。',
+    },
+    visibleTags: ['适合新朋友', '户外自然', '可反复参与', '同频交流'],
+    defaults: {
+      chargeType: 'free',
+      allowWaitlist: true,
+      requireApproval: false,
+      isOutdoorActivity: 'yes',
+      hasAlcohol: 'no',
+      hasCarpool: 'no',
+      hasOvernight: 'no',
+      hasMinors: 'no',
+      isCommercialActivity: 'no',
+    },
+  },
+  nomad_city: {
+    emoji: '🧳',
+    title: '旅居同城连接局',
+    blocks: {
+      highlight: '面向新来大理与长期旅居人群，快速建立同城连接。',
+      process: '欢迎破冰 → 经验交流 → 搭子匹配与后续建联。',
+      tips: '请尊重不同背景与生活方式，保持友善真实沟通。',
+      suitableFor: '适合游客、旅居者、数字游民和同城新朋友。',
+    },
+    visibleTags: ['适合旅居者', '适合游客', '一个人也能来', '同频交流'],
+    defaults: {
+      chargeType: 'free',
+      allowWaitlist: true,
+      requireApproval: false,
+      isOutdoorActivity: 'no',
+      hasAlcohol: 'no',
+      hasCarpool: 'no',
+      hasOvernight: 'no',
+      hasMinors: 'no',
+      isCommercialActivity: 'no',
+    },
+  },
+}
+
 export const ACTIVITY_TYPE_OPTIONS_BY_SCENE = {
   local_explore: [
     { id: 'hotspot_checkin', name: '热门点位打卡', categoryId: 'photo' },
@@ -261,6 +506,10 @@ export const PUBLISH_SCENE_OPTIONS = ACTIVITY_SCENE_DEFINITIONS
   label: item.label,
   desc: item.desc,
 }))
+
+export const QUICK_PUBLISH_TEMPLATE_SCENE_IDS = PUBLISH_SCENE_OPTIONS
+  .map((item) => String(item.id || '').trim())
+  .filter((id) => id && id !== 'other_scene')
 
 const SCENE_ID_SET = new Set(ACTIVITY_SCENE_DEFINITIONS.map((item) => item.id))
 const SCENE_LABEL_MAP = ACTIVITY_SCENE_DEFINITIONS.reduce((acc, item) => {
@@ -620,6 +869,45 @@ export function resolveSceneTypeFromLegacyFields(input = {}) {
     typeId: finalTypeId,
     typeName: String(resolvedType?.name || '未分类'),
   }
+}
+
+export function getPublishTemplateByScene(sceneId = '') {
+  const safeSceneId = normalizeSceneId(sceneId)
+  if (!safeSceneId || safeSceneId === 'other_scene' || safeSceneId === 'festival_theme') return null
+  const tpl = PUBLISH_TEMPLATE_BY_SCENE[safeSceneId]
+  if (!tpl) return null
+  return {
+    sceneId: safeSceneId,
+    emoji: String(tpl.emoji || ''),
+    title: String(tpl.title || ''),
+    blocks: {
+      highlight: String(tpl.blocks?.highlight || ''),
+      process: String(tpl.blocks?.process || ''),
+      tips: String(tpl.blocks?.tips || ''),
+      suitableFor: String(tpl.blocks?.suitableFor || ''),
+    },
+    visibleTags: Array.isArray(tpl.visibleTags) ? [...tpl.visibleTags] : [],
+    defaults: {
+      chargeType: String(tpl.defaults?.chargeType || 'free'),
+      allowWaitlist: !!tpl.defaults?.allowWaitlist,
+      requireApproval: !!tpl.defaults?.requireApproval,
+      isOutdoorActivity: String(tpl.defaults?.isOutdoorActivity || 'no'),
+      hasAlcohol: String(tpl.defaults?.hasAlcohol || 'no'),
+      hasCarpool: String(tpl.defaults?.hasCarpool || 'no'),
+      hasOvernight: String(tpl.defaults?.hasOvernight || 'no'),
+      hasMinors: String(tpl.defaults?.hasMinors || 'no'),
+      isCommercialActivity: String(tpl.defaults?.isCommercialActivity || 'no'),
+    },
+  }
+}
+
+export function getPublishTemplateOptions() {
+  return QUICK_PUBLISH_TEMPLATE_SCENE_IDS.map((sceneId) => ({
+    sceneId,
+    sceneLabel: getSceneLabel(sceneId),
+    emoji: String(PUBLISH_TEMPLATE_BY_SCENE[sceneId]?.emoji || ''),
+    title: String(PUBLISH_TEMPLATE_BY_SCENE[sceneId]?.title || ''),
+  }))
 }
 
 export function normalizeThemeIds(themeIds = [], max = 3) {

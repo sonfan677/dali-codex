@@ -3,6 +3,46 @@
     <scroll-view scroll-y class="scroll" :scroll-top="scrollTop">
       <view class="form">
 
+        <!-- 快速模板 -->
+        <view class="field">
+          <text class="label">快速发布模板（11类）</text>
+          <view class="template-chip-list">
+            <text
+              v-for="item in publishTemplateOptions"
+              :key="`scene-template-${item.sceneId}`"
+              class="template-chip"
+              :class="{ 'template-chip--active': selectedTemplateSceneId === item.sceneId }"
+              @tap="selectSceneTemplate(item.sceneId)"
+            >
+              {{ item.emoji }} {{ item.sceneLabel }}
+            </text>
+          </view>
+          <view class="template-actions">
+            <button class="mini-btn" @tap="applySelectedSceneTemplate">套用模板</button>
+            <button class="mini-btn mini-btn--ghost" @tap="generateStructuredDescriptionPreview">生成结构化描述</button>
+          </view>
+          <text class="hint">模板会自动填充默认文案、标签、收费与风控项，你只需改时间/地点等关键字段。</text>
+        </view>
+
+        <!-- 常发布快速复用 -->
+        <view class="field">
+          <text class="label">常发布活动（快速复用）</text>
+          <view v-if="recentPublishProfiles.length === 0" class="empty empty--inline">
+            <text class="empty-text">暂无常用活动，发布成功后会自动沉淀到这里</text>
+          </view>
+          <view v-for="item in recentPublishProfiles" :key="item.id" class="recent-item">
+            <view class="recent-main">
+              <text class="recent-title">{{ item.title || '未命名模板' }}</text>
+              <text class="recent-meta">{{ item.sceneName || '未分类类型' }} · {{ item.typeName || '未分类场景' }}</text>
+            </view>
+            <view class="recent-actions">
+              <button class="mini-btn mini-btn--ghost" @tap="applyRecentProfile(item)">复用</button>
+              <button class="mini-btn" @tap="quickPublishRecentProfile(item)">一键发布</button>
+            </view>
+          </view>
+          <text class="hint">一键发布会自动把开始时间滚动到“当前时间后2小时”的最近15分钟刻度。</text>
+        </view>
+
         <!-- 标题 -->
         <view class="field">
           <text class="label">活动标题 *</text>
@@ -17,12 +57,55 @@
 
         <!-- 描述 -->
         <view class="field">
-          <text class="label">活动描述</text>
+          <view class="field-switch structured-switch-row">
+            <view>
+              <text class="label mb0">活动描述（结构化）</text>
+              <text class="hint">推荐开启：系统会自动拼接 emoji + 结构化文案</text>
+            </view>
+            <switch
+              :checked="useStructuredDescription"
+              color="#1A3C5E"
+              @change="onStructuredModeChange"
+            />
+          </view>
+          <view v-if="useStructuredDescription" class="structured-editor">
+            <input
+              class="input"
+              v-model="structuredBlocks.highlight"
+              placeholder="🎯 活动亮点（必填建议）"
+              maxlength="60"
+            />
+            <textarea
+              class="textarea mt12"
+              v-model="structuredBlocks.process"
+              placeholder="🗺️ 活动流程（建议：集合→进行→结束）"
+              maxlength="120"
+            />
+            <textarea
+              class="textarea mt12"
+              v-model="structuredBlocks.tips"
+              placeholder="⚠️ 注意事项（如迟到、装备、安全说明）"
+              maxlength="120"
+            />
+            <input
+              class="input mt12"
+              v-model="structuredBlocks.suitableFor"
+              placeholder="🙌 适合人群（如新手友好、一个人可来）"
+              maxlength="80"
+            />
+            <view class="template-actions">
+              <button class="mini-btn mini-btn--ghost" @tap="generateStructuredDescriptionPreview">刷新结构化描述</button>
+            </view>
+            <view class="structured-preview">
+              <text class="structured-preview-label">结构化预览</text>
+              <text class="structured-preview-text">{{ structuredDescriptionPreview || '暂无可预览内容' }}</text>
+            </view>
+          </view>
           <textarea
             class="textarea"
             v-model="form.description"
-            placeholder="活动详情、集合方式、注意事项等（选填）"
-            maxlength="200"
+            placeholder="补充说明（选填）：如集合口令、临时变更、细节补充"
+            maxlength="300"
           />
           <view class="visible-tags-summary">
             <text class="visible-tags-summary-text">{{ visibleTagSummaryText }}</text>
@@ -483,6 +566,8 @@
 import { callCloud } from '@/utils/cloud.js'
 import { useUserStore } from '@/stores/user.js'
 import {
+  getPublishTemplateByScene,
+  getPublishTemplateOptions,
   getSocialEnergyLabel,
   normalizeCustomTypeName,
   PUBLISH_SCENE_OPTIONS,
@@ -499,6 +584,18 @@ import {
   resolveCategoryBySceneType,
   resolveSceneTypeFromLegacyFields,
 } from '@/utils/activityMeta.js'
+
+const QUICK_PUBLISH_STORAGE_KEY = 'dali_publish_quick_profiles_v1'
+const QUICK_PUBLISH_MAX_COUNT = 6
+
+function createEmptyStructuredBlocks() {
+  return {
+    highlight: '',
+    process: '',
+    tips: '',
+    suitableFor: '',
+  }
+}
 
 function buildTimeRange() {
   const dates = []
@@ -645,6 +742,11 @@ export default {
         publishRules: false,
         organizerAgreement: false,
       },
+      publishTemplateOptions: getPublishTemplateOptions(),
+      selectedTemplateSceneId: defaultSceneId,
+      useStructuredDescription: true,
+      structuredBlocks: createEmptyStructuredBlocks(),
+      recentPublishProfiles: [],
     }
   },
 
@@ -718,6 +820,10 @@ export default {
       return getSocialEnergyLabel(this.inferredSocialEnergyId)
     },
 
+    structuredDescriptionPreview() {
+      return this.buildStructuredDescriptionText({ includeExtraDescription: true })
+    },
+
     publishRulesVersion() {
       return String(this.publishGovernanceConfig?.publishRulesVersion || 'publish_rules_v1')
     },
@@ -728,6 +834,8 @@ export default {
   },
 
   onLoad(options = {}) {
+    this.loadRecentPublishProfiles()
+    this.hydrateStructuredByScene(this.form.sceneId, { force: false })
     this.applyPrefillFromQuery(options)
     this.consumeMarketPrefillFromStorage({ showToast: false })
     this.syncPublishGovernanceFromStore()
@@ -790,6 +898,301 @@ export default {
       const organizerAgreementConsent = consentFromStore.organizerAgreement || consentFromGlobal.organizerAgreement || {}
       this.consent.publishRules = String(publishRulesConsent.version || '').trim() === publishRulesVersion && !!publishRulesConsent.acceptedAt
       this.consent.organizerAgreement = String(organizerAgreementConsent.version || '').trim() === organizerAgreementVersion && !!organizerAgreementConsent.acceptedAt
+    },
+
+    loadRecentPublishProfiles() {
+      try {
+        const raw = uni.getStorageSync(QUICK_PUBLISH_STORAGE_KEY)
+        if (!Array.isArray(raw)) {
+          this.recentPublishProfiles = []
+          return
+        }
+        this.recentPublishProfiles = raw
+          .map((item) => ({
+            id: String(item?.id || '').trim(),
+            title: String(item?.title || '').trim().slice(0, 30),
+            sceneId: String(item?.sceneId || '').trim(),
+            sceneName: String(item?.sceneName || '').trim(),
+            typeId: String(item?.typeId || '').trim(),
+            typeName: String(item?.typeName || '').trim(),
+            customTypeName: String(item?.customTypeName || '').trim(),
+            visibleTags: Array.isArray(item?.visibleTags) ? [...new Set(item.visibleTags.map((x) => String(x || '').trim()).filter(Boolean))].slice(0, 12) : [],
+            descriptionExtra: String(item?.descriptionExtra || '').trim().slice(0, 300),
+            structuredBlocks: {
+              highlight: String(item?.structuredBlocks?.highlight || '').trim(),
+              process: String(item?.structuredBlocks?.process || '').trim(),
+              tips: String(item?.structuredBlocks?.tips || '').trim(),
+              suitableFor: String(item?.structuredBlocks?.suitableFor || '').trim(),
+            },
+            chargeType: ['free', 'aa', 'paid'].includes(String(item?.chargeType || '').trim()) ? String(item.chargeType).trim() : 'free',
+            feeAmount: Number(item?.feeAmount) > 0 ? Number(item.feeAmount) : 0,
+            allowWaitlist: !!item?.allowWaitlist,
+            requireApproval: !!item?.requireApproval,
+            isCommercialActivity: String(item?.isCommercialActivity || '').trim() === 'yes' ? 'yes' : 'no',
+            riskFlags: {
+              isNightActivity: String(item?.riskFlags?.isNightActivity || '').trim() === 'yes' ? 'yes' : 'no',
+              isOutdoorActivity: String(item?.riskFlags?.isOutdoorActivity || '').trim() === 'yes' ? 'yes' : 'no',
+              hasAlcohol: String(item?.riskFlags?.hasAlcohol || '').trim() === 'yes' ? 'yes' : 'no',
+              hasCarpool: String(item?.riskFlags?.hasCarpool || '').trim() === 'yes' ? 'yes' : 'no',
+              hasOvernight: String(item?.riskFlags?.hasOvernight || '').trim() === 'yes' ? 'yes' : 'no',
+              hasMinors: String(item?.riskFlags?.hasMinors || '').trim() === 'yes' ? 'yes' : 'no',
+            },
+            maxParticipants: Number(item?.maxParticipants) > 0 ? Number(item.maxParticipants) : null,
+            durationIndex: Number.isFinite(Number(item?.durationIndex)) ? Math.max(0, Math.min(this.durationOptions.length - 1, Number(item.durationIndex))) : 1,
+            lat: Number(item?.lat) || 0,
+            lng: Number(item?.lng) || 0,
+            address: String(item?.address || '').trim(),
+            payeeSubject: String(item?.payeeSubject || '').trim().slice(0, 30),
+            refundPolicy: String(item?.refundPolicy || '').trim().slice(0, 200),
+            cancellationPolicy: String(item?.cancellationPolicy || '').trim().slice(0, 200),
+            updatedAt: Number(item?.updatedAt || 0) || 0,
+          }))
+          .filter((item) => item.id && item.sceneId)
+          .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))
+          .slice(0, QUICK_PUBLISH_MAX_COUNT)
+      } catch (e) {
+        this.recentPublishProfiles = []
+      }
+    },
+
+    persistRecentPublishProfiles() {
+      try {
+        uni.setStorageSync(QUICK_PUBLISH_STORAGE_KEY, this.recentPublishProfiles.slice(0, QUICK_PUBLISH_MAX_COUNT))
+      } catch (e) {}
+    },
+
+    selectSceneTemplate(sceneId = '') {
+      const safe = String(sceneId || '').trim()
+      if (!safe) return
+      this.selectedTemplateSceneId = safe
+    },
+
+    applySelectedSceneTemplate() {
+      const sceneId = String(this.selectedTemplateSceneId || '').trim()
+      if (!sceneId) {
+        uni.showToast({ title: '请先选择模板类型', icon: 'none' })
+        return
+      }
+      this.applySceneTemplateDefaults(sceneId)
+    },
+
+    hydrateStructuredByScene(sceneId = '', options = {}) {
+      const tpl = getPublishTemplateByScene(sceneId)
+      if (!tpl) return
+      const hasContent = Object.values(this.structuredBlocks || {}).some((item) => String(item || '').trim())
+      if (hasContent && !options.force) return
+      this.structuredBlocks = {
+        highlight: tpl.blocks.highlight || '',
+        process: tpl.blocks.process || '',
+        tips: tpl.blocks.tips || '',
+        suitableFor: tpl.blocks.suitableFor || '',
+      }
+    },
+
+    applySceneTemplateDefaults(sceneId = '') {
+      const tpl = getPublishTemplateByScene(sceneId)
+      if (!tpl) {
+        uni.showToast({ title: '该类型暂无模板', icon: 'none' })
+        return
+      }
+      this.syncSceneAndType(sceneId, '')
+      this.selectedTemplateSceneId = sceneId
+      this.useStructuredDescription = true
+      this.structuredBlocks = {
+        highlight: tpl.blocks.highlight || '',
+        process: tpl.blocks.process || '',
+        tips: tpl.blocks.tips || '',
+        suitableFor: tpl.blocks.suitableFor || '',
+      }
+      if (tpl.title) {
+        this.form.title = tpl.title.slice(0, 30)
+      }
+      this.form.visibleTags = Array.isArray(tpl.visibleTags) ? [...tpl.visibleTags].slice(0, 12) : []
+      this.setChargeType(tpl.defaults.chargeType || 'free')
+      if (this.form.chargeType === 'paid' && !Number(this.form.feeAmount)) {
+        this.form.feeAmount = '39'
+      }
+      this.form.allowWaitlist = !!tpl.defaults.allowWaitlist
+      this.form.requireApproval = !!tpl.defaults.requireApproval
+      this.form.isOutdoorActivity = tpl.defaults.isOutdoorActivity || 'no'
+      this.form.hasAlcohol = tpl.defaults.hasAlcohol || 'no'
+      this.form.hasCarpool = tpl.defaults.hasCarpool || 'no'
+      this.form.hasOvernight = tpl.defaults.hasOvernight || 'no'
+      this.form.hasMinors = tpl.defaults.hasMinors || 'no'
+      this.form.isCommercialActivity = tpl.defaults.isCommercialActivity || 'no'
+      if (this.form.chargeType !== 'free') {
+        if (!String(this.form.payeeSubject || '').trim()) {
+          this.form.payeeSubject = '活动发起方'
+        }
+        if (!String(this.form.refundPolicy || '').trim()) {
+          this.form.refundPolicy = '活动开始前24小时可全额退款，开始后不支持退款。'
+        }
+      }
+      if (!String(this.form.cancellationPolicy || '').trim()) {
+        this.form.cancellationPolicy = '如遇天气/人数不足等情况，将提前通知并给出改期或取消方案。'
+      }
+      this.generateStructuredDescriptionPreview()
+      uni.showToast({ title: '模板已套用', icon: 'success' })
+    },
+
+    onStructuredModeChange(e) {
+      this.useStructuredDescription = !!e?.detail?.value
+      if (this.useStructuredDescription) {
+        this.hydrateStructuredByScene(this.form.sceneId, { force: false })
+      }
+    },
+
+    buildStructuredDescriptionText(options = {}) {
+      const includeExtra = options.includeExtraDescription !== false
+      const blocks = this.structuredBlocks || {}
+      const rows = []
+      const highlight = String(blocks.highlight || '').trim()
+      const process = String(blocks.process || '').trim()
+      const tips = String(blocks.tips || '').trim()
+      const suitableFor = String(blocks.suitableFor || '').trim()
+      if (highlight) rows.push(`🎯 活动亮点：${highlight}`)
+      if (process) rows.push(`🗺️ 活动流程：${process}`)
+      if (tips) rows.push(`⚠️ 注意事项：${tips}`)
+      if (suitableFor) rows.push(`🙌 适合人群：${suitableFor}`)
+      const extra = includeExtra ? String(this.form.description || '').trim() : ''
+      if (extra) rows.push(`📝 补充说明：${extra}`)
+      return rows.join('\n')
+    },
+
+    generateStructuredDescriptionPreview() {
+      const preview = this.buildStructuredDescriptionText({ includeExtraDescription: true })
+      if (!preview) {
+        uni.showToast({ title: '请先填写结构化内容', icon: 'none' })
+        return
+      }
+      uni.showToast({ title: '已刷新结构化描述', icon: 'none' })
+    },
+
+    buildRecentPublishSnapshot() {
+      const id = `${String(this.form.sceneId || '')}_${String(this.form.typeId || this.form.customTypeName || '')}`.slice(0, 64)
+      return {
+        id: id || `${Date.now()}`,
+        title: String(this.form.title || '').trim().slice(0, 30),
+        sceneId: String(this.form.sceneId || '').trim(),
+        sceneName: String(this.form.sceneName || '').trim(),
+        typeId: String(this.form.typeId || '').trim(),
+        typeName: String(this.form.typeName || '').trim(),
+        customTypeName: String(this.form.customTypeName || '').trim(),
+        visibleTags: Array.isArray(this.form.visibleTags) ? [...this.form.visibleTags].slice(0, 12) : [],
+        descriptionExtra: String(this.form.description || '').trim().slice(0, 300),
+        structuredBlocks: {
+          highlight: String(this.structuredBlocks?.highlight || '').trim().slice(0, 80),
+          process: String(this.structuredBlocks?.process || '').trim().slice(0, 160),
+          tips: String(this.structuredBlocks?.tips || '').trim().slice(0, 160),
+          suitableFor: String(this.structuredBlocks?.suitableFor || '').trim().slice(0, 100),
+        },
+        chargeType: this.form.chargeType,
+        feeAmount: Number(this.form.feeAmount) > 0 ? Number(this.form.feeAmount) : 0,
+        allowWaitlist: !!this.form.allowWaitlist,
+        requireApproval: !!this.form.requireApproval,
+        isCommercialActivity: String(this.form.isCommercialActivity || '').trim() === 'yes' ? 'yes' : 'no',
+        riskFlags: {
+          isNightActivity: this.form.isNightActivity === 'yes' ? 'yes' : 'no',
+          isOutdoorActivity: this.form.isOutdoorActivity === 'yes' ? 'yes' : 'no',
+          hasAlcohol: this.form.hasAlcohol === 'yes' ? 'yes' : 'no',
+          hasCarpool: this.form.hasCarpool === 'yes' ? 'yes' : 'no',
+          hasOvernight: this.form.hasOvernight === 'yes' ? 'yes' : 'no',
+          hasMinors: this.form.hasMinors === 'yes' ? 'yes' : 'no',
+        },
+        maxParticipants: Number(this.form.maxParticipants) > 0 ? Number(this.form.maxParticipants) : null,
+        durationIndex: Number(this.durationIndex || 1),
+        lat: Number(this.form.lat || 0),
+        lng: Number(this.form.lng || 0),
+        address: String(this.form.address || '').trim(),
+        payeeSubject: String(this.form.payeeSubject || '').trim().slice(0, 30),
+        refundPolicy: String(this.form.refundPolicy || '').trim().slice(0, 200),
+        cancellationPolicy: String(this.form.cancellationPolicy || '').trim().slice(0, 200),
+        updatedAt: Date.now(),
+      }
+    },
+
+    pushRecentPublishProfile() {
+      const snapshot = this.buildRecentPublishSnapshot()
+      if (!snapshot.sceneId || snapshot.sceneId === 'other_scene') return
+      const next = [snapshot, ...(Array.isArray(this.recentPublishProfiles) ? this.recentPublishProfiles : []).filter((item) => item.id !== snapshot.id)]
+        .slice(0, QUICK_PUBLISH_MAX_COUNT)
+      this.recentPublishProfiles = next
+      this.persistRecentPublishProfiles()
+    },
+
+    applyRecentProfile(profile = {}) {
+      const sceneId = String(profile.sceneId || '').trim()
+      if (!sceneId) return
+      this.syncSceneAndType(sceneId, String(profile.typeId || '').trim())
+      this.selectedTemplateSceneId = sceneId
+      this.form.title = String(profile.title || '').slice(0, 30)
+      this.form.visibleTags = Array.isArray(profile.visibleTags) ? [...profile.visibleTags].slice(0, 12) : []
+      this.form.description = String(profile.descriptionExtra || '').slice(0, 300)
+      this.structuredBlocks = {
+        highlight: String(profile.structuredBlocks?.highlight || ''),
+        process: String(profile.structuredBlocks?.process || ''),
+        tips: String(profile.structuredBlocks?.tips || ''),
+        suitableFor: String(profile.structuredBlocks?.suitableFor || ''),
+      }
+      this.useStructuredDescription = true
+      this.setChargeType(String(profile.chargeType || 'free'))
+      this.form.feeAmount = Number(profile.feeAmount) > 0 ? `${Number(profile.feeAmount)}` : ''
+      this.form.allowWaitlist = !!profile.allowWaitlist
+      this.form.requireApproval = !!profile.requireApproval
+      this.form.isCommercialActivity = String(profile.isCommercialActivity || '') === 'yes' ? 'yes' : 'no'
+      this.form.isNightActivity = String(profile.riskFlags?.isNightActivity || 'no') === 'yes' ? 'yes' : 'no'
+      this.form.isOutdoorActivity = String(profile.riskFlags?.isOutdoorActivity || 'no') === 'yes' ? 'yes' : 'no'
+      this.form.hasAlcohol = String(profile.riskFlags?.hasAlcohol || 'no') === 'yes' ? 'yes' : 'no'
+      this.form.hasCarpool = String(profile.riskFlags?.hasCarpool || 'no') === 'yes' ? 'yes' : 'no'
+      this.form.hasOvernight = String(profile.riskFlags?.hasOvernight || 'no') === 'yes' ? 'yes' : 'no'
+      this.form.hasMinors = String(profile.riskFlags?.hasMinors || 'no') === 'yes' ? 'yes' : 'no'
+      this.form.maxParticipants = Number(profile.maxParticipants) > 0 ? Number(profile.maxParticipants) : null
+      this.form.payeeSubject = String(profile.payeeSubject || '')
+      this.form.refundPolicy = String(profile.refundPolicy || '')
+      this.form.cancellationPolicy = String(profile.cancellationPolicy || this.form.cancellationPolicy || '')
+      this.durationIndex = Number.isFinite(Number(profile.durationIndex))
+        ? Math.max(0, Math.min(this.durationOptions.length - 1, Number(profile.durationIndex)))
+        : 1
+      if (Number(profile.lat) && Number(profile.lng) && profile.address) {
+        this.form.lat = Number(profile.lat)
+        this.form.lng = Number(profile.lng)
+        this.form.address = String(profile.address || '')
+      }
+      uni.showToast({ title: '已复用常发布活动', icon: 'success' })
+    },
+
+    buildQuickPublishStartMs() {
+      const now = Date.now() + 2 * 60 * 60 * 1000
+      const dt = new Date(now)
+      const mins = dt.getMinutes()
+      const rounded = Math.ceil(mins / 15) * 15
+      dt.setMinutes(rounded >= 60 ? 0 : rounded, 0, 0)
+      if (rounded >= 60) dt.setHours(dt.getHours() + 1)
+      return dt.getTime()
+    },
+
+    quickPublishRecentProfile(profile = {}) {
+      this.applyRecentProfile(profile)
+      const nextStartMs = this.buildQuickPublishStartMs()
+      this.form.startTimeMs = nextStartMs
+      this.form.startTimeStr = this.formatStartTimeTextByMs(nextStartMs)
+      const dayIdx = this.findDateIndexByMs(nextStartMs)
+      if (dayIdx >= 0) {
+        const dt = new Date(nextStartMs)
+        const hh = `${dt.getHours()}`.padStart(2, '0')
+        const mm = `${dt.getMinutes()}`.padStart(2, '0')
+        const hourIdx = Math.max(0, this.timeRangeData.hours.findIndex((x) => x.startsWith(hh)))
+        const minuteIdx = Math.max(0, this.timeRangeData.minutes.findIndex((x) => x === mm))
+        this.timeIndex = [dayIdx, hourIdx, minuteIdx]
+      }
+      uni.showModal({
+        title: '确认一键发布？',
+        content: '将按常发布模板直接提交，开始时间已自动调整为2小时后。',
+        success: (res) => {
+          if (!res.confirm) return
+          this.submit()
+        },
+      })
     },
 
     toggleConsent(key = '') {
@@ -873,6 +1276,8 @@ export default {
         title,
       })
       this.syncSceneAndType(mappedSceneType.sceneId, mappedSceneType.typeId)
+      this.selectedTemplateSceneId = String(mappedSceneType.sceneId || '').trim()
+      this.hydrateStructuredByScene(mappedSceneType.sceneId, { force: false })
 
       const startMs = new Date(startTimeText).getTime()
       if (Number.isFinite(startMs) && startMs > Date.now()) {
@@ -1088,8 +1493,10 @@ export default {
       const idx = Number(e.detail.value || 0)
       const selected = this.sceneOptions[idx] || this.sceneOptions[0]
       this.syncSceneAndType(selected?.id || '', '')
+      this.selectedTemplateSceneId = String(selected?.id || '').trim()
       if (String(selected?.id || '').trim() !== 'other_scene') {
         this.form.customTypeName = ''
+        this.hydrateStructuredByScene(selected?.id || '', { force: false })
       }
     },
 
@@ -1498,13 +1905,16 @@ _doChooseLocation() {
       this.submitting = true
       try {
         const finalCategoryId = resolveCategoryBySceneType(this.form.sceneId, this.form.typeId)
+        const finalDescription = this.useStructuredDescription
+          ? this.buildStructuredDescriptionText({ includeExtraDescription: true })
+          : String(this.form.description || '').trim()
         const visibleTags = [...new Set((Array.isArray(this.form.visibleTags) ? this.form.visibleTags : [])
           .map((item) => String(item || '').trim())
           .filter((item) => item && USER_VISIBLE_TAG_ALLOW_SET.has(item)))]
           .slice(0, 12)
         const res = await callCloud('publishActivity', {
           title:            this.form.title.trim(),
-          description:      this.form.description.trim(),
+          description:      finalDescription,
           visibleTags,
           sceneId:          this.form.sceneId,
           sceneName:        this.form.sceneName,
@@ -1558,6 +1968,7 @@ _doChooseLocation() {
           },
         })
         if (res.success) {
+          this.pushRecentPublishProfile()
           const publishReviewStatus = String(res.publishReviewStatus || '').toLowerCase()
           const baseText = publishReviewStatus === 'pending'
             ? '已提交审核'
@@ -1652,6 +2063,87 @@ _doChooseLocation() {
   align-items: center;
   justify-content: space-between;
 }
+.structured-switch-row {
+  margin-bottom: 12rpx;
+}
+.template-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10rpx;
+}
+.template-chip {
+  padding: 8rpx 14rpx;
+  border-radius: 999rpx;
+  font-size: 22rpx;
+  color: #475467;
+  background: #F2F4F7;
+  border: 1rpx solid #E4E7EC;
+}
+.template-chip--active {
+  color: #1A3C5E;
+  background: #EAF2FB;
+  border-color: #1A3C5E;
+  font-weight: 600;
+}
+.template-actions {
+  margin-top: 14rpx;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+}
+.mini-btn {
+  margin: 0;
+  height: 62rpx;
+  line-height: 62rpx;
+  padding: 0 20rpx;
+  border-radius: 10rpx;
+  font-size: 24rpx;
+  color: #1A3C5E;
+  background: #EAF2FB;
+  border: none;
+}
+.mini-btn::after { border: none; }
+.mini-btn--ghost {
+  color: #475467;
+  background: #F2F4F7;
+}
+.recent-item {
+  margin-top: 12rpx;
+  padding: 14rpx;
+  border-radius: 10rpx;
+  background: #F8FAFC;
+  border: 1rpx solid #EEF2F7;
+}
+.recent-main {
+  margin-bottom: 10rpx;
+}
+.recent-title {
+  display: block;
+  font-size: 25rpx;
+  color: #1F2937;
+  font-weight: 600;
+}
+.recent-meta {
+  display: block;
+  margin-top: 4rpx;
+  font-size: 22rpx;
+  color: #667085;
+}
+.recent-actions {
+  display: flex;
+  gap: 10rpx;
+}
+.empty {
+  padding: 24rpx 0;
+  text-align: center;
+}
+.empty--inline {
+  padding: 16rpx 0;
+}
+.empty-text {
+  font-size: 22rpx;
+  color: #98A2B3;
+}
 .label {
   font-size: 26rpx;
   color: #999;
@@ -1671,6 +2163,32 @@ _doChooseLocation() {
   color: #333;
   width: 100%;
   min-height: 140rpx;
+}
+.structured-editor {
+  margin-bottom: 14rpx;
+  padding: 14rpx;
+  border-radius: 12rpx;
+  background: #F8FAFC;
+}
+.structured-preview {
+  margin-top: 12rpx;
+  padding: 12rpx;
+  border-radius: 10rpx;
+  background: #FFFFFF;
+  border: 1rpx solid #E4E7EC;
+}
+.structured-preview-label {
+  display: block;
+  font-size: 22rpx;
+  color: #667085;
+}
+.structured-preview-text {
+  margin-top: 6rpx;
+  display: block;
+  font-size: 24rpx;
+  line-height: 1.6;
+  color: #344054;
+  white-space: pre-wrap;
 }
 .char-count {
   font-size: 22rpx;
