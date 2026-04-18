@@ -12,15 +12,15 @@
               @tap="switchPublishMode(item.id)"
             >{{ item.label }}</text>
           </view>
-          <text class="hint">当前页面：{{ publishModeLabel }}</text>
+          <text class="hint">模式说明：{{ publishModeHint }}</text>
         </view>
 
         <!-- 快速模板 -->
         <view v-if="publishMode === 'template'" class="field">
-          <text class="label">快速发布模板（{{ publishTemplateOptions.length }}类）</text>
+          <text class="label">活动类型</text>
           <view class="template-chip-list">
             <text
-              v-for="item in publishTemplateOptions"
+              v-for="item in quickPublishTemplateOptions"
               :key="`scene-template-${item.sceneId}`"
               class="template-chip"
               :class="{ 'template-chip--active': selectedTemplateSceneId === item.sceneId }"
@@ -43,16 +43,8 @@
               </text>
             </view>
             <text class="hint">当前细分模板：{{ selectedTypeTemplateName }}</text>
-            <view class="template-actions">
-              <button class="mini-btn" @tap="applySelectedTypeTemplate">套用细分模板</button>
-            </view>
           </view>
-          <view class="template-actions">
-            <button class="mini-btn" @tap="applySelectedSceneTemplate">套用模板</button>
-            <button class="mini-btn mini-btn--ghost" @tap="generateStructuredDescriptionPreview">生成结构化描述</button>
-            <button class="mini-btn mini-btn--primary" @tap="switchPublishMode('custom')">进入自定义发布</button>
-          </view>
-          <text class="hint">模板会自动填充默认文案、标签、收费与风控项，你只需改时间/地点等关键字段。</text>
+          <text class="hint">点击细分场景后会自动套用模板，并在下方展开完整表单供微调。</text>
         </view>
 
         <!-- 常发布快速复用 -->
@@ -77,7 +69,7 @@
           <text class="hint">一键发布会自动把开始时间滚动到“当前时间后2小时”的最近15分钟刻度。</text>
         </view>
 
-        <template v-if="publishMode === 'custom'">
+        <template v-if="publishMode === 'custom' || (publishMode === 'template' && templateFormReady)">
         <!-- 标题 -->
         <view class="field">
           <text class="label">活动标题 *</text>
@@ -511,12 +503,12 @@
     </scroll-view>
 
     <!-- 底部发布按钮 -->
-    <view v-if="publishMode === 'custom'" class="bottom-bar">
+    <view v-if="publishMode === 'custom' || (publishMode === 'template' && templateFormReady)" class="bottom-bar">
       <button class="submit-btn" @tap="submit" :loading="submitting">
         发布活动
       </button>
     </view>
-    <view v-else class="bottom-bar">
+    <view v-else-if="publishMode === 'recent'" class="bottom-bar">
       <button class="submit-btn submit-btn--ghost" @tap="switchPublishMode('custom')">
         进入自定义发布
       </button>
@@ -727,6 +719,7 @@ export default {
       minParticipantsDisplay: '',
       publishModeOptions: PUBLISH_MODE_OPTIONS,
       publishMode: 'template',
+      templateFormReady: false,
       form: {
         title: '',
         description: '',
@@ -806,6 +799,17 @@ export default {
     publishModeLabel() {
       const found = (this.publishModeOptions || []).find((item) => item.id === this.publishMode)
       return String(found?.label || '自定义发布')
+    },
+
+    publishModeHint() {
+      const mode = String(this.publishMode || '')
+      if (mode === 'template') return '先选活动类型和细分场景，系统自动套用模板并展开表单'
+      if (mode === 'recent') return '复用历史活动，快速改时间地点后一键发布'
+      return '从零填写结构化表单，适合新活动完整发布'
+    },
+
+    quickPublishTemplateOptions() {
+      return (this.publishTemplateOptions || []).filter((item) => String(item.sceneId || '').trim() !== 'other_scene')
     },
 
     scenePickerRange() {
@@ -924,6 +928,9 @@ export default {
       const exists = (this.publishModeOptions || []).some((item) => item.id === safeMode)
       if (!exists || this.publishMode === safeMode) return
       this.publishMode = safeMode
+      if (safeMode === 'custom') {
+        this.templateFormReady = true
+      }
       this.scrollTop = 0
     },
 
@@ -1052,13 +1059,20 @@ export default {
       const safe = String(sceneId || '').trim()
       if (!safe) return
       this.selectedTemplateSceneId = safe
-      this.refreshTypeTemplateOptions(safe, this.form.typeId)
+      this.refreshTypeTemplateOptions(safe, '')
+      this.templateFormReady = false
     },
 
     selectTypeTemplate(typeId = '') {
       const safe = String(typeId || '').trim()
       if (!safe) return
       this.selectedTemplateTypeId = safe
+      const sceneId = String(this.selectedTemplateSceneId || this.form.sceneId || '').trim()
+      if (!sceneId) return
+      this.applyTypeTemplateDefaults(sceneId, safe)
+      if (this.publishMode === 'template') {
+        this.templateFormReady = true
+      }
     },
 
     applySelectedSceneTemplate() {
@@ -1118,6 +1132,7 @@ export default {
       const sceneId = String(options.sceneId || tpl.sceneId || this.form.sceneId || '').trim()
       const typeId = String(options.typeId || tpl.typeId || '').trim()
       this.syncSceneAndType(sceneId, typeId)
+      this.templateFormReady = true
       this.selectedTemplateSceneId = sceneId
       this.refreshTypeTemplateOptions(sceneId, typeId || this.form.typeId)
       if (typeId) this.selectedTemplateTypeId = typeId
