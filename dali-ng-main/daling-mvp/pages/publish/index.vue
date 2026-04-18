@@ -5,7 +5,7 @@
 
         <!-- 快速模板 -->
         <view class="field">
-          <text class="label">快速发布模板（11类）</text>
+          <text class="label">快速发布模板（{{ publishTemplateOptions.length }}类）</text>
           <view class="template-chip-list">
             <text
               v-for="item in publishTemplateOptions"
@@ -1004,6 +1004,9 @@ export default {
         tips: tpl.blocks.tips || '',
         suitableFor: tpl.blocks.suitableFor || '',
       }
+      if (String(sceneId || '').trim() === 'other_scene') {
+        this.form.customTypeName = String(tpl.customTypeName || this.form.customTypeName || '自定义兴趣局')
+      }
       if (tpl.title) {
         this.form.title = tpl.title.slice(0, 30)
       }
@@ -1113,7 +1116,7 @@ export default {
 
     pushRecentPublishProfile() {
       const snapshot = this.buildRecentPublishSnapshot()
-      if (!snapshot.sceneId || snapshot.sceneId === 'other_scene') return
+      if (!snapshot.sceneId) return
       const next = [snapshot, ...(Array.isArray(this.recentPublishProfiles) ? this.recentPublishProfiles : []).filter((item) => item.id !== snapshot.id)]
         .slice(0, QUICK_PUBLISH_MAX_COUNT)
       this.recentPublishProfiles = next
@@ -1128,6 +1131,7 @@ export default {
       this.form.title = String(profile.title || '').slice(0, 30)
       this.form.visibleTags = Array.isArray(profile.visibleTags) ? [...profile.visibleTags].slice(0, 12) : []
       this.form.description = String(profile.descriptionExtra || '').slice(0, 300)
+      this.form.customTypeName = String(profile.customTypeName || '')
       this.structuredBlocks = {
         highlight: String(profile.structuredBlocks?.highlight || ''),
         process: String(profile.structuredBlocks?.process || ''),
@@ -1494,9 +1498,9 @@ export default {
       const selected = this.sceneOptions[idx] || this.sceneOptions[0]
       this.syncSceneAndType(selected?.id || '', '')
       this.selectedTemplateSceneId = String(selected?.id || '').trim()
+      this.hydrateStructuredByScene(selected?.id || '', { force: false })
       if (String(selected?.id || '').trim() !== 'other_scene') {
         this.form.customTypeName = ''
-        this.hydrateStructuredByScene(selected?.id || '', { force: false })
       }
     },
 

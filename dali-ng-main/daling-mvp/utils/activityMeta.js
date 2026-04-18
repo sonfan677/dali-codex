@@ -263,6 +263,51 @@ const PUBLISH_TEMPLATE_BY_SCENE = {
       isCommercialActivity: 'no',
     },
   },
+  other_scene: {
+    emoji: '✨',
+    title: '自定义兴趣活动',
+    blocks: {
+      highlight: '这是一个可自由定义主题的活动，欢迎发起你的新玩法。',
+      process: '集合签到 → 自定义活动流程 → 自由交流或收尾复盘。',
+      tips: '请描述清楚活动边界和注意事项，避免参与者理解偏差。',
+      suitableFor: '适合有明确主题想法的组织者，建议写清目标人群。',
+    },
+    visibleTags: ['同频交流', '一个人也能来', '新手友好'],
+    defaults: {
+      chargeType: 'free',
+      allowWaitlist: true,
+      requireApproval: false,
+      isOutdoorActivity: 'no',
+      hasAlcohol: 'no',
+      hasCarpool: 'no',
+      hasOvernight: 'no',
+      hasMinors: 'no',
+      isCommercialActivity: 'no',
+    },
+    customTypeName: '自定义兴趣局',
+  },
+  festival_theme: {
+    emoji: '🎉',
+    title: '节庆主题活动',
+    blocks: {
+      highlight: '围绕大理节庆窗口组织同行活动，增强参与与城市体验。',
+      process: '节庆信息同步 → 集合同行 → 现场活动与自由探索。',
+      tips: '节庆期间人流较大，请提前规划路线并注意安全。',
+      suitableFor: '适合游客、旅居者和同城用户共同参与。',
+    },
+    visibleTags: ['节日氛围', '热闹', '适合游客'],
+    defaults: {
+      chargeType: 'free',
+      allowWaitlist: true,
+      requireApproval: false,
+      isOutdoorActivity: 'yes',
+      hasAlcohol: 'no',
+      hasCarpool: 'no',
+      hasOvernight: 'no',
+      hasMinors: 'no',
+      isCommercialActivity: 'no',
+    },
+  },
 }
 
 export const ACTIVITY_TYPE_OPTIONS_BY_SCENE = {
@@ -509,7 +554,7 @@ export const PUBLISH_SCENE_OPTIONS = ACTIVITY_SCENE_DEFINITIONS
 
 export const QUICK_PUBLISH_TEMPLATE_SCENE_IDS = PUBLISH_SCENE_OPTIONS
   .map((item) => String(item.id || '').trim())
-  .filter((id) => id && id !== 'other_scene')
+  .filter((id) => id)
 
 const SCENE_ID_SET = new Set(ACTIVITY_SCENE_DEFINITIONS.map((item) => item.id))
 const SCENE_LABEL_MAP = ACTIVITY_SCENE_DEFINITIONS.reduce((acc, item) => {
@@ -873,7 +918,7 @@ export function resolveSceneTypeFromLegacyFields(input = {}) {
 
 export function getPublishTemplateByScene(sceneId = '') {
   const safeSceneId = normalizeSceneId(sceneId)
-  if (!safeSceneId || safeSceneId === 'other_scene' || safeSceneId === 'festival_theme') return null
+  if (!safeSceneId) return null
   const tpl = PUBLISH_TEMPLATE_BY_SCENE[safeSceneId]
   if (!tpl) return null
   return {
@@ -898,6 +943,7 @@ export function getPublishTemplateByScene(sceneId = '') {
       hasMinors: String(tpl.defaults?.hasMinors || 'no'),
       isCommercialActivity: String(tpl.defaults?.isCommercialActivity || 'no'),
     },
+    customTypeName: String(tpl.customTypeName || ''),
   }
 }
 
