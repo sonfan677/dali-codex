@@ -2,9 +2,21 @@
   <view class="page">
     <scroll-view scroll-y class="scroll" :scroll-top="scrollTop">
       <view class="form">
+        <view class="field publish-mode-field">
+          <view class="mode-tab-row">
+            <text
+              v-for="item in publishModeOptions"
+              :key="`publish-mode-${item.id}`"
+              class="mode-tab"
+              :class="{ 'mode-tab--active': publishMode === item.id }"
+              @tap="switchPublishMode(item.id)"
+            >{{ item.label }}</text>
+          </view>
+          <text class="hint">当前页面：{{ publishModeLabel }}</text>
+        </view>
 
         <!-- 快速模板 -->
-        <view class="field">
+        <view v-if="publishMode === 'template'" class="field">
           <text class="label">快速发布模板（{{ publishTemplateOptions.length }}类）</text>
           <view class="template-chip-list">
             <text
@@ -38,12 +50,13 @@
           <view class="template-actions">
             <button class="mini-btn" @tap="applySelectedSceneTemplate">套用模板</button>
             <button class="mini-btn mini-btn--ghost" @tap="generateStructuredDescriptionPreview">生成结构化描述</button>
+            <button class="mini-btn mini-btn--primary" @tap="switchPublishMode('custom')">进入自定义发布</button>
           </view>
           <text class="hint">模板会自动填充默认文案、标签、收费与风控项，你只需改时间/地点等关键字段。</text>
         </view>
 
         <!-- 常发布快速复用 -->
-        <view class="field">
+        <view v-if="publishMode === 'recent'" class="field">
           <text class="label">常发布活动（快速复用）</text>
           <view v-if="recentPublishProfiles.length === 0" class="empty empty--inline">
             <text class="empty-text">暂无常用活动，发布成功后会自动沉淀到这里</text>
@@ -58,9 +71,13 @@
               <button class="mini-btn" @tap="quickPublishRecentProfile(item)">一键发布</button>
             </view>
           </view>
+          <view class="template-actions">
+            <button class="mini-btn mini-btn--primary" @tap="switchPublishMode('custom')">进入自定义发布</button>
+          </view>
           <text class="hint">一键发布会自动把开始时间滚动到“当前时间后2小时”的最近15分钟刻度。</text>
         </view>
 
+        <template v-if="publishMode === 'custom'">
         <!-- 标题 -->
         <view class="field">
           <text class="label">活动标题 *</text>
@@ -488,14 +505,20 @@
           </picker>
           <text class="hint">{{ formationWindowHint }}</text>
         </view>
+        </template>
 
       </view>
     </scroll-view>
 
     <!-- 底部发布按钮 -->
-    <view class="bottom-bar">
+    <view v-if="publishMode === 'custom'" class="bottom-bar">
       <button class="submit-btn" @tap="submit" :loading="submitting">
         发布活动
+      </button>
+    </view>
+    <view v-else class="bottom-bar">
+      <button class="submit-btn submit-btn--ghost" @tap="switchPublishMode('custom')">
+        进入自定义发布
       </button>
     </view>
 
@@ -668,6 +691,11 @@ const RISK_BINARY_FIELDS = [
   { key: 'hasOvernight', label: '是否涉及过夜安排' },
   { key: 'hasMinors', label: '是否允许未成年人参与' },
 ]
+const PUBLISH_MODE_OPTIONS = [
+  { id: 'template', label: '快速发布模板' },
+  { id: 'recent', label: '常发布活动（快速复用）' },
+  { id: 'custom', label: '自定义发布（结构化）' },
+]
 
 export default {
   setup() {
@@ -697,6 +725,8 @@ export default {
       profileDraftIdentityTags: [],
       scrollTop: 0,
       minParticipantsDisplay: '',
+      publishModeOptions: PUBLISH_MODE_OPTIONS,
+      publishMode: 'template',
       form: {
         title: '',
         description: '',
@@ -773,6 +803,11 @@ export default {
   },
 
   computed: {
+    publishModeLabel() {
+      const found = (this.publishModeOptions || []).find((item) => item.id === this.publishMode)
+      return String(found?.label || '自定义发布')
+    },
+
     scenePickerRange() {
       return this.sceneOptions.map((item) => item.label)
     },
@@ -883,6 +918,15 @@ export default {
   },
 
   methods: {
+    switchPublishMode(mode = '') {
+      const safeMode = String(mode || '').trim()
+      if (!safeMode) return
+      const exists = (this.publishModeOptions || []).some((item) => item.id === safeMode)
+      if (!exists || this.publishMode === safeMode) return
+      this.publishMode = safeMode
+      this.scrollTop = 0
+    },
+
     safeDecodeURIComponent(value = '') {
       const raw = String(value || '')
       if (!raw) return ''
@@ -2148,6 +2192,32 @@ _doChooseLocation() {
   border-radius: 12rpx;
   padding: 28rpx 32rpx;
 }
+.publish-mode-field {
+  position: sticky;
+  top: 0;
+  z-index: 12;
+  box-shadow: 0 4rpx 14rpx rgba(15, 23, 42, 0.05);
+}
+.mode-tab-row {
+  display: flex;
+  gap: 10rpx;
+}
+.mode-tab {
+  flex: 1;
+  text-align: center;
+  padding: 12rpx 10rpx;
+  border-radius: 10rpx;
+  font-size: 24rpx;
+  color: #667085;
+  background: #f2f4f7;
+  border: 1rpx solid #e4e7ec;
+}
+.mode-tab--active {
+  color: #1A3C5E;
+  border-color: #1A3C5E;
+  background: #EAF2FB;
+  font-weight: 600;
+}
 .field-switch {
   display: flex;
   align-items: center;
@@ -2196,6 +2266,10 @@ _doChooseLocation() {
 .mini-btn--ghost {
   color: #475467;
   background: #F2F4F7;
+}
+.mini-btn--primary {
+  color: #FFFFFF;
+  background: #1A3C5E;
 }
 .recent-item {
   margin-top: 12rpx;
@@ -2604,5 +2678,9 @@ _doChooseLocation() {
   font-size: 32rpx;
   font-weight: bold;
   border: none;
+}
+.submit-btn--ghost {
+  background: #EAF2FB;
+  color: #1A3C5E;
 }
 </style>
