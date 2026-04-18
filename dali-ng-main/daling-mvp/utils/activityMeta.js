@@ -310,6 +310,34 @@ const PUBLISH_TEMPLATE_BY_SCENE = {
   },
 }
 
+const TYPE_CATEGORY_EMOJI_MAP = {
+  sport: '🏃',
+  cycling: '🚴',
+  outdoor: '🌿',
+  music: '🎵',
+  game: '🎲',
+  culture: '📚',
+  food: '🍜',
+  photo: '📷',
+  wellness: '🧘',
+  social: '🤝',
+  other: '✨',
+}
+
+const CATEGORY_TEMPLATE_EXTRA_TAGS = {
+  sport: ['新手友好'],
+  cycling: ['户外自然'],
+  outdoor: ['户外自然'],
+  music: ['沉浸体验'],
+  game: ['热闹'],
+  culture: ['文艺'],
+  food: ['有吃有喝'],
+  photo: ['适合拍照'],
+  wellness: ['松弛'],
+  social: ['同频交流'],
+  other: ['一个人也能来'],
+}
+
 export const ACTIVITY_TYPE_OPTIONS_BY_SCENE = {
   local_explore: [
     { id: 'hotspot_checkin', name: '热门点位打卡', categoryId: 'photo' },
@@ -954,6 +982,51 @@ export function getPublishTemplateOptions() {
     emoji: String(PUBLISH_TEMPLATE_BY_SCENE[sceneId]?.emoji || ''),
     title: String(PUBLISH_TEMPLATE_BY_SCENE[sceneId]?.title || ''),
   }))
+}
+
+export function getPublishTypeTemplateOptions(sceneId = '') {
+  const safeSceneId = normalizeSceneId(sceneId)
+  if (!safeSceneId || safeSceneId === 'other_scene') return []
+  const sceneTpl = getPublishTemplateByScene(safeSceneId)
+  return getTypesByScene(safeSceneId).map((item) => ({
+    sceneId: safeSceneId,
+    typeId: String(item.id || '').trim(),
+    typeName: String(item.name || '').trim(),
+    categoryId: normalizeCategoryId(item.categoryId),
+    emoji: TYPE_CATEGORY_EMOJI_MAP[normalizeCategoryId(item.categoryId)] || sceneTpl?.emoji || '✨',
+  }))
+}
+
+export function getPublishTemplateBySceneType(sceneId = '', typeId = '') {
+  const safeSceneId = normalizeSceneId(sceneId)
+  const baseTpl = getPublishTemplateByScene(safeSceneId)
+  if (!safeSceneId || !baseTpl) return null
+
+  const type = resolveTypeForScene(safeSceneId, typeId)
+  if (!type) return baseTpl
+
+  const safeTypeId = String(type.id || '').trim()
+  const safeTypeName = String(type.name || '').trim() || '活动'
+  const categoryId = normalizeCategoryId(type.categoryId || resolveCategoryBySceneType(safeSceneId, safeTypeId))
+  const extraTags = CATEGORY_TEMPLATE_EXTRA_TAGS[categoryId] || []
+  const mergedTags = [...new Set([...(baseTpl.visibleTags || []), ...extraTags])].slice(0, 12)
+  const emoji = TYPE_CATEGORY_EMOJI_MAP[categoryId] || baseTpl.emoji || '✨'
+
+  return {
+    ...baseTpl,
+    sceneId: safeSceneId,
+    typeId: safeTypeId,
+    typeName: safeTypeName,
+    emoji,
+    title: `${safeTypeName}同行活动`,
+    blocks: {
+      highlight: `围绕「${safeTypeName}」发起活动，${String(baseTpl.blocks?.highlight || '')}`,
+      process: String(baseTpl.blocks?.process || ''),
+      tips: String(baseTpl.blocks?.tips || ''),
+      suitableFor: String(baseTpl.blocks?.suitableFor || ''),
+    },
+    visibleTags: mergedTags,
+  }
 }
 
 export function normalizeThemeIds(themeIds = [], max = 3) {

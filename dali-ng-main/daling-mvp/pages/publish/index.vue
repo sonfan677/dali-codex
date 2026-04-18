@@ -17,6 +17,24 @@
               {{ item.emoji }} {{ item.sceneLabel }}
             </text>
           </view>
+          <view v-if="typeTemplateOptions.length > 0" class="type-template-wrap">
+            <text class="hint">细分场景模板（{{ typeTemplateOptions.length }}项）</text>
+            <view class="template-chip-list">
+              <text
+                v-for="item in typeTemplateOptions"
+                :key="`type-template-${item.sceneId}-${item.typeId}`"
+                class="template-chip template-chip--sub"
+                :class="{ 'template-chip--active': selectedTemplateTypeId === item.typeId }"
+                @tap="selectTypeTemplate(item.typeId)"
+              >
+                {{ item.emoji }} {{ item.typeName }}
+              </text>
+            </view>
+            <text class="hint">当前细分模板：{{ selectedTypeTemplateName }}</text>
+            <view class="template-actions">
+              <button class="mini-btn" @tap="applySelectedTypeTemplate">套用细分模板</button>
+            </view>
+          </view>
           <view class="template-actions">
             <button class="mini-btn" @tap="applySelectedSceneTemplate">套用模板</button>
             <button class="mini-btn mini-btn--ghost" @tap="generateStructuredDescriptionPreview">生成结构化描述</button>
@@ -567,7 +585,9 @@ import { callCloud } from '@/utils/cloud.js'
 import { useUserStore } from '@/stores/user.js'
 import {
   getPublishTemplateByScene,
+  getPublishTemplateBySceneType,
   getPublishTemplateOptions,
+  getPublishTypeTemplateOptions,
   getSocialEnergyLabel,
   normalizeCustomTypeName,
   PUBLISH_SCENE_OPTIONS,
@@ -744,6 +764,8 @@ export default {
       },
       publishTemplateOptions: getPublishTemplateOptions(),
       selectedTemplateSceneId: defaultSceneId,
+      typeTemplateOptions: getPublishTypeTemplateOptions(defaultSceneId),
+      selectedTemplateTypeId: String(defaultType.id || ''),
       useStructuredDescription: true,
       structuredBlocks: createEmptyStructuredBlocks(),
       recentPublishProfiles: [],
@@ -774,6 +796,13 @@ export default {
       const list = Array.isArray(this.typeOptions) ? this.typeOptions : []
       if (!list.length) return ['请选择活动场景']
       return list.map((item) => item.name)
+    },
+
+    selectedTypeTemplateName() {
+      const safeTypeId = String(this.selectedTemplateTypeId || '').trim()
+      if (!safeTypeId) return '未选择'
+      const found = (this.typeTemplateOptions || []).find((item) => String(item.typeId || '').trim() === safeTypeId)
+      return String(found?.typeName || '未选择')
     },
 
     formationWindowHint() {
@@ -835,6 +864,7 @@ export default {
 
   onLoad(options = {}) {
     this.loadRecentPublishProfiles()
+    this.refreshTypeTemplateOptions(this.form.sceneId, this.form.typeId)
     this.hydrateStructuredByScene(this.form.sceneId, { force: false })
     this.applyPrefillFromQuery(options)
     this.consumeMarketPrefillFromStorage({ showToast: false })
@@ -961,10 +991,30 @@ export default {
       } catch (e) {}
     },
 
+    refreshTypeTemplateOptions(sceneId = '', preferredTypeId = '') {
+      const safeSceneId = String(sceneId || '').trim()
+      const list = getPublishTypeTemplateOptions(safeSceneId)
+      this.typeTemplateOptions = list
+      if (!list.length) {
+        this.selectedTemplateTypeId = ''
+        return
+      }
+      const safePreferredTypeId = String(preferredTypeId || '').trim()
+      const matched = list.some((item) => item.typeId === safePreferredTypeId)
+      this.selectedTemplateTypeId = matched ? safePreferredTypeId : String(list[0].typeId || '')
+    },
+
     selectSceneTemplate(sceneId = '') {
       const safe = String(sceneId || '').trim()
       if (!safe) return
       this.selectedTemplateSceneId = safe
+      this.refreshTypeTemplateOptions(safe, this.form.typeId)
+    },
+
+    selectTypeTemplate(typeId = '') {
+      const safe = String(typeId || '').trim()
+      if (!safe) return
+      this.selectedTemplateTypeId = safe
     },
 
     applySelectedSceneTemplate() {
@@ -974,6 +1024,16 @@ export default {
         return
       }
       this.applySceneTemplateDefaults(sceneId)
+    },
+
+    applySelectedTypeTemplate() {
+      const sceneId = String(this.selectedTemplateSceneId || this.form.sceneId || '').trim()
+      const typeId = String(this.selectedTemplateTypeId || '').trim()
+      if (!sceneId || !typeId) {
+        uni.showToast({ title: '请先选择细分模板', icon: 'none' })
+        return
+      }
+      this.applyTypeTemplateDefaults(sceneId, typeId)
     },
 
     hydrateStructuredByScene(sceneId = '', options = {}) {
@@ -995,34 +1055,54 @@ export default {
         uni.showToast({ title: '该类型暂无模板', icon: 'none' })
         return
       }
-      this.syncSceneAndType(sceneId, '')
+      this.applyTemplatePayload(tpl, { sceneId, typeId: '' })
+      uni.showToast({ title: '模板已套用', icon: 'success' })
+    },
+
+    applyTypeTemplateDefaults(sceneId = '', typeId = '') {
+      const tpl = getPublishTemplateBySceneType(sceneId, typeId)
+      if (!tpl) {
+        uni.showToast({ title: '该细分模板暂无配置', icon: 'none' })
+        return
+      }
+      this.applyTemplatePayload(tpl, { sceneId, typeId })
+      uni.showToast({ title: '细分模板已套用', icon: 'success' })
+    },
+
+    applyTemplatePayload(tpl = null, options = {}) {
+      if (!tpl || typeof tpl !== 'object') return
+      const sceneId = String(options.sceneId || tpl.sceneId || this.form.sceneId || '').trim()
+      const typeId = String(options.typeId || tpl.typeId || '').trim()
+      this.syncSceneAndType(sceneId, typeId)
       this.selectedTemplateSceneId = sceneId
+      this.refreshTypeTemplateOptions(sceneId, typeId || this.form.typeId)
+      if (typeId) this.selectedTemplateTypeId = typeId
       this.useStructuredDescription = true
       this.structuredBlocks = {
-        highlight: tpl.blocks.highlight || '',
-        process: tpl.blocks.process || '',
-        tips: tpl.blocks.tips || '',
-        suitableFor: tpl.blocks.suitableFor || '',
+        highlight: String(tpl.blocks?.highlight || ''),
+        process: String(tpl.blocks?.process || ''),
+        tips: String(tpl.blocks?.tips || ''),
+        suitableFor: String(tpl.blocks?.suitableFor || ''),
       }
-      if (String(sceneId || '').trim() === 'other_scene') {
+      if (sceneId === 'other_scene') {
         this.form.customTypeName = String(tpl.customTypeName || this.form.customTypeName || '自定义兴趣局')
       }
       if (tpl.title) {
-        this.form.title = tpl.title.slice(0, 30)
+        this.form.title = String(tpl.title).slice(0, 30)
       }
       this.form.visibleTags = Array.isArray(tpl.visibleTags) ? [...tpl.visibleTags].slice(0, 12) : []
-      this.setChargeType(tpl.defaults.chargeType || 'free')
+      this.setChargeType(tpl.defaults?.chargeType || 'free')
       if (this.form.chargeType === 'paid' && !Number(this.form.feeAmount)) {
         this.form.feeAmount = '39'
       }
-      this.form.allowWaitlist = !!tpl.defaults.allowWaitlist
-      this.form.requireApproval = !!tpl.defaults.requireApproval
-      this.form.isOutdoorActivity = tpl.defaults.isOutdoorActivity || 'no'
-      this.form.hasAlcohol = tpl.defaults.hasAlcohol || 'no'
-      this.form.hasCarpool = tpl.defaults.hasCarpool || 'no'
-      this.form.hasOvernight = tpl.defaults.hasOvernight || 'no'
-      this.form.hasMinors = tpl.defaults.hasMinors || 'no'
-      this.form.isCommercialActivity = tpl.defaults.isCommercialActivity || 'no'
+      this.form.allowWaitlist = !!tpl.defaults?.allowWaitlist
+      this.form.requireApproval = !!tpl.defaults?.requireApproval
+      this.form.isOutdoorActivity = String(tpl.defaults?.isOutdoorActivity || 'no')
+      this.form.hasAlcohol = String(tpl.defaults?.hasAlcohol || 'no')
+      this.form.hasCarpool = String(tpl.defaults?.hasCarpool || 'no')
+      this.form.hasOvernight = String(tpl.defaults?.hasOvernight || 'no')
+      this.form.hasMinors = String(tpl.defaults?.hasMinors || 'no')
+      this.form.isCommercialActivity = String(tpl.defaults?.isCommercialActivity || 'no')
       if (this.form.chargeType !== 'free') {
         if (!String(this.form.payeeSubject || '').trim()) {
           this.form.payeeSubject = '活动发起方'
@@ -1035,7 +1115,6 @@ export default {
         this.form.cancellationPolicy = '如遇天气/人数不足等情况，将提前通知并给出改期或取消方案。'
       }
       this.generateStructuredDescriptionPreview()
-      uni.showToast({ title: '模板已套用', icon: 'success' })
     },
 
     onStructuredModeChange(e) {
@@ -1128,6 +1207,8 @@ export default {
       if (!sceneId) return
       this.syncSceneAndType(sceneId, String(profile.typeId || '').trim())
       this.selectedTemplateSceneId = sceneId
+      this.refreshTypeTemplateOptions(sceneId, this.form.typeId)
+      this.selectedTemplateTypeId = String(this.form.typeId || '')
       this.form.title = String(profile.title || '').slice(0, 30)
       this.form.visibleTags = Array.isArray(profile.visibleTags) ? [...profile.visibleTags].slice(0, 12) : []
       this.form.description = String(profile.descriptionExtra || '').slice(0, 300)
@@ -1281,6 +1362,8 @@ export default {
       })
       this.syncSceneAndType(mappedSceneType.sceneId, mappedSceneType.typeId)
       this.selectedTemplateSceneId = String(mappedSceneType.sceneId || '').trim()
+      this.refreshTypeTemplateOptions(mappedSceneType.sceneId, this.form.typeId)
+      this.selectedTemplateTypeId = String(this.form.typeId || '')
       this.hydrateStructuredByScene(mappedSceneType.sceneId, { force: false })
 
       const startMs = new Date(startTimeText).getTime()
@@ -1498,6 +1581,8 @@ export default {
       const selected = this.sceneOptions[idx] || this.sceneOptions[0]
       this.syncSceneAndType(selected?.id || '', '')
       this.selectedTemplateSceneId = String(selected?.id || '').trim()
+      this.refreshTypeTemplateOptions(this.form.sceneId, this.form.typeId)
+      this.selectedTemplateTypeId = String(this.form.typeId || '')
       this.hydrateStructuredByScene(selected?.id || '', { force: false })
       if (String(selected?.id || '').trim() !== 'other_scene') {
         this.form.customTypeName = ''
@@ -1510,6 +1595,7 @@ export default {
       const selected = this.typeOptions[idx] || this.typeOptions[0] || { id: '', name: '' }
       this.form.typeId = selected.id
       this.form.typeName = selected.name
+      this.selectedTemplateTypeId = String(selected.id || '')
     },
 
     // 失焦时校验并格式化
