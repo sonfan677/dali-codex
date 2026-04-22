@@ -167,6 +167,7 @@
 
 - 本地回归清单：`docs/LOCAL_TEST_CHECKLIST.md`
 - 产品与合规摘要：`docs/PRODUCT_BASELINE_SUMMARY.md`
+- AI 复刻开发交接文档：`docs/AI_REBUILD_HANDOFF.md`
 
 ---
 
