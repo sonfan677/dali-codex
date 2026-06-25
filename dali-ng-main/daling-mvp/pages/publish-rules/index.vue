@@ -6,12 +6,12 @@
       <text class="intro">本规则用于明确活动发布边界与治理要求。你提交活动即表示已阅读并同意本规则。</text>
 
       <text class="section-title">1. 平台定位</text>
-      <text class="item-body">平台提供活动信息发布、展示、报名登记与必要治理能力。除另有明确标注外，平台不是活动组织者、收费方、带队方或线下履约方。</text>
+      <text class="item-body">平台提供活动信息发布、展示、报名登记与必要治理能力。平台不是活动组织者、收费方、带队方或线下履约方。</text>
 
       <text class="section-title">2. 发布信息要求</text>
       <view class="bullet-group">
         <view class="bullet-item"><text class="bullet">·</text><text class="bullet-text">活动信息需真实、完整、可执行。</text></view>
-        <view class="bullet-item"><text class="bullet">·</text><text class="bullet-text">收费活动必须披露收费方式、收款主体、退款规则、取消规则。</text></view>
+        <view class="bullet-item"><text class="bullet">·</text><text class="bullet-text">活动线仅支持免费活动；不得把活动发布页作为收费、收款、退款或交易入口。</text></view>
         <view class="bullet-item"><text class="bullet">·</text><text class="bullet-text">需如实申报夜间、户外、饮酒、拼车、过夜、未成年人参与等风险要素。</text></view>
       </view>
 
@@ -25,12 +25,12 @@
       <text class="section-title">4. 禁止发布内容</text>
       <view class="bullet-group">
         <view class="bullet-item"><text class="bullet">·</text><text class="bullet-text">违法违规、欺诈引流、虚假宣传或侵害他人权益内容。</text></view>
-        <view class="bullet-item"><text class="bullet">·</text><text class="bullet-text">隐瞒收费主体、诱导站外转账、拒绝披露核心条件的活动。</text></view>
+        <view class="bullet-item"><text class="bullet">·</text><text class="bullet-text">诱导站外转账、售卖名额、暗示平台担保或拒绝披露核心条件的活动。</text></view>
         <view class="bullet-item"><text class="bullet">·</text><text class="bullet-text">平台认定存在明显安全风险且不适合发布的活动。</text></view>
       </view>
 
       <text class="section-title">5. 违规处置</text>
-      <text class="item-body">平台可视情节采取提醒、下架、驳回、限制发布、限制收费活动、冻结账号等措施，并保留必要证据以配合监管。</text>
+      <text class="item-body">平台可视情节采取提醒、下架、驳回、限制发布、冻结账号等措施，并保留必要证据以配合监管。</text>
     </view>
   </scroll-view>
 </template>

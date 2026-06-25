@@ -51,9 +51,9 @@ const DEFAULT_PUBLISH_GOVERNANCE_CONFIG = {
   highRiskForceManualReview: true,
   tierRules: {
     normal: { maxRiskLevel: 'L2', allowPaid: false },
-    verified: { maxRiskLevel: 'L2', allowPaid: true },
-    commercial: { maxRiskLevel: 'L3', allowPaid: true },
-    qualified: { maxRiskLevel: 'L4', allowPaid: true },
+    verified: { maxRiskLevel: 'L2', allowPaid: false },
+    commercial: { maxRiskLevel: 'L3', allowPaid: false },
+    qualified: { maxRiskLevel: 'L4', allowPaid: false },
   },
 }
 

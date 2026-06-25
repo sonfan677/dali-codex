@@ -372,14 +372,13 @@ function buildRiskDisclosure(activity = {}) {
     hasOvernight: normalizeBooleanInput(activity?.riskDeclaration?.hasOvernight) || !!activity?.opsTagProfile?.riskTriggerFlags?.isOvernight,
     hasMinors: normalizeBooleanInput(activity?.riskDeclaration?.hasMinors) || !!activity?.opsTagProfile?.riskTriggerFlags?.isChildren,
   }
-  const chargeType = String(activity?.pricing?.chargeType || activity?.chargeType || fromActivity?.chargeType || 'free').trim().toLowerCase()
-  const mediumByFlags = Object.values(fallbackFlags).some(Boolean) || chargeType !== 'free'
+  const chargeType = 'free'
+  const mediumByFlags = Object.values(fallbackFlags).some(Boolean)
   const isHigh = String(activity?.publishRiskLevel || fromActivity?.level || '').trim().toLowerCase() === 'high' || String(fromActivity?.level || '').toUpperCase() === 'L3'
   const level = isHigh ? 'L3' : (mediumByFlags ? 'L2' : 'L1')
   const checkItems = []
   if (level !== 'L1') checkItems.push('platformNotOrganizer', 'selfAssessRisk', 'knowOfflineRisk')
   if (level === 'L3') checkItems.push('emergencyPrepared')
-  if (chargeType !== 'free') checkItems.push('knowPaymentByOrganizer')
   return {
     version: String(fromActivity?.version || 'p0_v1'),
     level,
@@ -400,8 +399,8 @@ function buildFeeDisclosure(activity = {}) {
     : {}
   return {
     isCommercialActivity: normalizeBooleanInput(fromActivity.isCommercialActivity),
-    payeeSubject: String(fromActivity.payeeSubject || '').trim(),
-    refundPolicy: String(fromActivity.refundPolicy || '').trim(),
+    payeeSubject: '',
+    refundPolicy: '',
     cancellationPolicy: String(fromActivity.cancellationPolicy || '').trim(),
     platformPaymentRole: String(fromActivity.platformPaymentRole || 'not_involved'),
   }
@@ -493,11 +492,11 @@ exports.main = async (event) => {
     sceneName: activity.sceneName || sceneType.sceneName,
     typeId: activity.typeId || sceneType.typeId,
     typeName: activity.typeName || sceneType.typeName,
-    chargeType: String(activity.chargeType || activity.pricing?.chargeType || 'free'),
-    feeAmount: Number(activity.feeAmount ?? activity.pricing?.feeAmount ?? 0) || 0,
+    chargeType: 'free',
+    feeAmount: 0,
     pricing: {
-      chargeType: String(activity.pricing?.chargeType || activity.chargeType || 'free'),
-      feeAmount: Number(activity.pricing?.feeAmount ?? activity.feeAmount ?? 0) || 0,
+      chargeType: 'free',
+      feeAmount: 0,
       currency: activity.pricing?.currency || 'CNY',
     },
     feeDisclosure: buildFeeDisclosure(activity),

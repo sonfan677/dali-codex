@@ -495,9 +495,9 @@ const DEFAULT_PUBLISH_GOVERNANCE_CONFIG = {
   highRiskForceManualReview: true,
   tierRules: {
     normal: { maxRiskLevel: 'L2', allowPaid: false },
-    verified: { maxRiskLevel: 'L2', allowPaid: true },
-    commercial: { maxRiskLevel: 'L3', allowPaid: true },
-    qualified: { maxRiskLevel: 'L4', allowPaid: true },
+    verified: { maxRiskLevel: 'L2', allowPaid: false },
+    commercial: { maxRiskLevel: 'L3', allowPaid: false },
+    qualified: { maxRiskLevel: 'L4', allowPaid: false },
   },
 }
 
@@ -1457,6 +1457,110 @@ function buildWeeklyBrief(input = {}) {
   }
 }
 
+function buildLaunchMetricCards(input = {}) {
+  const activities = Array.isArray(input.activityRows) ? input.activityRows : []
+  const participations = Array.isArray(input.participationRows) ? input.participationRows : []
+  const actionRows = Array.isArray(input.actionRows) ? input.actionRows : []
+  const now = new Date()
+  const day = now.getDay() || 7
+  const monday = new Date(now)
+  monday.setHours(0, 0, 0, 0)
+  monday.setDate(now.getDate() - day + 1)
+  const weekStartMs = monday.getTime()
+  const nowMs = Date.now()
+  const inThisWeek = (ts) => Number.isFinite(ts) && ts >= weekStartMs && ts <= nowMs
+  const formatPct = (value) => Number.isFinite(value) ? pctText(value) : '待埋点'
+  const statusByThreshold = (value, threshold) => {
+    if (!Number.isFinite(value)) return 'waiting'
+    return value >= threshold ? 'healthy' : 'warning'
+  }
+
+  const weekActivities = activities.filter((item) => inThisWeek(toTimestamp(item.createdAt || item.startTime)))
+  const weekJoins = participations.filter((item) => {
+    const status = String(item.status || '')
+    return status === 'joined' && inThisWeek(toTimestamp(item.joinedAt || item.appliedAt || item.createdAt))
+  })
+  const detailViewActions = actionRows.filter((item) => {
+    const action = String(item.action || item.actionType || '').toLowerCase()
+    return ['activity_detail_view', 'detail_view', 'view_activity_detail'].includes(action)
+      && inThisWeek(toTimestamp(item.createdAt))
+  })
+  const detailViewCount = detailViewActions.length
+  const detailClickRate = null
+  const joinConversionRate = detailViewCount > 0 ? weekJoins.length / detailViewCount : null
+  const formationDenominator = weekActivities.filter((item) => !!item.isGroupFormation || Number(item.minParticipants || 0) >= 2)
+  const formedCount = formationDenominator.filter((item) => {
+    const status = String(item.formationStatus || '').toUpperCase()
+    if (['FORMED', 'CONFIRMED'].includes(status)) return true
+    const min = Math.max(2, Number(item.minParticipants || 0))
+    return Number(item.currentParticipants || 0) >= min
+  }).length
+  const formationRate = formationDenominator.length ? formedCount / formationDenominator.length : null
+  const userJoinMap = {}
+  participations.forEach((item) => {
+    const uid = String(item.userId || item._openid || '').trim()
+    const ts = toTimestamp(item.joinedAt || item.appliedAt || item.createdAt)
+    if (!uid || !Number.isFinite(ts)) return
+    userJoinMap[uid] = userJoinMap[uid] || []
+    userJoinMap[uid].push(ts)
+  })
+  const retainedUsers = new Set()
+  const baseUsers = new Set()
+  weekJoins.forEach((item) => {
+    const uid = String(item.userId || item._openid || '').trim()
+    const joinedTs = toTimestamp(item.joinedAt || item.appliedAt || item.createdAt)
+    if (!uid || !Number.isFinite(joinedTs)) return
+    baseUsers.add(uid)
+    const events = userJoinMap[uid] || []
+    const hasNextDay = events.some((ts) => ts >= joinedTs + 24 * 60 * 60 * 1000 && ts < joinedTs + 48 * 60 * 60 * 1000)
+    if (hasNextDay) retainedUsers.add(uid)
+  })
+  const retentionRate = baseUsers.size ? retainedUsers.size / baseUsers.size : null
+
+  return [
+    {
+      key: 'weekly_publish_count',
+      label: '周发布活动数',
+      value: `${weekActivities.length} 场`,
+      threshold: '健康 >= 5 场',
+      status: weekActivities.length >= 5 ? 'healthy' : 'warning',
+      note: '判断供给是否成立',
+    },
+    {
+      key: 'detail_click_rate',
+      label: '活动详情页点击率',
+      value: formatPct(detailClickRate),
+      threshold: '健康 >= 30%',
+      status: statusByThreshold(detailClickRate, 0.3),
+      note: detailViewCount ? `详情访问 ${detailViewCount} 次` : '需接入详情访问埋点',
+    },
+    {
+      key: 'join_conversion_rate',
+      label: '报名转化率',
+      value: formatPct(joinConversionRate),
+      threshold: '健康 >= 20%',
+      status: statusByThreshold(joinConversionRate, 0.2),
+      note: detailViewCount ? `报名 ${weekJoins.length} / 详情 ${detailViewCount}` : '需接入详情访问埋点',
+    },
+    {
+      key: 'formation_rate',
+      label: '成团率',
+      value: Number.isFinite(formationRate) ? pctText(formationRate) : '待样本',
+      threshold: '健康 >= 40%',
+      status: statusByThreshold(formationRate, 0.4),
+      note: `成团 ${formedCount} / 需成团 ${formationDenominator.length}`,
+    },
+    {
+      key: 'next_day_retention',
+      label: '用户次日留存率',
+      value: Number.isFinite(retentionRate) ? pctText(retentionRate) : '待样本',
+      threshold: '健康 >= 25%',
+      status: statusByThreshold(retentionRate, 0.25),
+      note: `次日复参与 ${retainedUsers.size} / 本周报名用户 ${baseUsers.size}`,
+    },
+  ]
+}
+
 function buildAnomalyAlerts(input = {}) {
   const weekly = input.weeklyBrief || {}
   const patrolSummary = input.patrolSummary || {}
@@ -2097,6 +2201,11 @@ exports.main = async () => {
     participationRows: participationList,
     insightCards: opsInsightCards,
   })
+  const launchMetricCards = buildLaunchMetricCards({
+    activityRows: enrichedActivityList,
+    participationRows: participationList,
+    actionRows: rawActionLogs,
+  })
   const opsAnomalyAlerts = buildAnomalyAlerts({
     weeklyBrief: opsWeeklyBrief,
     patrolSummary: opsPatrolSummary,
@@ -2123,6 +2232,7 @@ exports.main = async () => {
     },
     reportList,
     pendingPublishList,
+    launchMetricCards,
     opsTagOverview,
     customSceneTypeStats,
     opsInsightCards,

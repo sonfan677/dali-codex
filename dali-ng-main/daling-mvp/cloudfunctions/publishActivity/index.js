@@ -326,9 +326,9 @@ const DEFAULT_PUBLISH_GOVERNANCE_CONFIG = {
   highRiskForceManualReview: true,
   tierRules: {
     normal: { maxRiskLevel: 'L2', allowPaid: false },
-    verified: { maxRiskLevel: 'L2', allowPaid: true },
-    commercial: { maxRiskLevel: 'L3', allowPaid: true },
-    qualified: { maxRiskLevel: 'L4', allowPaid: true },
+    verified: { maxRiskLevel: 'L2', allowPaid: false },
+    commercial: { maxRiskLevel: 'L3', allowPaid: false },
+    qualified: { maxRiskLevel: 'L4', allowPaid: false },
   },
 }
 const ORGANIZER_TIER_LABEL_MAP = {
@@ -743,13 +743,13 @@ function resolveTierPublishPermission({
   isAdmin = false,
   governanceConfig = DEFAULT_PUBLISH_GOVERNANCE_CONFIG,
 } = {}) {
-  if (isAdmin) return { allowed: true, reasonCode: '', message: '', maxRiskLevel: 'L4', allowPaid: true }
+  if (isAdmin) return { allowed: true, reasonCode: '', message: '', maxRiskLevel: 'L4', allowPaid: false }
   const normalizedConfig = sanitizePublishGovernanceConfig(
     governanceConfig,
     DEFAULT_PUBLISH_GOVERNANCE_CONFIG
   )
   if (!normalizedConfig.enableTierGate) {
-    return { allowed: true, reasonCode: '', message: '', maxRiskLevel: 'L4', allowPaid: true }
+    return { allowed: true, reasonCode: '', message: '', maxRiskLevel: 'L4', allowPaid: false }
   }
   const tierRuleMap = normalizedConfig.tierRules || DEFAULT_PUBLISH_GOVERNANCE_CONFIG.tierRules
   const tier = String(organizerTier || 'normal').trim().toLowerCase()
@@ -757,7 +757,7 @@ function resolveTierPublishPermission({
     tierRuleMap[tier] || tierRuleMap.normal || DEFAULT_PUBLISH_GOVERNANCE_CONFIG.tierRules.normal,
     DEFAULT_PUBLISH_GOVERNANCE_CONFIG.tierRules.normal
   )
-  const normalizedChargeType = String(chargeType || 'free').trim().toLowerCase()
+  const normalizedChargeType = 'free'
   if (normalizedChargeType === 'paid' && !rule.allowPaid) {
     return {
       allowed: false,
@@ -941,14 +941,13 @@ function resolveJoinRiskDisclosure({
     hasOvernight: !!sourceFlags.hasOvernight,
     hasMinors: !!sourceFlags.hasMinors,
   }
-  const mediumRiskByFlags = Object.values(flags).some(Boolean) || normalizedChargeType !== 'free'
+  const mediumRiskByFlags = Object.values(flags).some(Boolean)
   const isHighRisk = String(publishRiskLevel || '').trim().toLowerCase() === 'high'
   const level = isHighRisk ? 'L3' : (mediumRiskByFlags ? 'L2' : 'L1')
 
   const checkItems = []
   if (level !== 'L1') checkItems.push('platformNotOrganizer', 'selfAssessRisk', 'knowOfflineRisk')
   if (level === 'L3') checkItems.push('emergencyPrepared')
-  if (normalizedChargeType !== 'free') checkItems.push('knowPaymentByOrganizer')
 
   return {
     version: 'p1_v1',
@@ -1870,30 +1869,25 @@ exports.main = async (event, context) => {
       }
     }
   }
-  const finalChargeType = String(chargeType || '').trim().toLowerCase()
-  if (!['free', 'aa', 'paid'].includes(finalChargeType)) {
-    return { success: false, error: 'INVALID_CHARGE_TYPE', message: '收费方式不合法' }
+  const requestedChargeType = String(chargeType || 'free').trim().toLowerCase()
+  const requestedFeeAmount = Number(feeAmount || 0)
+  const hasUnsupportedCharge = requestedChargeType !== 'free' || (Number.isFinite(requestedFeeAmount) && requestedFeeAmount > 0)
+  if (hasUnsupportedCharge) {
+    return {
+      success: false,
+      error: 'ACTIVITY_CHARGE_NOT_SUPPORTED',
+      message: '活动线仅支持免费活动，暂不支持收费、收款或退款能力',
+    }
   }
-  const feeNum = Number(feeAmount)
-  const finalFeeAmount = finalChargeType === 'paid'
-    ? feeNum
-    : 0
-  if (finalChargeType === 'paid' && (!Number.isFinite(finalFeeAmount) || finalFeeAmount <= 0)) {
-    return { success: false, error: 'INVALID_FEE_AMOUNT', message: '付费金额不合法' }
-  }
+  const finalChargeType = 'free'
+  const finalFeeAmount = 0
   const finalIsCommercialActivity = normalizeBooleanInput(isCommercialActivity)
   if (finalIsCommercialActivity === null) {
     return { success: false, error: 'INVALID_COMMERCIAL_FLAG', message: '请明确是否商业组织活动' }
   }
-  const finalPayeeSubject = normalizePolicyText(payeeSubject, 30)
-  const finalRefundPolicy = normalizePolicyText(refundPolicy, 200)
+  const finalPayeeSubject = ''
+  const finalRefundPolicy = ''
   const finalCancellationPolicy = normalizePolicyText(cancellationPolicy, 200)
-  if (finalChargeType !== 'free' && finalPayeeSubject.length < 2) {
-    return { success: false, error: 'MISSING_PAYEE_SUBJECT', message: '请填写收款主体' }
-  }
-  if (finalChargeType !== 'free' && finalRefundPolicy.length < 4) {
-    return { success: false, error: 'MISSING_REFUND_POLICY', message: '请填写退款规则' }
-  }
   if (finalCancellationPolicy.length < 4) {
     return { success: false, error: 'MISSING_CANCELLATION_POLICY', message: '请填写活动取消规则' }
   }

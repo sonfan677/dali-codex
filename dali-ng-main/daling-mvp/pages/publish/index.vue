@@ -275,41 +275,10 @@
           />
         </view>
 
-        <!-- 收费设置 -->
+        <!-- 组织与取消规则 -->
         <view class="field">
-          <text class="label">收费方式 *</text>
-          <view class="fee-options">
-            <view
-              class="fee-option"
-              :class="{ 'fee-option--active': form.chargeType === 'free' }"
-              @tap="setChargeType('free')"
-            >免费</view>
-            <view
-              class="fee-option"
-              :class="{ 'fee-option--active': form.chargeType === 'aa' }"
-              @tap="setChargeType('aa')"
-            >AA</view>
-            <view
-              class="fee-option"
-              :class="{ 'fee-option--active': form.chargeType === 'paid' }"
-              @tap="setChargeType('paid')"
-            >付费</view>
-          </view>
-          <view v-if="form.chargeType === 'paid'" class="fee-input-row">
-            <text class="fee-currency">¥</text>
-            <input
-              class="fee-amount-input"
-              type="digit"
-              :value="form.feeAmount"
-              placeholder="填写金额（人民币）"
-              @input="onFeeAmountInput"
-            />
-          </view>
-        </view>
-
-        <!-- 收费与履约披露 -->
-        <view class="field">
-          <text class="label">收费与履约披露 *</text>
+          <text class="label">组织与取消规则 *</text>
+          <text class="hint">活动线仅支持免费活动；平台不提供活动收费、收款、退款或交易担保能力</text>
           <view class="risk-binary-row">
             <text class="risk-binary-label">是否商业组织活动</text>
             <view class="fee-options risk-binary-options">
@@ -325,27 +294,12 @@
               >否</view>
             </view>
           </view>
-          <view v-if="form.chargeType !== 'free'" class="mt12">
-            <input
-              class="input"
-              v-model="form.payeeSubject"
-              placeholder="收款主体（如：张三 / XX工作室）*"
-              maxlength="30"
-            />
-            <textarea
-              class="textarea mt12"
-              v-model="form.refundPolicy"
-              placeholder="退款规则（必填，如：活动前24小时可全额退款）*"
-              maxlength="200"
-            />
-          </view>
           <textarea
             class="textarea mt12"
             v-model="form.cancellationPolicy"
             placeholder="活动取消规则（必填，如：人数不足自动取消并通知）*"
             maxlength="200"
           />
-          <text class="hint">费用由活动发起者自行收取，平台不代收、不托管、不分账</text>
         </view>
 
         <!-- 风险要素申报 -->
@@ -1005,8 +959,8 @@ export default {
               tips: String(item?.structuredBlocks?.tips || '').trim(),
               suitableFor: String(item?.structuredBlocks?.suitableFor || '').trim(),
             },
-            chargeType: ['free', 'aa', 'paid'].includes(String(item?.chargeType || '').trim()) ? String(item.chargeType).trim() : 'free',
-            feeAmount: Number(item?.feeAmount) > 0 ? Number(item.feeAmount) : 0,
+            chargeType: 'free',
+            feeAmount: 0,
             allowWaitlist: !!item?.allowWaitlist,
             requireApproval: !!item?.requireApproval,
             isCommercialActivity: String(item?.isCommercialActivity || '').trim() === 'yes' ? 'yes' : 'no',
@@ -1023,8 +977,8 @@ export default {
             lat: Number(item?.lat) || 0,
             lng: Number(item?.lng) || 0,
             address: String(item?.address || '').trim(),
-            payeeSubject: String(item?.payeeSubject || '').trim().slice(0, 30),
-            refundPolicy: String(item?.refundPolicy || '').trim().slice(0, 200),
+            payeeSubject: '',
+            refundPolicy: '',
             cancellationPolicy: String(item?.cancellationPolicy || '').trim().slice(0, 200),
             updatedAt: Number(item?.updatedAt || 0) || 0,
           }))
@@ -1150,10 +1104,8 @@ export default {
         this.form.title = String(tpl.title).slice(0, 30)
       }
       this.form.visibleTags = Array.isArray(tpl.visibleTags) ? [...tpl.visibleTags].slice(0, 12) : []
-      this.setChargeType(tpl.defaults?.chargeType || 'free')
-      if (this.form.chargeType === 'paid' && !Number(this.form.feeAmount)) {
-        this.form.feeAmount = '39'
-      }
+      this.setChargeType('free')
+      this.form.feeAmount = ''
       this.form.allowWaitlist = !!tpl.defaults?.allowWaitlist
       this.form.requireApproval = !!tpl.defaults?.requireApproval
       this.form.isOutdoorActivity = String(tpl.defaults?.isOutdoorActivity || 'no')
@@ -1162,14 +1114,8 @@ export default {
       this.form.hasOvernight = String(tpl.defaults?.hasOvernight || 'no')
       this.form.hasMinors = String(tpl.defaults?.hasMinors || 'no')
       this.form.isCommercialActivity = String(tpl.defaults?.isCommercialActivity || 'no')
-      if (this.form.chargeType !== 'free') {
-        if (!String(this.form.payeeSubject || '').trim()) {
-          this.form.payeeSubject = '活动发起方'
-        }
-        if (!String(this.form.refundPolicy || '').trim()) {
-          this.form.refundPolicy = '活动开始前24小时可全额退款，开始后不支持退款。'
-        }
-      }
+      this.form.payeeSubject = ''
+      this.form.refundPolicy = ''
       if (!String(this.form.cancellationPolicy || '').trim()) {
         this.form.cancellationPolicy = '如遇天气/人数不足等情况，将提前通知并给出改期或取消方案。'
       }
@@ -1227,8 +1173,8 @@ export default {
           tips: String(this.structuredBlocks?.tips || '').trim().slice(0, 160),
           suitableFor: String(this.structuredBlocks?.suitableFor || '').trim().slice(0, 100),
         },
-        chargeType: this.form.chargeType,
-        feeAmount: Number(this.form.feeAmount) > 0 ? Number(this.form.feeAmount) : 0,
+        chargeType: 'free',
+        feeAmount: 0,
         allowWaitlist: !!this.form.allowWaitlist,
         requireApproval: !!this.form.requireApproval,
         isCommercialActivity: String(this.form.isCommercialActivity || '').trim() === 'yes' ? 'yes' : 'no',
@@ -1245,8 +1191,8 @@ export default {
         lat: Number(this.form.lat || 0),
         lng: Number(this.form.lng || 0),
         address: String(this.form.address || '').trim(),
-        payeeSubject: String(this.form.payeeSubject || '').trim().slice(0, 30),
-        refundPolicy: String(this.form.refundPolicy || '').trim().slice(0, 200),
+        payeeSubject: '',
+        refundPolicy: '',
         cancellationPolicy: String(this.form.cancellationPolicy || '').trim().slice(0, 200),
         updatedAt: Date.now(),
       }
@@ -1279,8 +1225,8 @@ export default {
         suitableFor: String(profile.structuredBlocks?.suitableFor || ''),
       }
       this.useStructuredDescription = true
-      this.setChargeType(String(profile.chargeType || 'free'))
-      this.form.feeAmount = Number(profile.feeAmount) > 0 ? `${Number(profile.feeAmount)}` : ''
+      this.setChargeType('free')
+      this.form.feeAmount = ''
       this.form.allowWaitlist = !!profile.allowWaitlist
       this.form.requireApproval = !!profile.requireApproval
       this.form.isCommercialActivity = String(profile.isCommercialActivity || '') === 'yes' ? 'yes' : 'no'
@@ -1291,8 +1237,8 @@ export default {
       this.form.hasOvernight = String(profile.riskFlags?.hasOvernight || 'no') === 'yes' ? 'yes' : 'no'
       this.form.hasMinors = String(profile.riskFlags?.hasMinors || 'no') === 'yes' ? 'yes' : 'no'
       this.form.maxParticipants = Number(profile.maxParticipants) > 0 ? Number(profile.maxParticipants) : null
-      this.form.payeeSubject = String(profile.payeeSubject || '')
-      this.form.refundPolicy = String(profile.refundPolicy || '')
+      this.form.payeeSubject = ''
+      this.form.refundPolicy = ''
       this.form.cancellationPolicy = String(profile.cancellationPolicy || this.form.cancellationPolicy || '')
       this.durationIndex = Number.isFinite(Number(profile.durationIndex))
         ? Math.max(0, Math.min(this.durationOptions.length - 1, Number(profile.durationIndex)))
@@ -1519,9 +1465,9 @@ export default {
     },
 
     setChargeType(type = 'free') {
-      const safe = ['free', 'aa', 'paid'].includes(type) ? type : 'free'
+      const safe = 'free'
       this.form.chargeType = safe
-      if (safe !== 'paid') this.form.feeAmount = ''
+      this.form.feeAmount = ''
     },
 
     onFeeAmountInput(e) {
@@ -1986,36 +1932,16 @@ _doChooseLocation() {
         uni.showToast({ title: '请选择活动类型和活动场景', icon: 'none' })
         return
       }
-      if (!['free', 'aa', 'paid'].includes(this.form.chargeType)) {
-        uni.showToast({ title: '请选择收费方式', icon: 'none' })
-        return
-      }
+      this.setChargeType('free')
       const isCommercialActivity = this.parseRiskBinaryValue(this.form.isCommercialActivity)
       if (isCommercialActivity === null) {
         uni.showToast({ title: '请选择是否商业组织活动', icon: 'none' })
         return
       }
-      let feeAmount = 0
-      if (this.form.chargeType === 'paid') {
-        feeAmount = Number(this.form.feeAmount)
-        if (!Number.isFinite(feeAmount) || feeAmount <= 0) {
-          uni.showToast({ title: '请填写正确的付费金额', icon: 'none' })
-          return
-        }
-      }
-      const payeeSubject = String(this.form.payeeSubject || '').trim()
-      const refundPolicy = String(this.form.refundPolicy || '').trim()
+      const feeAmount = 0
+      const payeeSubject = ''
+      const refundPolicy = ''
       const cancellationPolicy = String(this.form.cancellationPolicy || '').trim()
-      if (this.form.chargeType !== 'free') {
-        if (payeeSubject.length < 2) {
-          uni.showToast({ title: '请填写收款主体', icon: 'none' })
-          return
-        }
-        if (refundPolicy.length < 4) {
-          uni.showToast({ title: '请填写退款规则', icon: 'none' })
-          return
-        }
-      }
       if (cancellationPolicy.length < 4) {
         uni.showToast({ title: '请填写活动取消规则', icon: 'none' })
         return
@@ -2071,7 +1997,7 @@ _doChooseLocation() {
           typeName:         this.isCustomSceneSelected ? normalizedCustomTypeName : this.form.typeName,
           customTypeName:   this.isCustomSceneSelected ? normalizedCustomTypeName : '',
           socialEnergy:     this.inferredSocialEnergyId,
-          chargeType:       this.form.chargeType,
+          chargeType:       'free',
           feeAmount,
           isCommercialActivity,
           payeeSubject,
@@ -2161,11 +2087,12 @@ _doChooseLocation() {
             INVALID_CUSTOM_TYPE: '请输入有效的自定义活动场景',
             CUSTOM_TYPE_TOO_LONG: '自定义活动场景最多20字',
             DUPLICATE_CUSTOM_TYPE: '自定义活动场景与现有场景重复',
-            INVALID_CHARGE_TYPE: '收费方式不合法',
-            INVALID_FEE_AMOUNT: '付费金额不合法',
+            ACTIVITY_CHARGE_NOT_SUPPORTED: '活动线仅支持免费活动',
+            INVALID_CHARGE_TYPE: '活动线仅支持免费活动',
+            INVALID_FEE_AMOUNT: '活动线仅支持免费活动',
             INVALID_COMMERCIAL_FLAG: '请选择是否商业组织活动',
-            MISSING_PAYEE_SUBJECT: '请填写收款主体',
-            MISSING_REFUND_POLICY: '请填写退款规则',
+            MISSING_PAYEE_SUBJECT: '活动线仅支持免费活动',
+            MISSING_REFUND_POLICY: '活动线仅支持免费活动',
             MISSING_CANCELLATION_POLICY: '请填写活动取消规则',
             MISSING_RISK_FLAGS: '请完整填写风险要素申报',
             CONTACT_REQUIRED: '请至少填写1项联系方式',

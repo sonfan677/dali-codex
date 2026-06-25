@@ -54,7 +54,7 @@ const PUBLISH_TEMPLATE_BY_SCENE = {
     },
     visibleTags: ['轻松', '热闹', '一个人也能来', '同频交流'],
     defaults: {
-      chargeType: 'aa',
+      chargeType: 'free',
       allowWaitlist: true,
       requireApproval: false,
       isOutdoorActivity: 'no',
@@ -76,7 +76,7 @@ const PUBLISH_TEMPLATE_BY_SCENE = {
     },
     visibleTags: ['同频交流', '热闹', '需要预约', '一个人也能来'],
     defaults: {
-      chargeType: 'aa',
+      chargeType: 'free',
       allowWaitlist: true,
       requireApproval: true,
       isOutdoorActivity: 'no',
@@ -120,7 +120,7 @@ const PUBLISH_TEMPLATE_BY_SCENE = {
     },
     visibleTags: ['沉浸体验', '新手友好', '适合初学者', '需要预约'],
     defaults: {
-      chargeType: 'paid',
+      chargeType: 'free',
       allowWaitlist: true,
       requireApproval: true,
       isOutdoorActivity: 'no',
@@ -128,7 +128,7 @@ const PUBLISH_TEMPLATE_BY_SCENE = {
       hasCarpool: 'no',
       hasOvernight: 'no',
       hasMinors: 'no',
-      isCommercialActivity: 'yes',
+      isCommercialActivity: 'no',
     },
   },
   music_performance: {
@@ -142,7 +142,7 @@ const PUBLISH_TEMPLATE_BY_SCENE = {
     },
     visibleTags: ['热闹', '文艺', '沉浸体验', '节日氛围'],
     defaults: {
-      chargeType: 'paid',
+      chargeType: 'free',
       allowWaitlist: true,
       requireApproval: false,
       isOutdoorActivity: 'no',
@@ -150,7 +150,7 @@ const PUBLISH_TEMPLATE_BY_SCENE = {
       hasCarpool: 'no',
       hasOvernight: 'no',
       hasMinors: 'no',
-      isCommercialActivity: 'yes',
+      isCommercialActivity: 'no',
     },
   },
   market_popups: {
@@ -172,7 +172,7 @@ const PUBLISH_TEMPLATE_BY_SCENE = {
       hasCarpool: 'no',
       hasOvernight: 'no',
       hasMinors: 'no',
-      isCommercialActivity: 'yes',
+      isCommercialActivity: 'no',
     },
   },
   outdoor_nature: {
@@ -186,7 +186,7 @@ const PUBLISH_TEMPLATE_BY_SCENE = {
     },
     visibleTags: ['户外自然', '适合初学者', '需要预约', '可反复参与'],
     defaults: {
-      chargeType: 'aa',
+      chargeType: 'free',
       allowWaitlist: true,
       requireApproval: true,
       isOutdoorActivity: 'yes',

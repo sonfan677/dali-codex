@@ -17,12 +17,7 @@ function resolveJoinRiskDisclosure(activity = {}) {
   const fromActivity = activity?.riskDisclosure && typeof activity.riskDisclosure === 'object'
     ? activity.riskDisclosure
     : {}
-  const chargeType = String(
-    fromActivity.chargeType
-    || activity?.pricing?.chargeType
-    || activity?.chargeType
-    || 'free'
-  ).trim().toLowerCase()
+  const chargeType = 'free'
   const flags = {
     isNight: normalizeBooleanInput(fromActivity?.flags?.isNight || activity?.riskDeclaration?.isNightActivity),
     isOutdoor: normalizeBooleanInput(fromActivity?.flags?.isOutdoor || activity?.riskDeclaration?.isOutdoorActivity || activity?.opsTagProfile?.riskTriggerFlags?.isOutdoor),
@@ -31,14 +26,13 @@ function resolveJoinRiskDisclosure(activity = {}) {
     hasOvernight: normalizeBooleanInput(fromActivity?.flags?.hasOvernight || activity?.riskDeclaration?.hasOvernight || activity?.opsTagProfile?.riskTriggerFlags?.isOvernight),
     hasMinors: normalizeBooleanInput(fromActivity?.flags?.hasMinors || activity?.riskDeclaration?.hasMinors || activity?.opsTagProfile?.riskTriggerFlags?.isChildren),
   }
-  const hasMediumRiskFactor = Object.values(flags).some(Boolean) || chargeType !== 'free'
+  const hasMediumRiskFactor = Object.values(flags).some(Boolean)
   const isHigh = String(activity?.publishRiskLevel || '').trim().toLowerCase() === 'high' || String(fromActivity?.level || '').toUpperCase() === 'L3'
   const level = isHigh ? 'L3' : (hasMediumRiskFactor ? 'L2' : 'L1')
 
   const checkItems = []
   if (level !== 'L1') checkItems.push('platformNotOrganizer', 'selfAssessRisk', 'knowOfflineRisk')
   if (level === 'L3') checkItems.push('emergencyPrepared')
-  if (chargeType !== 'free') checkItems.push('knowPaymentByOrganizer')
 
   return {
     version: String(fromActivity?.version || 'p0_v1'),
@@ -55,7 +49,7 @@ function validateRiskConfirmPayload(disclosure = {}, riskConfirm = null) {
   const requiredChecks = Array.isArray(disclosure?.checkItems)
     ? disclosure.checkItems.map((item) => String(item || '').trim()).filter(Boolean)
     : []
-  const strictRequired = String(disclosure?.level || 'L1').toUpperCase() !== 'L1' || String(disclosure?.chargeType || 'free') !== 'free'
+  const strictRequired = String(disclosure?.level || 'L1').toUpperCase() !== 'L1'
   const payload = riskConfirm && typeof riskConfirm === 'object' ? riskConfirm : {}
   const checks = payload?.checks && typeof payload.checks === 'object' ? payload.checks : {}
   const normalizedChecks = requiredChecks.reduce((acc, key) => {

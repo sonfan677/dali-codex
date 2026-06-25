@@ -44,20 +44,14 @@
         </text>
       </view>
       <view class="info-row">
-        <text class="info-label">费用</text>
-        <text class="info-value">{{ pricingText }}</text>
-      </view>
-      <view class="info-row">
         <text class="info-label">报名</text>
         <text class="info-value">{{ joinPolicyText }}</text>
       </view>
 
       <view class="compliance-box">
-        <text class="compliance-title">组织与费用说明</text>
+        <text class="compliance-title">组织说明</text>
         <text class="compliance-item">组织者：{{ activity.publisherNickname || '匿名用户' }}</text>
-        <text class="compliance-item">平台角色：搭里仅提供信息展示与报名工具，不参与线下组织、收费履约与现场管理。</text>
-        <text v-if="isChargeActivity" class="compliance-item">收款主体：{{ payeeSubjectText }}</text>
-        <text v-if="isChargeActivity" class="compliance-item">退款规则：{{ refundPolicyText }}</text>
+        <text class="compliance-item">平台角色：搭里仅提供信息展示与报名工具，不参与线下组织、收费、退款或现场管理。</text>
         <text class="compliance-item">取消规则：{{ cancellationPolicyText }}</text>
       </view>
 
@@ -787,27 +781,19 @@ export default {
     },
 
     pricingText() {
-      if (!this.activity) return '免费'
-      const chargeType = String(this.activity?.pricing?.chargeType || this.activity?.chargeType || 'free')
-      const feeAmount = Number(this.activity?.pricing?.feeAmount ?? this.activity?.feeAmount ?? 0) || 0
-      if (chargeType === 'paid') return `付费（¥${feeAmount}）`
-      if (chargeType === 'aa') return 'AA'
       return '免费'
     },
 
     isChargeActivity() {
-      const chargeType = String(this.activity?.pricing?.chargeType || this.activity?.chargeType || 'free')
-      return chargeType === 'aa' || chargeType === 'paid'
+      return false
     },
 
     payeeSubjectText() {
-      const val = String(this.activity?.feeDisclosure?.payeeSubject || '').trim()
-      return val || '发起者自行收款'
+      return ''
     },
 
     refundPolicyText() {
-      const val = String(this.activity?.feeDisclosure?.refundPolicy || '').trim()
-      return val || '请联系发起者确认退款规则'
+      return ''
     },
 
     cancellationPolicyText() {
@@ -991,12 +977,7 @@ export default {
       const source = this.activity?.riskDisclosure && typeof this.activity.riskDisclosure === 'object'
         ? this.activity.riskDisclosure
         : {}
-      const chargeType = String(
-        source.chargeType
-        || this.activity?.pricing?.chargeType
-        || this.activity?.chargeType
-        || 'free'
-      ).trim().toLowerCase()
+      const chargeType = 'free'
       const flags = {
         isNight: this.normalizeBooleanInput(source?.flags?.isNight || this.activity?.riskDeclaration?.isNightActivity),
         isOutdoor: this.normalizeBooleanInput(source?.flags?.isOutdoor || this.activity?.riskDeclaration?.isOutdoorActivity),
@@ -1005,7 +986,7 @@ export default {
         hasOvernight: this.normalizeBooleanInput(source?.flags?.hasOvernight || this.activity?.riskDeclaration?.hasOvernight),
         hasMinors: this.normalizeBooleanInput(source?.flags?.hasMinors || this.activity?.riskDeclaration?.hasMinors),
       }
-      const hasMediumRiskFactor = Object.values(flags).some(Boolean) || chargeType !== 'free'
+      const hasMediumRiskFactor = Object.values(flags).some(Boolean)
       const isHigh = String(this.activity?.publishRiskLevel || '').trim().toLowerCase() === 'high' || String(source?.level || '').toUpperCase() === 'L3'
       const level = isHigh ? 'L3' : (hasMediumRiskFactor ? 'L2' : 'L1')
       const checkItems = []
@@ -1013,7 +994,6 @@ export default {
         checkItems.push('platformNotOrganizer', 'selfAssessRisk', 'knowOfflineRisk')
       }
       if (level === 'L3') checkItems.push('emergencyPrepared')
-      if (chargeType !== 'free') checkItems.push('knowPaymentByOrganizer')
       return {
         level,
         chargeType,
@@ -1030,7 +1010,6 @@ export default {
         selfAssessRisk: '我会根据自身情况评估风险并谨慎参与',
         knowOfflineRisk: '我已知悉陌生人线下活动存在人身和财产风险',
         emergencyPrepared: '我会提前做好行程/紧急联系人/装备等安全准备',
-        knowPaymentByOrganizer: '我已知悉费用由发起者自行收取，平台不代收不担保退款',
       }
       return map[String(key || '').trim()] || String(key || '').trim()
     },
@@ -1066,9 +1045,6 @@ export default {
       if (flags.hasCarpool) notices.push('涉及拼车/搭车，请先核验车主与路线并共享行程。')
       if (flags.hasOvernight) notices.push('涉及过夜安排，请提前确认住宿安全与规则。')
       if (flags.hasMinors) notices.push('涉及未成年人参与，请确保监护措施与活动适配性。')
-      if (String(disclosure?.chargeType || 'free') !== 'free') {
-        notices.push('如涉及收费，请先核验收款主体、收费项目与退款规则。')
-      }
       return notices
     },
 

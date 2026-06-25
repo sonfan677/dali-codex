@@ -26,6 +26,26 @@
       </view>
     </view>
 
+    <view v-if="hasAccess && !loading" class="launch-metrics-card">
+      <view class="launch-metrics-head">
+        <text class="launch-metrics-title">首战指标</text>
+        <text class="launch-metrics-sub">按主 PRD 固定看这 5 项</text>
+      </view>
+      <view class="launch-metrics-grid">
+        <view
+          v-for="item in launchMetricCards"
+          :key="item.key"
+          class="launch-metric-item"
+          :class="`launch-metric-item--${item.status || 'waiting'}`"
+        >
+          <text class="launch-metric-value">{{ item.value }}</text>
+          <text class="launch-metric-label">{{ item.label }}</text>
+          <text class="launch-metric-threshold">{{ item.threshold }}</text>
+          <text class="launch-metric-note">{{ item.note }}</text>
+        </view>
+      </view>
+    </view>
+
     <!-- Tab -->
     <view class="tabs">
       <view
@@ -1831,6 +1851,7 @@ export default {
         topRows: [],
         loadedAt: null,
       },
+      launchMetricCards: [],
       opsInsightCards: [],
       userSegmentOverview: {
         total: 0,
@@ -1887,9 +1908,9 @@ export default {
         highRiskForceManualReview: true,
         tierRules: {
           normal: { maxRiskLevel: 'L2', allowPaid: false },
-          verified: { maxRiskLevel: 'L2', allowPaid: true },
-          commercial: { maxRiskLevel: 'L3', allowPaid: true },
-          qualified: { maxRiskLevel: 'L4', allowPaid: true },
+          verified: { maxRiskLevel: 'L2', allowPaid: false },
+          commercial: { maxRiskLevel: 'L3', allowPaid: false },
+          qualified: { maxRiskLevel: 'L4', allowPaid: false },
         },
       },
       publishGovernanceConfigVersion: '',
@@ -3083,7 +3104,6 @@ export default {
       ].join(' / ')
       const lines = [
         { key: 'goal', label: '活动目标', value: formatLine(ov.topActivityGoal) },
-        { key: 'charge', label: '收费模式', value: formatLine(ov.topChargingMode) },
         { key: 'risk', label: '风险等级', value: formatLine(ov.topRiskBase) },
         { key: 'keyword', label: '关键词命中', value: formatLine(ov.topKeywordRules) },
         { key: 'trigger', label: '风险触发器', value: triggerText },
@@ -4440,6 +4460,7 @@ export default {
           topRows: [],
           loadedAt: null,
         }
+        this.launchMetricCards = Array.isArray(res.launchMetricCards) ? res.launchMetricCards : []
         this.opsInsightCards = Array.isArray(res.opsInsightCards) ? res.opsInsightCards : []
         this.opsWeeklyBrief = res.opsWeeklyBrief || {
           weekStartDate: '',
@@ -7201,6 +7222,81 @@ export default {
   background: white; border-radius: 12rpx;
   padding: 24rpx 28rpx; margin-bottom: 16rpx;
   transition: all .22s ease;
+}
+
+.launch-metrics-card {
+  background: #ffffff;
+  margin: 0 24rpx 20rpx;
+  border-radius: 14rpx;
+  padding: 24rpx;
+}
+
+.launch-metrics-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16rpx;
+  margin-bottom: 18rpx;
+}
+
+.launch-metrics-title {
+  font-size: 30rpx;
+  font-weight: 700;
+  color: #1A3C5E;
+}
+
+.launch-metrics-sub {
+  font-size: 22rpx;
+  color: #98A2B3;
+}
+
+.launch-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14rpx;
+}
+
+.launch-metric-item {
+  border-radius: 10rpx;
+  padding: 18rpx;
+  background: #F8FAFC;
+  border: 1rpx solid #E4E7EC;
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+}
+
+.launch-metric-item--healthy {
+  background: #F0FDF4;
+  border-color: #BBF7D0;
+}
+
+.launch-metric-item--warning {
+  background: #FFF7ED;
+  border-color: #FED7AA;
+}
+
+.launch-metric-item--waiting {
+  background: #F8FAFC;
+  border-color: #E4E7EC;
+}
+
+.launch-metric-value {
+  font-size: 30rpx;
+  font-weight: 800;
+  color: #111827;
+}
+
+.launch-metric-label {
+  font-size: 24rpx;
+  color: #344054;
+  font-weight: 600;
+}
+
+.launch-metric-threshold,
+.launch-metric-note {
+  font-size: 21rpx;
+  color: #667085;
+  line-height: 1.4;
 }
 .card--warn {
   box-shadow: 0 0 0 1rpx #fecaca inset;

@@ -60,7 +60,7 @@
         </view>
         <view class="bullet-item">
           <text class="bullet">·</text>
-          <text class="bullet-text">未披露收款主体、收费项目、退款规则、取消规则的收费活动信息</text>
+          <text class="bullet-text">通过活动信息诱导收费、转账、售卖名额或暗示平台担保的内容</text>
         </view>
         <view class="bullet-item">
           <text class="bullet">·</text>
@@ -77,7 +77,7 @@
         </view>
         <view class="bullet-item">
           <text class="bullet">·</text>
-          <text class="bullet-text">收费活动须明确披露“是否收费、收款主体、退款规则、取消规则、是否商业组织活动”，并由发布者自行收款和处理履约。</text>
+          <text class="bullet-text">活动线仅支持免费活动。发布者不得把活动发布页作为收费、收款、退款或交易担保入口。</text>
         </view>
         <view class="bullet-item">
           <text class="bullet">·</text>
@@ -104,7 +104,7 @@
 
       <!-- 六 -->
       <text class="section-title">六、免责声明</text>
-      <text class="item-body">平台仅提供活动信息展示、报名记录和基础管理能力，不对活动本身的真实性、适法性、安全性、组织效果或线下履约结果作出保证。除平台另有明确说明外，活动费用均由发布者自行收取，平台不代收、不托管、不担保退款。用户参与活动前应自行判断风险并谨慎决策。</text>
+      <text class="item-body">平台仅提供活动信息展示、报名记录和基础管理能力，不对活动本身的真实性、适法性、安全性、组织效果或线下履约结果作出保证。平台不提供活动收费、收款、退款、资金托管或交易担保能力。用户参与活动前应自行判断风险并谨慎决策。</text>
 
       <!-- 七 -->
       <text class="section-title">七、协议变更</text>
